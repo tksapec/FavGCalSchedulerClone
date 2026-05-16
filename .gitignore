@@ -1,0 +1,13 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.zip
+publish/
+TestResults/
+
+# Personal Google OAuth client secrets must stay outside the repo.
+client_secret*.json
+oauth*.json
+credentials*.json
