@@ -28,4 +28,62 @@ public sealed class TagServiceTests
 
         Assert.True(TagService.IsTodoLike(item));
     }
+
+    [Fact]
+    public void IsWorkday_DetectsWorkdayTagInTitle()
+    {
+        var item = new CalendarEvent { Title = "休日出勤 #workday" };
+
+        Assert.True(TagService.IsWorkday(item));
+    }
+
+    [Fact]
+    public void IsWorkday_IgnoresCase()
+    {
+        var item = new CalendarEvent { Description = "振替出勤 #WORKDAY" };
+
+        Assert.True(TagService.IsWorkday(item));
+    }
+
+    [Fact]
+    public void WorkdayOverride_WinsOverHolidayOnSameEvent()
+    {
+        var date = new DateTime(2026, 5, 16);
+        var item = AllDayEvent(date, "休日出勤 #holiday #workday");
+
+        Assert.True(TagService.HasWorkdayOverride([item], date));
+        Assert.False(TagService.HasHolidayWithoutWorkdayOverride([item], date));
+    }
+
+    [Fact]
+    public void WorkdayOverride_WinsOverHolidayOnSeparateEvents()
+    {
+        var date = new DateTime(2026, 5, 17);
+        var holiday = AllDayEvent(date, "休日 #holiday");
+        var workday = AllDayEvent(date, "出勤日 #workday");
+
+        Assert.True(TagService.HasWorkdayOverride([holiday, workday], date));
+        Assert.False(TagService.HasHolidayWithoutWorkdayOverride([holiday, workday], date));
+    }
+
+    [Fact]
+    public void WorkdayOverride_AppliesToWeekendDate()
+    {
+        var saturday = new DateTime(2026, 5, 16);
+        var item = AllDayEvent(saturday, "土曜出勤 #workday");
+
+        Assert.Equal(DayOfWeek.Saturday, saturday.DayOfWeek);
+        Assert.True(TagService.HasWorkdayOverride([item], saturday));
+    }
+
+    private static CalendarEvent AllDayEvent(DateTime date, string title)
+    {
+        return new CalendarEvent
+        {
+            Title = title,
+            IsAllDay = true,
+            Start = new DateTimeOffset(date.Date),
+            End = new DateTimeOffset(date.Date.AddDays(1))
+        };
+    }
 }

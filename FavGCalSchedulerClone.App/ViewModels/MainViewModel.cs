@@ -301,7 +301,8 @@ public sealed class MainViewModel : ObservableObject
             {
                 Date = date,
                 IsCurrentMonth = date.Month == CurrentMonth.Month,
-                IsHoliday = events.Any(e => TagService.IsHoliday(e) && DateRangeHelper.OccursOn(e, date))
+                IsWorkdayOverride = TagService.HasWorkdayOverride(events, date),
+                IsHoliday = TagService.HasHolidayWithoutWorkdayOverride(events, date)
             };
 
             foreach (var calendarEvent in _visibleEvents.Where(e => DateRangeHelper.OccursOn(e, date)).Take(5))

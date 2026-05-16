@@ -11,5 +11,6 @@ public sealed class CalendarDay
     public bool IsSunday => Date.DayOfWeek == DayOfWeek.Sunday;
     public bool IsSaturday => Date.DayOfWeek == DayOfWeek.Saturday;
     public bool IsHoliday { get; set; }
+    public bool IsWorkdayOverride { get; set; }
     public ObservableCollection<CalendarEvent> Events { get; } = [];
 }

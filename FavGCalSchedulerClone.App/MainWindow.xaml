@@ -71,6 +71,9 @@
                 <DataTrigger Binding="{Binding IsHoliday}" Value="True">
                     <Setter Property="Background" Value="#F4B7B9" />
                 </DataTrigger>
+                <DataTrigger Binding="{Binding IsWorkdayOverride}" Value="True">
+                    <Setter Property="Background" Value="{StaticResource WeekdayBrush}" />
+                </DataTrigger>
                 <DataTrigger Binding="{Binding IsToday}" Value="True">
                     <Setter Property="BorderBrush" Value="#42E02D" />
                     <Setter Property="BorderThickness" Value="3" />

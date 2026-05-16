@@ -9,6 +9,7 @@ FavGCalScheduler の操作感に近づけることを目標にした、個人利
 - Google Calendar API による `primary` カレンダーとの双方向同期
 - `#holiday` を含む予定の休日色表示
 - `#work`、`#private`、`#important`、`#holiday` のタグ色分けと表示切り替え
+- 本アプリ独自タグ `#workday` による土日祝日の平日色表示
 - FavGCalScheduler の `#todoA56%` 形式の検出と ToDo 候補表示
 - スケジュール追加、ToDo追加、スケジュール一覧、検索、アプリ設定、バージョン情報の軽量ダイアログ
 - DPAPI による Google OAuth トークンのユーザー単位保護
@@ -21,6 +22,15 @@ FavGCalScheduler の操作感に近づけることを目標にした、個人利
 - 印刷、バックアップ、リストア、インポート、エクスポート
 - アプリ設定ダイアログの永続化項目
 - ToDo の処理済み管理、優先度や進捗の専用UI
+
+## タグ仕様
+
+| タグ | 種別 | 動作 |
+| --- | --- | --- |
+| `#holiday` | FavGCalScheduler互換 | その日のカレンダー表示色を休日色にします。 |
+| `#workday` | 本アプリ独自 | 土日祝日でも、その日のカレンダー表示色を平日色にします。`#holiday` と同じ日にある場合は `#workday` を優先します。 |
+| `#todoA56%` | FavGCalScheduler互換 | ToDo候補として扱います。英字は優先度、数字は進捗率です。 |
+| `#work` / `#private` / `#important` | 本アプリ表示タグ | 予定バーの表示色を切り替えます。 |
 
 ## Google OAuth 設定
 
