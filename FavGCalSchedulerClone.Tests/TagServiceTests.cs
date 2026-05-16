@@ -30,6 +30,53 @@ public sealed class TagServiceTests
     }
 
     [Fact]
+    public void GetTodoMetadata_ParsesPriorityAndProgress()
+    {
+        var item = new CalendarEvent { Description = "本文 #todoA56%" };
+
+        var metadata = TagService.GetTodoMetadata(item);
+
+        Assert.NotNull(metadata);
+        Assert.Equal("A", metadata.Priority);
+        Assert.Equal(56, metadata.Progress);
+        Assert.False(metadata.IsDone);
+    }
+
+    [Fact]
+    public void GetTodoMetadata_TreatsOneHundredPercentAsDone()
+    {
+        var item = new CalendarEvent { Description = "#todo100%" };
+
+        var metadata = TagService.GetTodoMetadata(item);
+
+        Assert.NotNull(metadata);
+        Assert.Equal("", metadata.Priority);
+        Assert.Equal(100, metadata.Progress);
+        Assert.True(metadata.IsDone);
+    }
+
+    [Fact]
+    public void GetTodoMetadata_IgnoresCase()
+    {
+        var item = new CalendarEvent { Title = "#TODOB0%" };
+
+        var metadata = TagService.GetTodoMetadata(item);
+
+        Assert.NotNull(metadata);
+        Assert.Equal("B", metadata.Priority);
+        Assert.Equal(0, metadata.Progress);
+    }
+
+    [Fact]
+    public void UpdateTodoMarker_ReplacesExistingMarkerWithoutDuplicating()
+    {
+        var updated = TagService.UpdateTodoMarker("既存本文 #todoB10% 詳細", "A", 100);
+
+        Assert.Equal("#todoA100% 既存本文 詳細", updated);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(updated, "#todo", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+    }
+
+    [Fact]
     public void IsWorkday_DetectsWorkdayTagInTitle()
     {
         var item = new CalendarEvent { Title = "休日出勤 #workday" };

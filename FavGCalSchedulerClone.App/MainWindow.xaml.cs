@@ -148,6 +148,8 @@ public partial class MainWindow : Window
         var dueDate = new DatePicker { SelectedDate = date };
         var priority = new ComboBox { SelectedIndex = 0, ItemsSource = new[] { "A", "B", "C", "D", "E", "F" } };
         var progress = new Slider { Minimum = 0, Maximum = 100, TickFrequency = 10, IsSnapToTickEnabled = true, Width = 210 };
+        var progressLabel = new TextBlock { Text = "進捗(0%)", VerticalAlignment = VerticalAlignment.Center };
+        progress.ValueChanged += (_, _) => progressLabel.Text = $"進捗({(int)progress.Value}%)";
         var color = new ComboBox { IsEnabled = false, SelectedIndex = 0, ItemsSource = new[] { "既定" } };
         var calendar = new ComboBox { SelectedIndex = 0, ItemsSource = _viewModel.CalendarNames };
         var title = new TextBox();
@@ -155,7 +157,7 @@ public partial class MainWindow : Window
 
         root.Children.Add(Labeled("期限", dueDate, 0, 0));
         root.Children.Add(Labeled("優先度", priority, 1, 0));
-        root.Children.Add(Labeled("進捗(0%)", progress, 2, 0, 1, 4));
+        root.Children.Add(Labeled(progressLabel, progress, 2, 0, 1, 4));
         root.Children.Add(Labeled("予定の色", color, 3, 0));
         root.Children.Add(Labeled("カレンダー", calendar, 3, 2));
         root.Children.Add(Labeled("件名", title, 4, 0, 1, 4));
@@ -311,10 +313,15 @@ public partial class MainWindow : Window
 
     private static FrameworkElement Labeled(string label, FrameworkElement input, int row, int column, int rowSpan = 1, int columnSpan = 2)
     {
+        return Labeled(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center }, input, row, column, rowSpan, columnSpan);
+    }
+
+    private static FrameworkElement Labeled(FrameworkElement label, FrameworkElement input, int row, int column, int rowSpan = 1, int columnSpan = 2)
+    {
         var grid = new Grid { Margin = new Thickness(0, 0, 8, 7) };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(82) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center });
+        grid.Children.Add(label);
         Grid.SetColumn(input, 1);
         grid.Children.Add(input);
         return Place(grid, row, column, rowSpan, columnSpan);

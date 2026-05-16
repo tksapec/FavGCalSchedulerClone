@@ -23,4 +23,9 @@ public sealed class CalendarEvent
     public string SearchText => $"{Title} {Description} {Location}".Trim();
     public string CalendarDisplayText => IsAllDay ? Title : $"{Start:HH:mm} {Title}";
     public string DateDisplayText => IsAllDay ? Start.ToString("yyyy/MM/dd") : Start.ToString("yyyy/MM/dd HH:mm");
+    public TodoMetadata? TodoMetadata => FavGCalSchedulerClone.App.Services.TagService.GetTodoMetadata(this);
+    public string TodoPriority => TodoMetadata?.Priority ?? "";
+    public int TodoProgress => TodoMetadata?.Progress ?? 0;
+    public string TodoProgressText => TodoMetadata?.ProgressText ?? "";
+    public bool IsTodoDone => TodoMetadata?.IsDone == true;
 }

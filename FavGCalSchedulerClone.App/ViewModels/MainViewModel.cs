@@ -39,6 +39,7 @@ public sealed class MainViewModel : ObservableObject
         NewEventCommand = new RelayCommand(NewEvent);
         SaveEventCommand = new AsyncRelayCommand(SaveEventAsync);
         DeleteEventCommand = new AsyncRelayCommand(DeleteEventAsync, () => SelectedEvent is not null);
+        MarkSelectedTodoDoneCommand = new AsyncRelayCommand(MarkSelectedTodoDoneAsync, () => SelectedEvent?.IsTodoLike == true && !SelectedEvent.IsTodoDone);
         SyncCommand = new AsyncRelayCommand(SyncAsync);
         BrowseOAuthClientCommand = new AsyncRelayCommand(BrowseOAuthClientAsync);
         AuthorizeCommand = new AsyncRelayCommand(AuthorizeAsync);
@@ -50,6 +51,7 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<CalendarEvent> SelectedDayEvents { get; } = [];
     public ObservableCollection<CalendarEvent> SevenDayEvents { get; } = [];
     public ObservableCollection<CalendarEvent> TodoEvents { get; } = [];
+    public ObservableCollection<CalendarEvent> CompletedTodoEvents { get; } = [];
     public ObservableCollection<CalendarTag> Tags { get; } = [];
     public ObservableCollection<string> CalendarNames { get; } = ["primary"];
 
@@ -61,6 +63,7 @@ public sealed class MainViewModel : ObservableObject
     public RelayCommand NewEventCommand { get; }
     public AsyncRelayCommand SaveEventCommand { get; }
     public AsyncRelayCommand DeleteEventCommand { get; }
+    public AsyncRelayCommand MarkSelectedTodoDoneCommand { get; }
     public AsyncRelayCommand SyncCommand { get; }
     public AsyncRelayCommand BrowseOAuthClientCommand { get; }
     public AsyncRelayCommand AuthorizeCommand { get; }
@@ -112,6 +115,7 @@ public sealed class MainViewModel : ObservableObject
             {
                 LoadEditor(value);
                 DeleteEventCommand.RaiseCanExecuteChanged();
+                MarkSelectedTodoDoneCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -219,15 +223,10 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        var todoMarker = $"#todo{priority}{Math.Clamp(progress, 0, 100)}%";
-        var body = string.IsNullOrWhiteSpace(description)
-            ? todoMarker
-            : $"{todoMarker} {description.Trim()}";
-
         var todoEvent = new CalendarEvent
         {
             Title = title.Trim(),
-            Description = body,
+            Description = TagService.UpdateTodoMarker(description, priority, progress),
             CalendarId = _settings.ActiveCalendarId,
             Start = new DateTimeOffset(dueDate.Date),
             End = new DateTimeOffset(dueDate.Date.AddDays(1)),
@@ -240,6 +239,22 @@ public sealed class MainViewModel : ObservableObject
         await _repository.SaveEventAsync(todoEvent);
         await RefreshCalendarAsync();
         Status = "ToDoを保存しました。同期するとGoogleカレンダーへ反映されます。";
+    }
+
+    public async Task MarkSelectedTodoDoneAsync()
+    {
+        if (SelectedEvent is null || !SelectedEvent.IsTodoLike)
+        {
+            return;
+        }
+
+        var priority = SelectedEvent.TodoPriority;
+        SelectedEvent.Description = TagService.UpdateTodoMarker(SelectedEvent.Description, priority, 100);
+        SelectedEvent.IsDirty = true;
+        await _repository.SaveEventAsync(SelectedEvent);
+        await RefreshCalendarAsync();
+        MarkSelectedTodoDoneCommand.RaiseCanExecuteChanged();
+        Status = "ToDoを処理済みにしました。同期するとGoogleカレンダーへ反映されます。";
     }
 
     public async Task<IReadOnlyList<CalendarEvent>> LoadYearEventsAsync(DateTime yearInView)
@@ -347,9 +362,17 @@ public sealed class MainViewModel : ObservableObject
     private void RefreshTodos(IEnumerable<CalendarEvent> events)
     {
         TodoEvents.Clear();
-        foreach (var item in events.Where(e => e.IsTodoLike && !e.IsDeleted).OrderBy(e => e.Start).Take(50))
+        CompletedTodoEvents.Clear();
+        foreach (var item in events.Where(e => e.IsTodoLike && !e.IsDeleted).OrderBy(e => e.Start).ThenBy(e => e.TodoPriority).Take(100))
         {
-            TodoEvents.Add(item);
+            if (item.IsTodoDone)
+            {
+                CompletedTodoEvents.Add(item);
+            }
+            else
+            {
+                TodoEvents.Add(item);
+            }
         }
     }
 

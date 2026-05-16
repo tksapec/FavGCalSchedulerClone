@@ -366,21 +366,31 @@
                     </TabItem>
 
                     <TabItem Header="ToDo(未処理)">
-                        <DataGrid Margin="4" ItemsSource="{Binding TodoEvents}">
-                            <DataGrid.Columns>
-                                <DataGridTextColumn Header="期限" Binding="{Binding DateDisplayText}" Width="150" />
-                                <DataGridTextColumn Header="優先度" Binding="{Binding ColorId}" Width="80" />
-                                <DataGridTextColumn Header="進捗" Binding="{Binding IsDirty}" Width="70" />
-                                <DataGridTextColumn Header="カレンダー名称" Binding="{Binding CalendarId}" Width="160" />
-                                <DataGridTextColumn Header="件名" Binding="{Binding Title}" Width="*" />
-                            </DataGrid.Columns>
-                        </DataGrid>
+                        <DockPanel Margin="4">
+                            <Button DockPanel.Dock="Bottom" Content="選択ToDoを100%にする" Command="{Binding MarkSelectedTodoDoneCommand}"
+                                    HorizontalAlignment="Right" Height="24" Padding="10,1" Margin="0,4,0,0" />
+                            <DataGrid ItemsSource="{Binding TodoEvents}" SelectedItem="{Binding SelectedEvent}">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="期限" Binding="{Binding DateDisplayText}" Width="130" />
+                                    <DataGridTextColumn Header="優先度" Binding="{Binding TodoPriority}" Width="70" />
+                                    <DataGridTextColumn Header="進捗" Binding="{Binding TodoProgressText}" Width="70" />
+                                    <DataGridTextColumn Header="件名" Binding="{Binding Title}" Width="*" />
+                                    <DataGridTextColumn Header="カレンダー名称" Binding="{Binding CalendarId}" Width="150" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </DockPanel>
                     </TabItem>
 
                     <TabItem Header="ToDo(処理済み)">
-                        <Grid Margin="4">
-                            <TextBlock Text="処理済みToDoの専用管理は後続フェーズで追加します。" Foreground="#555555" VerticalAlignment="Center" HorizontalAlignment="Center" />
-                        </Grid>
+                        <DataGrid Margin="4" ItemsSource="{Binding CompletedTodoEvents}" SelectedItem="{Binding SelectedEvent}">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="期限" Binding="{Binding DateDisplayText}" Width="130" />
+                                <DataGridTextColumn Header="優先度" Binding="{Binding TodoPriority}" Width="70" />
+                                <DataGridTextColumn Header="進捗" Binding="{Binding TodoProgressText}" Width="70" />
+                                <DataGridTextColumn Header="件名" Binding="{Binding Title}" Width="*" />
+                                <DataGridTextColumn Header="カレンダー名称" Binding="{Binding CalendarId}" Width="150" />
+                            </DataGrid.Columns>
+                        </DataGrid>
                     </TabItem>
                 </TabControl>
 

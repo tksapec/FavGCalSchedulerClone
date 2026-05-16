@@ -45,6 +45,42 @@ public static partial class TagService
     public static bool IsTodoLike(CalendarEvent calendarEvent) =>
         TodoRegex().IsMatch($"{calendarEvent.Title} {calendarEvent.Description}");
 
+    public static TodoMetadata? GetTodoMetadata(CalendarEvent calendarEvent)
+    {
+        var match = TodoRegex().Match($"{calendarEvent.Title} {calendarEvent.Description}");
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        var priority = match.Groups["priority"].Success && !string.IsNullOrWhiteSpace(match.Groups["priority"].Value)
+            ? match.Groups["priority"].Value.ToUpperInvariant()
+            : "";
+        var progress = int.Parse(match.Groups["progress"].Value);
+        return new TodoMetadata(priority, Math.Clamp(progress, 0, 100));
+    }
+
+    public static bool IsTodoDone(CalendarEvent calendarEvent) =>
+        GetTodoMetadata(calendarEvent)?.IsDone == true;
+
+    public static string BuildTodoMarker(string? priority, int progress)
+    {
+        var normalizedPriority = string.IsNullOrWhiteSpace(priority) ? "" : priority.Trim()[0].ToString().ToUpperInvariant();
+        if (normalizedPriority.Length > 0 && (normalizedPriority[0] < 'A' || normalizedPriority[0] > 'F'))
+        {
+            normalizedPriority = "";
+        }
+
+        return $"#todo{normalizedPriority}{Math.Clamp(progress, 0, 100)}%";
+    }
+
+    public static string UpdateTodoMarker(string? text, string? priority, int progress)
+    {
+        var marker = BuildTodoMarker(priority, progress);
+        var body = WhitespaceRegex().Replace(TodoRegex().Replace(text ?? "", ""), " ").Trim();
+        return string.IsNullOrWhiteSpace(body) ? marker : $"{marker} {body}";
+    }
+
     public static CalendarTag? FindDisplayTag(CalendarEvent calendarEvent, IEnumerable<CalendarTag> tags)
     {
         var eventTags = ExtractTags(calendarEvent.Title, calendarEvent.Description);
@@ -57,6 +93,9 @@ public static partial class TagService
     [GeneratedRegex(@"#[\p{L}\p{N}_%-]+", RegexOptions.Compiled)]
     private static partial Regex TagRegex();
 
-    [GeneratedRegex(@"#todo[A-Fa-f]?\d{1,3}%", RegexOptions.Compiled)]
+    [GeneratedRegex(@"#todo(?<priority>[A-Fa-f])?(?<progress>\d{1,3})%", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex TodoRegex();
+
+    [GeneratedRegex(@"\s+", RegexOptions.Compiled)]
+    private static partial Regex WhitespaceRegex();
 }
