@@ -10,15 +10,21 @@ public static class GoogleEventMapper
     public static LocalEvent FromGoogleEvent(Event googleEvent, string calendarId)
     {
         var isAllDay = googleEvent.Start?.Date is { Length: > 0 };
-        var start = ParseEventDateTime(googleEvent.Start, isAllDay, false);
-        var end = ParseEventDateTime(googleEvent.End, isAllDay, true);
+        var start = ParseEventDateTime(googleEvent.Start, isAllDay);
+        var end = ParseEventDateTime(googleEvent.End, isAllDay);
 
         var local = new LocalEvent
         {
             Id = string.IsNullOrWhiteSpace(googleEvent.Id) ? Guid.NewGuid().ToString("N") : $"g:{calendarId}:{googleEvent.Id}",
             GoogleEventId = googleEvent.Id,
+            RecurringEventId = googleEvent.RecurringEventId,
+            RecurringParentId = null,
+            OriginalStart = string.IsNullOrWhiteSpace(googleEvent.RecurringEventId)
+                ? null
+                : ParseEventDateTime(googleEvent.OriginalStartTime, isAllDay),
+            IsRecurrenceException = !string.IsNullOrWhiteSpace(googleEvent.RecurringEventId),
             CalendarId = calendarId,
-            Title = googleEvent.Summary ?? "(無顁E",
+            Title = googleEvent.Summary ?? "(no title)",
             Description = googleEvent.Description,
             Location = googleEvent.Location,
             Start = start,
@@ -43,7 +49,8 @@ public static class GoogleEventMapper
             Location = localEvent.Location,
             ColorId = localEvent.ColorId,
             Start = ToEventDateTime(localEvent.Start, localEvent.IsAllDay),
-            End = ToEventDateTime(localEvent.End, localEvent.IsAllDay)
+            End = ToEventDateTime(localEvent.End, localEvent.IsAllDay),
+            Status = localEvent.IsDeleted ? "cancelled" : "confirmed"
         };
 
         if (!string.IsNullOrWhiteSpace(localEvent.RecurrenceJson))
@@ -51,10 +58,15 @@ public static class GoogleEventMapper
             googleEvent.Recurrence = JsonSerializer.Deserialize<IList<string>>(localEvent.RecurrenceJson);
         }
 
+        if (localEvent.OriginalStart is { } originalStart)
+        {
+            googleEvent.OriginalStartTime = ToEventDateTime(originalStart, localEvent.IsAllDay);
+        }
+
         return googleEvent;
     }
 
-    private static DateTimeOffset ParseEventDateTime(EventDateTime? value, bool isAllDay, bool isEnd)
+    private static DateTimeOffset ParseEventDateTime(EventDateTime? value, bool isAllDay)
     {
         if (value is null)
         {

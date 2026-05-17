@@ -10,6 +10,10 @@ public sealed class MainViewModel : ObservableObject
 {
     private readonly CalendarRepository _repository;
     private readonly GoogleCalendarSyncService _syncService;
+    private readonly BackupService _backupService = new();
+    private readonly CalendarCsvService _csvService = new();
+    private readonly FavGCalSchedulerImportService _favGCalImportService;
+    private IReadOnlyList<CalendarEvent> _storedEvents = [];
     private IReadOnlyList<CalendarEvent> _visibleEvents = [];
     private AppSettings _settings = new();
     private DateTime _currentMonth = new(DateTime.Today.Year, DateTime.Today.Month, 1);
@@ -25,22 +29,31 @@ public sealed class MainViewModel : ObservableObject
     private string _endTime = "10:00";
     private bool _isAllDay = true;
     private string _oauthClientJsonPath = "";
+    private int _selectedTabIndex;
+    private DateTime? _pendingSelectedDate;
+    private CalendarViewMode _currentViewMode = CalendarViewMode.Month;
+    private string _editorCalendarId = GoogleCalendarDefaults.PrimaryCalendarId;
 
     public MainViewModel(CalendarRepository repository, GoogleCalendarSyncService syncService)
     {
         _repository = repository;
         _syncService = syncService;
+        _favGCalImportService = new FavGCalSchedulerImportService(repository);
 
-        PreviousMonthCommand = new RelayCommand(() => ChangeMonth(-1));
-        NextMonthCommand = new RelayCommand(() => ChangeMonth(1));
-        PreviousYearCommand = new RelayCommand(() => ChangeMonth(-12));
-        NextYearCommand = new RelayCommand(() => ChangeMonth(12));
-        TodayCommand = new RelayCommand(() => CurrentMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1));
+        PreviousMonthCommand = new RelayCommand(() => NavigatePrimary(-1));
+        NextMonthCommand = new RelayCommand(() => NavigatePrimary(1));
+        PreviousYearCommand = new RelayCommand(() => NavigateSecondary(-1));
+        NextYearCommand = new RelayCommand(() => NavigateSecondary(1));
+        TodayCommand = new AsyncRelayCommand(GoToTodayAsync);
+        ShowMonthViewCommand = new RelayCommand(() => CurrentViewMode = CalendarViewMode.Month);
+        ShowWeekViewCommand = new RelayCommand(() => CurrentViewMode = CalendarViewMode.Week);
+        ShowDayViewCommand = new RelayCommand(() => CurrentViewMode = CalendarViewMode.Day);
         NewEventCommand = new RelayCommand(NewEvent);
-        SaveEventCommand = new AsyncRelayCommand(SaveEventAsync);
-        DeleteEventCommand = new AsyncRelayCommand(DeleteEventAsync, () => SelectedEvent is not null);
+        SaveEventCommand = new AsyncRelayCommand(() => SaveEventWithRecurrenceAsync(null));
+        DeleteEventCommand = new AsyncRelayCommand(() => DeleteEventWithRecurrenceAsync(null), () => SelectedEvent is not null);
         MarkSelectedTodoDoneCommand = new AsyncRelayCommand(MarkSelectedTodoDoneAsync, () => SelectedEvent?.IsTodoLike == true && !SelectedEvent.IsTodoDone);
         SyncCommand = new AsyncRelayCommand(SyncAsync);
+        ReloadCalendarListCommand = new AsyncRelayCommand(ReloadAvailableCalendarsAsync);
         BrowseOAuthClientCommand = new AsyncRelayCommand(BrowseOAuthClientAsync);
         AuthorizeCommand = new AsyncRelayCommand(AuthorizeAsync);
         ClearTokensCommand = new AsyncRelayCommand(ClearTokensAsync);
@@ -48,10 +61,12 @@ public sealed class MainViewModel : ObservableObject
     }
 
     public ObservableCollection<CalendarDay> CalendarDays { get; } = [];
+    public ObservableCollection<CalendarDay> VisibleCalendarDays { get; } = [];
     public ObservableCollection<CalendarEvent> SelectedDayEvents { get; } = [];
     public ObservableCollection<CalendarEvent> SevenDayEvents { get; } = [];
     public ObservableCollection<CalendarEvent> TodoEvents { get; } = [];
     public ObservableCollection<CalendarEvent> CompletedTodoEvents { get; } = [];
+    public ObservableCollection<GoogleCalendarSelectionItem> AvailableCalendars { get; } = [];
     public ObservableCollection<CalendarTag> Tags { get; } = [];
     public ObservableCollection<string> CalendarNames { get; } = ["primary"];
 
@@ -59,12 +74,16 @@ public sealed class MainViewModel : ObservableObject
     public RelayCommand NextMonthCommand { get; }
     public RelayCommand PreviousYearCommand { get; }
     public RelayCommand NextYearCommand { get; }
-    public RelayCommand TodayCommand { get; }
+    public AsyncRelayCommand TodayCommand { get; }
+    public RelayCommand ShowMonthViewCommand { get; }
+    public RelayCommand ShowWeekViewCommand { get; }
+    public RelayCommand ShowDayViewCommand { get; }
     public RelayCommand NewEventCommand { get; }
     public AsyncRelayCommand SaveEventCommand { get; }
     public AsyncRelayCommand DeleteEventCommand { get; }
     public AsyncRelayCommand MarkSelectedTodoDoneCommand { get; }
     public AsyncRelayCommand SyncCommand { get; }
+    public AsyncRelayCommand ReloadCalendarListCommand { get; }
     public AsyncRelayCommand BrowseOAuthClientCommand { get; }
     public AsyncRelayCommand AuthorizeCommand { get; }
     public AsyncRelayCommand ClearTokensCommand { get; }
@@ -72,7 +91,45 @@ public sealed class MainViewModel : ObservableObject
 
     public string MonthTitle => CurrentMonth.ToString("yyyy/MM", CultureInfo.InvariantCulture);
     public string JapaneseMonthTitle => $"{CurrentMonth:yyyy}年（{FormatJapaneseEra(CurrentMonth)}） {CurrentMonth.Month}月";
+    public string CurrentPeriodTitle => CurrentViewMode switch
+    {
+        CalendarViewMode.Month => JapaneseMonthTitle,
+        CalendarViewMode.Week => FormatWeekTitle(SelectedDay?.Date ?? DateTime.Today),
+        CalendarViewMode.Day => FormatDayTitle(SelectedDay?.Date ?? DateTime.Today),
+        _ => JapaneseMonthTitle
+    };
     public string CalendarStatusText => FormatCalendarStatus(DateTime.Today);
+    public bool IsMonthView => CurrentViewMode == CalendarViewMode.Month;
+    public bool IsWeekView => CurrentViewMode == CalendarViewMode.Week;
+    public bool IsDayView => CurrentViewMode == CalendarViewMode.Day;
+    public string PreviousYearLabel => CurrentViewMode switch
+    {
+        CalendarViewMode.Month => "前年",
+        CalendarViewMode.Week => "前月",
+        CalendarViewMode.Day => "前月",
+        _ => "前年"
+    };
+    public string PreviousMonthLabel => CurrentViewMode switch
+    {
+        CalendarViewMode.Month => "前月",
+        CalendarViewMode.Week => "前週",
+        CalendarViewMode.Day => "前日",
+        _ => "前月"
+    };
+    public string NextMonthLabel => CurrentViewMode switch
+    {
+        CalendarViewMode.Month => "次月",
+        CalendarViewMode.Week => "次週",
+        CalendarViewMode.Day => "翌日",
+        _ => "次月"
+    };
+    public string NextYearLabel => CurrentViewMode switch
+    {
+        CalendarViewMode.Month => "次年",
+        CalendarViewMode.Week => "次月",
+        CalendarViewMode.Day => "次月",
+        _ => "次年"
+    };
 
     public DateTime CurrentMonth
     {
@@ -88,6 +145,26 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
+    public CalendarViewMode CurrentViewMode
+    {
+        get => _currentViewMode;
+        set
+        {
+            if (SetProperty(ref _currentViewMode, value))
+            {
+                OnPropertyChanged(nameof(IsMonthView));
+                OnPropertyChanged(nameof(IsWeekView));
+                OnPropertyChanged(nameof(IsDayView));
+                OnPropertyChanged(nameof(CurrentPeriodTitle));
+                OnPropertyChanged(nameof(PreviousYearLabel));
+                OnPropertyChanged(nameof(PreviousMonthLabel));
+                OnPropertyChanged(nameof(NextMonthLabel));
+                OnPropertyChanged(nameof(NextYearLabel));
+                RefreshVisibleCalendarDays();
+            }
+        }
+    }
+
     public CalendarDay? SelectedDay
     {
         get => _selectedDay;
@@ -97,6 +174,8 @@ public sealed class MainViewModel : ObservableObject
             {
                 RefreshSelectedDayEvents();
                 RefreshSevenDayEvents();
+                RefreshVisibleCalendarDays();
+                OnPropertyChanged(nameof(CurrentPeriodTitle));
                 if (value is not null)
                 {
                     StartDate = value.Date;
@@ -180,13 +259,34 @@ public sealed class MainViewModel : ObservableObject
         set => SetProperty(ref _oauthClientJsonPath, value);
     }
 
+    public string EditorCalendarId
+    {
+        get => _editorCalendarId;
+        set => SetProperty(ref _editorCalendarId, string.IsNullOrWhiteSpace(value) ? GoogleCalendarDefaults.PrimaryCalendarId : value);
+    }
+
+    public int SelectedTabIndex
+    {
+        get => _selectedTabIndex;
+        set => SetProperty(ref _selectedTabIndex, NormalizeTabIndex(value));
+    }
+
+    public int StartupTabIndex => _settings.StartupTabIndex;
+    public bool ConfirmBeforeDelete => _settings.ConfirmBeforeDelete;
+    public bool CloseButtonExitsApplication => _settings.CloseButtonExitsApplication;
+    public bool DefaultNewEventIsAllDay => _settings.DefaultNewEventIsAllDay;
+    public string DefaultBackupFileName => $"FavGCalSchedulerClone-backup-{DateTime.Now:yyyyMMdd-HHmmss}.zip";
+
     public async Task InitializeAsync()
     {
         await _repository.InitializeAsync();
-        _settings = await _repository.LoadSettingsAsync();
+        _settings = NormalizeSettings(await _repository.LoadSettingsAsync());
         OAuthClientJsonPath = _settings.OAuthClientJsonPath ?? "";
+        SelectedTabIndex = _settings.StartupTabIndex;
+        SelectedDay = null;
         await ReloadTagsAsync();
-        CurrentMonth = _settings.DisplayMonth;
+        await ReloadAvailableCalendarsAsync();
+        SetCurrentMonthWithoutRefreshing(_settings.DisplayMonth);
         await RefreshCalendarAsync();
         Status = "準備完了";
     }
@@ -194,6 +294,14 @@ public sealed class MainViewModel : ObservableObject
     public void NewEvent()
     {
         BeginNewEvent(SelectedDay?.Date ?? DateTime.Today);
+    }
+
+    public async Task GoToTodayAsync()
+    {
+        _pendingSelectedDate = DateTime.Today;
+        SetCurrentMonthWithoutRefreshing(DateTime.Today);
+        await RefreshCalendarAsync();
+        Status = "今日を表示しました。";
     }
 
     public void BeginNewEvent(DateTime date)
@@ -206,13 +314,13 @@ public sealed class MainViewModel : ObservableObject
         EndDate = date.Date;
         StartTime = "09:00";
         EndTime = "10:00";
-        IsAllDay = true;
+        IsAllDay = _settings.DefaultNewEventIsAllDay;
         Status = "新しいスケジュールを入力してください。";
     }
 
-    public async Task SaveCurrentEventAsync()
+    public async Task SaveCurrentEventAsync(RecurrenceEditScope? recurrenceScope = null)
     {
-        await SaveEventAsync();
+        await SaveEventWithRecurrenceAsync(recurrenceScope);
     }
 
     public async Task SaveTodoAsync(DateTime dueDate, string priority, int progress, string title, string? description)
@@ -227,7 +335,7 @@ public sealed class MainViewModel : ObservableObject
         {
             Title = title.Trim(),
             Description = TagService.UpdateTodoMarker(description, priority, progress),
-            CalendarId = _settings.ActiveCalendarId,
+            CalendarId = ResolveEditorCalendarId(),
             Start = new DateTimeOffset(dueDate.Date),
             End = new DateTimeOffset(dueDate.Date.AddDays(1)),
             IsAllDay = true,
@@ -262,8 +370,18 @@ public sealed class MainViewModel : ObservableObject
         var start = new DateTime(yearInView.Year, 1, 1);
         var end = start.AddYears(1);
         var events = await _repository.LoadEventsAsync(new DateTimeOffset(start), new DateTimeOffset(end));
-        ApplyDisplayColors(events);
-        return events.Where(IsVisible).OrderBy(e => e.Start).ThenBy(e => e.Title).ToArray();
+        var expanded = RecurrenceExpansionService.ExpandForRange(events, new DateTimeOffset(start), new DateTimeOffset(end));
+        ApplyDisplayColors(expanded);
+        return expanded.Where(IsVisible).OrderBy(e => e.Start).ThenBy(e => e.Title).ToArray();
+    }
+
+    public async Task<MonthlyPrintPlan> CreateMonthlyPrintPlanAsync()
+    {
+        var (gridStart, gridEnd) = DateRangeHelper.MonthGridRange(CurrentMonth);
+        var events = await _repository.LoadEventsAsync(new DateTimeOffset(gridStart), new DateTimeOffset(gridEnd));
+        var expanded = RecurrenceExpansionService.ExpandForRange(events, new DateTimeOffset(gridStart), new DateTimeOffset(gridEnd));
+        ApplyDisplayColors(expanded);
+        return MonthlyPrintPlanner.Create(CurrentMonth, expanded.Where(IsVisible));
     }
 
     public async Task<IReadOnlyList<CalendarEvent>> SearchYearEventsAsync(DateTime yearInView, string query)
@@ -290,6 +408,145 @@ public sealed class MainViewModel : ObservableObject
         Status = "タグ設定を保存しました。";
     }
 
+    public async Task SaveApplicationSettingsAsync(
+        int startupTabIndex,
+        bool confirmBeforeDelete,
+        bool closeButtonExitsApplication,
+        bool defaultNewEventIsAllDay)
+    {
+        _settings.StartupTabIndex = NormalizeTabIndex(startupTabIndex);
+        _settings.ConfirmBeforeDelete = confirmBeforeDelete;
+        _settings.CloseButtonExitsApplication = closeButtonExitsApplication;
+        _settings.DefaultNewEventIsAllDay = defaultNewEventIsAllDay;
+        await _repository.SaveSettingsAsync(_settings);
+
+        OnPropertyChanged(nameof(StartupTabIndex));
+        OnPropertyChanged(nameof(ConfirmBeforeDelete));
+        OnPropertyChanged(nameof(CloseButtonExitsApplication));
+        OnPropertyChanged(nameof(DefaultNewEventIsAllDay));
+        Status = "アプリ設定を保存しました。";
+    }
+
+    public async Task DeleteSelectedEventAsync(RecurrenceEditScope? recurrenceScope = null)
+    {
+        await DeleteEventWithRecurrenceAsync(recurrenceScope);
+    }
+
+    public async Task<BackupResult> BackupAllCalendarsAsync(string backupZipPath)
+    {
+        await _repository.InitializeAsync();
+        var result = await _backupService.CreateBackupAsync(_repository.DatabasePath, backupZipPath);
+        Status = $"バックアップを作成しました: {Path.GetFileName(result.BackupPath)}";
+        return result;
+    }
+
+    public async Task<RestoreResult> RestoreAllCalendarsAsync(string backupZipPath)
+    {
+        var result = await _backupService.RestoreBackupAsync(backupZipPath, _repository.DatabasePath);
+        await InitializeAsync();
+        Status = "バックアップからリストアしました。Google認証は必要に応じて再実行してください。";
+        return result;
+    }
+
+    public async Task<CalendarCsvExportResult> ExportCurrentYearCsvAsync(string csvPath)
+    {
+        var events = await LoadYearEventsAsync(CurrentMonth);
+        var result = await _csvService.ExportAsync(events, csvPath);
+        Status = $"CSVへエクスポートしました: {result.ExportedCount} 件";
+        return result;
+    }
+
+    public async Task<CalendarCsvImportResult> ImportCsvAsync(string csvPath)
+    {
+        var result = await _csvService.ImportAsync(csvPath);
+        foreach (var calendarEvent in result.Events)
+        {
+            await _repository.SaveEventAsync(calendarEvent);
+        }
+
+        await RefreshCalendarAsync();
+        Status = result.Errors.Count == 0
+            ? $"CSVからインポートしました: {result.Events.Count} 件"
+            : $"CSVから {result.Events.Count} 件をインポートしました。エラー {result.Errors.Count} 件。";
+        return result;
+    }
+
+    public Task<FavGCalImportAnalysis> AnalyzeFavGCalSchedulerImportAsync(string sourceFolder)
+    {
+        return _favGCalImportService.AnalyzeAsync(sourceFolder);
+    }
+
+    public async Task<FavGCalImportResult> ImportFavGCalSchedulerAsync(FavGCalImportOptions options)
+    {
+        var mappedCalendarIds = options.CalendarMappings.Values
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        foreach (var calendarId in mappedCalendarIds)
+        {
+            if (!AvailableCalendars.Any(item => item.Id == calendarId))
+            {
+                AvailableCalendars.Add(new GoogleCalendarSelectionItem
+                {
+                    Id = calendarId,
+                    Summary = calendarId,
+                    IsSelected = true
+                });
+            }
+        }
+
+        foreach (var calendar in AvailableCalendars)
+        {
+            if (mappedCalendarIds.Contains(calendar.Id, StringComparer.Ordinal))
+            {
+                calendar.IsSelected = true;
+            }
+        }
+
+        if (options.ImportSettings)
+        {
+            ApplyFavGCalSchedulerSettings(options.SourceFolder);
+        }
+
+        await SaveOAuthPathAsync();
+        if (options.VerifyGoogleEventsBeforeImport
+            && mappedCalendarIds.Length > 0
+            && !string.IsNullOrWhiteSpace(_settings.OAuthClientJsonPath)
+            && File.Exists(_settings.OAuthClientJsonPath))
+        {
+            Status = "Googleカレンダーから既存予定を確認しています...";
+            await _syncService.PullAsync(_settings, mappedCalendarIds);
+        }
+
+        var result = await _favGCalImportService.ImportAsync(options);
+        if (options.ImportSettings)
+        {
+            await _repository.SaveSettingsAsync(_settings);
+            OnPropertyChanged(nameof(ConfirmBeforeDelete));
+            OnPropertyChanged(nameof(CloseButtonExitsApplication));
+            OnPropertyChanged(nameof(DefaultNewEventIsAllDay));
+        }
+
+        await ReloadAvailableCalendarsAsync();
+        await RefreshCalendarAsync();
+        Status = $"FavGCalSchedulerデータを取り込みました: 追加 {result.ImportedCount} 件、既存紐付け {result.LinkedExistingGoogleCount} 件、重複スキップ {result.SkippedDuplicateCount} 件";
+        return result;
+    }
+
+    public async Task SetOAuthClientJsonPathAsync(string path)
+    {
+        OAuthClientJsonPath = path;
+        _settings.OAuthClientJsonPath = string.IsNullOrWhiteSpace(path) ? null : path.Trim();
+        await _repository.SaveSettingsAsync(_settings);
+        await ReloadAvailableCalendarsAsync();
+    }
+
+    public async Task AuthorizeGoogleAsync()
+    {
+        await AuthorizeAsync();
+    }
+
     private async Task ReloadTagsAsync()
     {
         Tags.Clear();
@@ -299,15 +556,55 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
+    public async Task ReloadAvailableCalendarsAsync()
+    {
+        var calendars = await LoadAvailableCalendarsCoreAsync();
+
+        AvailableCalendars.Clear();
+        foreach (var calendar in calendars)
+        {
+            AvailableCalendars.Add(calendar);
+        }
+
+        RefreshCalendarNames();
+        if (!AvailableCalendars.Any(item => item.IsSelected) && AvailableCalendars.Count > 0)
+        {
+            AvailableCalendars[0].IsSelected = true;
+        }
+
+        EditorCalendarId = ResolveEditorCalendarId();
+    }
+
+    public async Task ApplyCalendarSelectionAsync()
+    {
+        if (!AvailableCalendars.Any(item => item.IsSelected) && AvailableCalendars.Count > 0)
+        {
+            AvailableCalendars[0].IsSelected = true;
+        }
+
+        RefreshCalendarNames();
+        _settings.VisibleCalendarIds = AvailableCalendars.Where(item => item.IsSelected).Select(item => item.Id).ToList();
+        _settings.ActiveCalendarId = _settings.VisibleCalendarIds.FirstOrDefault() ?? ResolveEditorCalendarId();
+        if (!_settings.VisibleCalendarIds.Contains(EditorCalendarId, StringComparer.Ordinal))
+        {
+            EditorCalendarId = _settings.ActiveCalendarId;
+        }
+        await _repository.SaveSettingsAsync(_settings);
+        await RefreshCalendarAsync();
+    }
+
     private async Task RefreshCalendarAsync()
     {
         _settings.DisplayMonth = CurrentMonth;
         await _repository.SaveSettingsAsync(_settings);
 
         var (gridStart, gridEnd) = DateRangeHelper.MonthGridRange(CurrentMonth);
-        var events = await _repository.LoadEventsAsync(new DateTimeOffset(gridStart), new DateTimeOffset(gridEnd));
-        ApplyDisplayColors(events);
-        _visibleEvents = events.Where(IsVisible).ToArray();
+        _storedEvents = await _repository.LoadEventsAsync(new DateTimeOffset(gridStart), new DateTimeOffset(gridEnd), includeDeleted: true);
+        _visibleEvents = RecurrenceExpansionService
+            .ExpandForRange(_storedEvents, new DateTimeOffset(gridStart), new DateTimeOffset(gridEnd))
+            .Where(IsVisible)
+            .ToArray();
+        ApplyDisplayColors(_visibleEvents);
 
         CalendarDays.Clear();
         for (var date = gridStart; date < gridEnd; date = date.AddDays(1))
@@ -316,8 +613,8 @@ public sealed class MainViewModel : ObservableObject
             {
                 Date = date,
                 IsCurrentMonth = date.Month == CurrentMonth.Month,
-                IsWorkdayOverride = TagService.HasWorkdayOverride(events, date),
-                IsHoliday = TagService.HasHolidayWithoutWorkdayOverride(events, date)
+                IsWorkdayOverride = TagService.HasWorkdayOverride(_visibleEvents, date),
+                IsHoliday = TagService.HasHolidayWithoutWorkdayOverride(_visibleEvents, date)
             };
 
             foreach (var calendarEvent in _visibleEvents.Where(e => DateRangeHelper.OccursOn(e, date)).Take(5))
@@ -328,10 +625,20 @@ public sealed class MainViewModel : ObservableObject
             CalendarDays.Add(day);
         }
 
-        SelectedDay ??= CalendarDays.FirstOrDefault(d => d.Date == DateTime.Today) ?? CalendarDays.FirstOrDefault();
+        if (_pendingSelectedDate is { } pendingSelectedDate)
+        {
+            SelectedDay = CalendarDays.FirstOrDefault(d => d.Date == pendingSelectedDate.Date) ?? CalendarDays.FirstOrDefault();
+            _pendingSelectedDate = null;
+        }
+        else
+        {
+            SelectedDay ??= CalendarDays.FirstOrDefault(d => d.Date == DateTime.Today) ?? CalendarDays.FirstOrDefault();
+        }
+
+        RefreshVisibleCalendarDays();
         RefreshSelectedDayEvents();
         RefreshSevenDayEvents();
-        RefreshTodos(events);
+        RefreshTodos(_visibleEvents);
     }
 
     private void RefreshSelectedDayEvents()
@@ -387,12 +694,115 @@ public sealed class MainViewModel : ObservableObject
     private bool IsVisible(CalendarEvent calendarEvent)
     {
         var displayTag = TagService.FindDisplayTag(calendarEvent, Tags);
-        return displayTag?.IsVisible ?? true;
+        var calendarVisible = AvailableCalendars.Count == 0
+            || AvailableCalendars.Any(item => item.IsSelected && item.Id == calendarEvent.CalendarId);
+        return calendarVisible && (displayTag?.IsVisible ?? true);
     }
 
-    private void ChangeMonth(int monthOffset)
+    private void NavigatePrimary(int direction)
     {
-        CurrentMonth = CurrentMonth.AddMonths(monthOffset);
+        var anchor = SelectedDay?.Date ?? CurrentMonth;
+        var target = CurrentViewMode switch
+        {
+            CalendarViewMode.Month => anchor.AddMonths(direction),
+            CalendarViewMode.Week => anchor.AddDays(direction * 7),
+            CalendarViewMode.Day => anchor.AddDays(direction),
+            _ => anchor
+        };
+        NavigateToDate(target);
+    }
+
+    private void NavigateSecondary(int direction)
+    {
+        var anchor = SelectedDay?.Date ?? CurrentMonth;
+        var target = CurrentViewMode switch
+        {
+            CalendarViewMode.Month => anchor.AddYears(direction),
+            CalendarViewMode.Week => anchor.AddMonths(direction),
+            CalendarViewMode.Day => anchor.AddMonths(direction),
+            _ => anchor
+        };
+        NavigateToDate(target);
+    }
+
+    private void NavigateToDate(DateTime targetDate)
+    {
+        _pendingSelectedDate = targetDate.Date;
+        SetCurrentMonthWithoutRefreshing(targetDate.Date);
+        _ = RefreshCalendarAsync();
+    }
+
+    private void RefreshVisibleCalendarDays()
+    {
+        VisibleCalendarDays.Clear();
+
+        IEnumerable<CalendarDay> days = CurrentViewMode switch
+        {
+            CalendarViewMode.Month => CalendarDays,
+            CalendarViewMode.Week => GetWeekDays(),
+            CalendarViewMode.Day => GetDayDays(),
+            _ => CalendarDays
+        };
+
+        foreach (var day in days)
+        {
+            VisibleCalendarDays.Add(day);
+        }
+    }
+
+    private IEnumerable<CalendarDay> GetWeekDays()
+    {
+        if (CalendarDays.Count == 0)
+        {
+            return [];
+        }
+
+        var anchor = SelectedDay?.Date ?? CurrentMonth;
+        var start = anchor.Date.AddDays(-(int)anchor.DayOfWeek);
+        return Enumerable.Range(0, 7).Select(offset => FindOrCreateCalendarDay(start.AddDays(offset)));
+    }
+
+    private IEnumerable<CalendarDay> GetDayDays()
+    {
+        if (CalendarDays.Count == 0)
+        {
+            return [];
+        }
+
+        return [FindOrCreateCalendarDay((SelectedDay?.Date ?? CurrentMonth).Date)];
+    }
+
+    private CalendarDay FindOrCreateCalendarDay(DateTime date)
+    {
+        return CalendarDays.FirstOrDefault(day => day.Date == date)
+            ?? CreateCalendarDay(date, _visibleEvents);
+    }
+
+    private CalendarDay CreateCalendarDay(DateTime date, IEnumerable<CalendarEvent> events)
+    {
+        var day = new CalendarDay
+        {
+            Date = date,
+            IsCurrentMonth = date.Month == CurrentMonth.Month,
+            IsWorkdayOverride = TagService.HasWorkdayOverride(events, date),
+            IsHoliday = TagService.HasHolidayWithoutWorkdayOverride(events, date)
+        };
+
+        foreach (var calendarEvent in _visibleEvents.Where(e => DateRangeHelper.OccursOn(e, date)).Take(5))
+        {
+            day.Events.Add(calendarEvent);
+        }
+
+        return day;
+    }
+
+    private void SetCurrentMonthWithoutRefreshing(DateTime value)
+    {
+        _currentMonth = new DateTime(value.Year, value.Month, 1);
+        OnPropertyChanged(nameof(CurrentMonth));
+        OnPropertyChanged(nameof(MonthTitle));
+        OnPropertyChanged(nameof(JapaneseMonthTitle));
+        OnPropertyChanged(nameof(CurrentPeriodTitle));
     }
 
     private static string FormatJapaneseEra(DateTime date)
@@ -413,6 +823,18 @@ public sealed class MainViewModel : ObservableObject
         return $"{date:yyyy}年({FormatJapaneseEra(date)}){date:MM月dd日} 第{weekOfMonth}{dayOfWeek} {weekOfYear}週目 経過日数 {elapsedDays}日";
     }
 
+    private static string FormatWeekTitle(DateTime date)
+    {
+        var start = date.Date.AddDays(-(int)date.DayOfWeek);
+        var end = start.AddDays(6);
+        return $"{start:yyyy/M/d} - {end:yyyy/M/d}";
+    }
+
+    private static string FormatDayTitle(DateTime date)
+    {
+        return date.ToString("yyyy/M/d (ddd)", new CultureInfo("ja-JP"));
+    }
+
     private void LoadEditor(CalendarEvent? calendarEvent)
     {
         if (calendarEvent is null)
@@ -420,6 +842,7 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
+        EditorCalendarId = calendarEvent.CalendarId;
         Title = calendarEvent.Title;
         Description = calendarEvent.Description ?? "";
         Location = calendarEvent.Location ?? "";
@@ -428,6 +851,405 @@ public sealed class MainViewModel : ObservableObject
         StartTime = calendarEvent.Start.ToString("HH:mm", CultureInfo.InvariantCulture);
         EndTime = calendarEvent.End.ToString("HH:mm", CultureInfo.InvariantCulture);
         IsAllDay = calendarEvent.IsAllDay;
+    }
+
+    private async Task SaveEventWithRecurrenceAsync(RecurrenceEditScope? recurrenceScope)
+    {
+        var candidate = BuildEditedEventAsync();
+        if (candidate is null)
+        {
+            return;
+        }
+
+        if (SelectedEvent is null || recurrenceScope is null)
+        {
+            await _repository.SaveEventAsync(candidate);
+            SelectedEvent = candidate;
+            await RefreshCalendarAsync();
+            Status = "予定を保存しました。";
+            return;
+        }
+
+        switch (recurrenceScope.Value)
+        {
+            case RecurrenceEditScope.ThisOccurrence:
+                await SaveSingleOccurrenceAsync(candidate);
+                break;
+            case RecurrenceEditScope.ThisAndFollowing:
+                await SaveThisAndFollowingAsync(candidate);
+                break;
+            case RecurrenceEditScope.AllEvents:
+                await SaveEntireSeriesAsync(candidate);
+                break;
+        }
+
+        await RefreshCalendarAsync();
+        Status = "予定を保存しました。";
+    }
+
+    private async Task DeleteEventWithRecurrenceAsync(RecurrenceEditScope? recurrenceScope)
+    {
+        if (SelectedEvent is null)
+        {
+            return;
+        }
+
+        if (recurrenceScope is null)
+        {
+            await _repository.DeleteEventAsync(SelectedEvent);
+            SelectedEvent = null;
+            await RefreshCalendarAsync();
+            Status = "予定を削除しました。";
+            return;
+        }
+
+        switch (recurrenceScope.Value)
+        {
+            case RecurrenceEditScope.ThisOccurrence:
+                await DeleteSingleOccurrenceAsync();
+                break;
+            case RecurrenceEditScope.ThisAndFollowing:
+                await DeleteThisAndFollowingAsync();
+                break;
+            case RecurrenceEditScope.AllEvents:
+                await DeleteEntireSeriesAsync();
+                break;
+        }
+
+        SelectedEvent = null;
+        await RefreshCalendarAsync();
+        Status = "予定を削除しました。";
+    }
+
+    private CalendarEvent? BuildEditedEventAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Title))
+        {
+            Status = "件名を入力してください。";
+            return null;
+        }
+
+        var calendarEvent = SelectedEvent is null
+            ? new CalendarEvent()
+            : CloneEventForEditing(SelectedEvent);
+        calendarEvent.Title = Title.Trim();
+        calendarEvent.Description = string.IsNullOrWhiteSpace(Description) ? null : Description.Trim();
+        calendarEvent.Location = string.IsNullOrWhiteSpace(Location) ? null : Location.Trim();
+        calendarEvent.CalendarId = ResolveEditorCalendarId();
+        calendarEvent.IsAllDay = IsAllDay;
+        calendarEvent.IsDirty = true;
+        calendarEvent.IsDeleted = false;
+
+        if (IsAllDay)
+        {
+            calendarEvent.Start = new DateTimeOffset(StartDate.Date);
+            calendarEvent.End = new DateTimeOffset(EndDate.Date.AddDays(1));
+        }
+        else
+        {
+            if (!TimeSpan.TryParse(StartTime, out var startTime) || !TimeSpan.TryParse(EndTime, out var endTime))
+            {
+                Status = "時刻は HH:mm 形式で入力してください。";
+                return null;
+            }
+
+            calendarEvent.Start = new DateTimeOffset(StartDate.Date.Add(startTime));
+            calendarEvent.End = new DateTimeOffset(EndDate.Date.Add(endTime));
+            if (calendarEvent.End <= calendarEvent.Start)
+            {
+                Status = "終了日時は開始日時より後にしてください。";
+                return null;
+            }
+        }
+
+        return calendarEvent;
+    }
+
+    private async Task SaveSingleOccurrenceAsync(CalendarEvent candidate)
+    {
+        if (SelectedEvent is null)
+        {
+            return;
+        }
+
+        if (!SelectedEvent.IsGeneratedOccurrence && SelectedEvent.IsRecurrenceException)
+        {
+            candidate.IsRecurrenceException = true;
+            candidate.RecurringParentId = SelectedEvent.RecurringParentId;
+            candidate.RecurringEventId = SelectedEvent.RecurringEventId;
+            candidate.OriginalStart = SelectedEvent.OriginalStart;
+            await _repository.SaveEventAsync(candidate);
+            SelectedEvent = candidate;
+            return;
+        }
+
+        var master = await ResolveSeriesMasterAsync(SelectedEvent);
+        if (master is null)
+        {
+            await _repository.SaveEventAsync(candidate);
+            SelectedEvent = candidate;
+            return;
+        }
+
+        candidate.Id = SelectedEvent.IsGeneratedOccurrence ? Guid.NewGuid().ToString("N") : candidate.Id;
+        candidate.GoogleEventId = SelectedEvent.GoogleEventId;
+        candidate.RecurringParentId = master.Id;
+        candidate.RecurringEventId = master.GoogleEventId;
+        candidate.OriginalStart = SelectedEvent.OriginalStart ?? SelectedEvent.Start;
+        candidate.IsRecurrenceException = true;
+        candidate.RecurrenceJson = null;
+        master.RecurrenceJson = RecurrenceRuleHelper.AddExDate(master.RecurrenceJson, candidate.OriginalStart.Value, master.IsAllDay);
+        master.IsDirty = true;
+        await _repository.SaveEventAsync(master);
+        await _repository.SaveEventAsync(candidate);
+        SelectedEvent = candidate;
+    }
+
+    private async Task SaveEntireSeriesAsync(CalendarEvent candidate)
+    {
+        if (SelectedEvent is null)
+        {
+            await _repository.SaveEventAsync(candidate);
+            SelectedEvent = candidate;
+            return;
+        }
+
+        var master = await ResolveSeriesMasterAsync(SelectedEvent);
+        if (master is null)
+        {
+            await _repository.SaveEventAsync(candidate);
+            SelectedEvent = candidate;
+            return;
+        }
+
+        var target = CloneEventForEditing(master);
+        ApplySeriesEditValues(target, candidate, SelectedEvent);
+        target.IsDirty = true;
+        await _repository.SaveEventAsync(target);
+        SelectedEvent = target;
+    }
+
+    private async Task SaveThisAndFollowingAsync(CalendarEvent candidate)
+    {
+        if (SelectedEvent is null)
+        {
+            return;
+        }
+
+        var master = await ResolveSeriesMasterAsync(SelectedEvent);
+        if (master is null)
+        {
+            await _repository.SaveEventAsync(candidate);
+            SelectedEvent = candidate;
+            return;
+        }
+
+        var splitStart = SelectedEvent.OriginalStart ?? SelectedEvent.Start;
+        var original = CloneEventForEditing(master);
+        original.RecurrenceJson = RecurrenceRuleHelper.BuildSplitSourceRecurrenceJson(master, splitStart);
+        original.IsDirty = true;
+        await _repository.SaveEventAsync(original);
+
+        var future = CloneEventForEditing(master);
+        future.Id = Guid.NewGuid().ToString("N");
+        future.GoogleEventId = null;
+        future.RecurringEventId = null;
+        future.RecurringParentId = null;
+        future.OriginalStart = null;
+        future.IsRecurrenceException = false;
+        ApplySeriesEditValues(future, candidate, SelectedEvent);
+        future.RecurrenceJson = RecurrenceRuleHelper.BuildSplitFutureRecurrenceJson(master, splitStart);
+        future.IsDirty = true;
+        await _repository.SaveEventAsync(future);
+
+        foreach (var child in await _repository.LoadSeriesEventsAsync(master.Id, master.GoogleEventId))
+        {
+            if (!child.IsRecurrenceException || child.OriginalStart is null || child.OriginalStart < splitStart)
+            {
+                continue;
+            }
+
+            var moved = CloneEventForEditing(child);
+            moved.Id = Guid.NewGuid().ToString("N");
+            moved.GoogleEventId = null;
+            moved.RecurringParentId = future.Id;
+            moved.RecurringEventId = future.GoogleEventId;
+            moved.IsDirty = true;
+            await _repository.SaveEventAsync(moved);
+        }
+
+        SelectedEvent = future;
+    }
+
+    private async Task DeleteSingleOccurrenceAsync()
+    {
+        if (SelectedEvent is null)
+        {
+            return;
+        }
+
+        if (SelectedEvent.IsRecurrenceException && !SelectedEvent.IsGeneratedOccurrence)
+        {
+            await _repository.DeleteEventAsync(SelectedEvent);
+            return;
+        }
+
+        var master = await ResolveSeriesMasterAsync(SelectedEvent);
+        if (master is null)
+        {
+            await _repository.DeleteEventAsync(SelectedEvent);
+            return;
+        }
+
+        var tombstone = new CalendarEvent
+        {
+            Title = SelectedEvent.Title,
+            Description = SelectedEvent.Description,
+            Location = SelectedEvent.Location,
+            CalendarId = SelectedEvent.CalendarId,
+            Start = SelectedEvent.Start,
+            End = SelectedEvent.End,
+            IsAllDay = SelectedEvent.IsAllDay,
+            ColorId = SelectedEvent.ColorId,
+            IsDeleted = true,
+            IsDirty = true,
+            IsTodoLike = SelectedEvent.IsTodoLike,
+            RecurringParentId = master.Id,
+            RecurringEventId = master.GoogleEventId,
+            OriginalStart = SelectedEvent.OriginalStart ?? SelectedEvent.Start,
+            IsRecurrenceException = true
+        };
+        master.RecurrenceJson = RecurrenceRuleHelper.AddExDate(master.RecurrenceJson, tombstone.OriginalStart.Value, master.IsAllDay);
+        master.IsDirty = true;
+        await _repository.SaveEventAsync(master);
+        await _repository.SaveEventAsync(tombstone);
+    }
+
+    private async Task DeleteEntireSeriesAsync()
+    {
+        if (SelectedEvent is null)
+        {
+            return;
+        }
+
+        var master = await ResolveSeriesMasterAsync(SelectedEvent);
+        if (master is not null)
+        {
+            await _repository.DeleteEventAsync(master);
+        }
+
+        foreach (var child in await _repository.LoadSeriesEventsAsync(master?.Id ?? SelectedEvent.RecurringParentId, master?.GoogleEventId ?? SelectedEvent.RecurringEventId))
+        {
+            await _repository.DeleteEventAsync(child);
+        }
+    }
+
+    private async Task DeleteThisAndFollowingAsync()
+    {
+        if (SelectedEvent is null)
+        {
+            return;
+        }
+
+        var master = await ResolveSeriesMasterAsync(SelectedEvent);
+        if (master is null)
+        {
+            await _repository.DeleteEventAsync(SelectedEvent);
+            return;
+        }
+
+        var splitStart = SelectedEvent.OriginalStart ?? SelectedEvent.Start;
+        master.RecurrenceJson = RecurrenceRuleHelper.BuildSplitSourceRecurrenceJson(master, splitStart);
+        master.IsDirty = true;
+        await _repository.SaveEventAsync(master);
+
+        foreach (var child in await _repository.LoadSeriesEventsAsync(master.Id, master.GoogleEventId))
+        {
+            if (child.OriginalStart is not null && child.OriginalStart >= splitStart)
+            {
+                await _repository.DeleteEventAsync(child);
+            }
+        }
+    }
+
+    private async Task<CalendarEvent?> ResolveSeriesMasterAsync(CalendarEvent selectedEvent)
+    {
+        if (selectedEvent.IsRecurringMaster)
+        {
+            return await _repository.FindMasterByIdAsync(selectedEvent.Id);
+        }
+
+        if (!string.IsNullOrWhiteSpace(selectedEvent.RecurringParentId))
+        {
+            return _storedEvents.FirstOrDefault(item => item.Id == selectedEvent.RecurringParentId && item.IsRecurringMaster)
+                ?? await _repository.FindMasterByIdAsync(selectedEvent.RecurringParentId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(selectedEvent.RecurringEventId))
+        {
+            return _storedEvents.FirstOrDefault(item => item.GoogleEventId == selectedEvent.RecurringEventId && item.IsRecurringMaster)
+                ?? (await _repository.LoadSeriesEventsAsync(null, selectedEvent.RecurringEventId)).FirstOrDefault(item => item.IsRecurringMaster);
+        }
+
+        return null;
+    }
+
+    private void ApplySeriesEditValues(CalendarEvent target, CalendarEvent candidate, CalendarEvent selectedEvent)
+    {
+        var dayShift = (candidate.Start.Date - selectedEvent.Start.Date).Days;
+        target.Title = candidate.Title;
+        target.Description = candidate.Description;
+        target.Location = candidate.Location;
+        target.CalendarId = candidate.CalendarId;
+        target.IsAllDay = candidate.IsAllDay;
+        target.ColorId = candidate.ColorId;
+        target.Start = dayShift == 0
+            ? new DateTimeOffset(target.Start.Date.Add(candidate.Start.TimeOfDay), candidate.Start.Offset)
+            : target.Start.AddDays(dayShift).Date.Add(candidate.Start.TimeOfDay);
+        target.End = dayShift == 0
+            ? new DateTimeOffset(target.End.Date.Add(candidate.End.TimeOfDay), candidate.End.Offset)
+            : target.End.AddDays(dayShift).Date.Add(candidate.End.TimeOfDay);
+
+        if (candidate.IsAllDay)
+        {
+            var durationDays = Math.Max(1, (candidate.End.Date - candidate.Start.Date).Days);
+            target.Start = new DateTimeOffset(target.Start.Date);
+            target.End = new DateTimeOffset(target.Start.Date.AddDays(durationDays));
+        }
+        else
+        {
+            var duration = candidate.End - candidate.Start;
+            target.End = target.Start.Add(duration);
+        }
+    }
+
+    private static CalendarEvent CloneEventForEditing(CalendarEvent source)
+    {
+        return new CalendarEvent
+        {
+            Id = source.Id,
+            GoogleEventId = source.GoogleEventId,
+            RecurringEventId = source.RecurringEventId,
+            RecurringParentId = source.RecurringParentId,
+            OriginalStart = source.OriginalStart,
+            IsRecurrenceException = source.IsRecurrenceException,
+            CalendarId = source.CalendarId,
+            Title = source.Title,
+            Description = source.Description,
+            Location = source.Location,
+            Start = source.Start,
+            End = source.End,
+            IsAllDay = source.IsAllDay,
+            ColorId = source.ColorId,
+            RecurrenceJson = source.RecurrenceJson,
+            IsDeleted = source.IsDeleted,
+            UpdatedAt = source.UpdatedAt,
+            LastSyncedAt = source.LastSyncedAt,
+            IsDirty = source.IsDirty,
+            IsTodoLike = source.IsTodoLike,
+            DisplayColor = source.DisplayColor,
+            IsGeneratedOccurrence = source.IsGeneratedOccurrence
+        };
     }
 
     private async Task SaveEventAsync()
@@ -442,7 +1264,7 @@ public sealed class MainViewModel : ObservableObject
         calendarEvent.Title = Title.Trim();
         calendarEvent.Description = string.IsNullOrWhiteSpace(Description) ? null : Description.Trim();
         calendarEvent.Location = string.IsNullOrWhiteSpace(Location) ? null : Location.Trim();
-        calendarEvent.CalendarId = _settings.ActiveCalendarId;
+        calendarEvent.CalendarId = ResolveEditorCalendarId();
         calendarEvent.IsAllDay = IsAllDay;
         calendarEvent.IsDirty = true;
         calendarEvent.IsDeleted = false;
@@ -501,6 +1323,7 @@ public sealed class MainViewModel : ObservableObject
             OAuthClientJsonPath = dialog.FileName;
             _settings.OAuthClientJsonPath = dialog.FileName;
             await _repository.SaveSettingsAsync(_settings);
+            await ReloadAvailableCalendarsAsync();
             Status = "OAuth client JSONを保存しました。";
         }
     }
@@ -516,6 +1339,7 @@ public sealed class MainViewModel : ObservableObject
 
         Status = "ブラウザーでGoogle認証を続行してください。";
         await _syncService.AuthorizeAsync(_settings.OAuthClientJsonPath);
+        await ReloadAvailableCalendarsAsync();
         Status = "Google認証が完了しました。";
     }
 
@@ -524,6 +1348,7 @@ public sealed class MainViewModel : ObservableObject
         await SaveOAuthPathAsync();
         Status = "Googleカレンダーと同期中...";
         var result = await _syncService.SyncAsync(_settings);
+        await ReloadAvailableCalendarsAsync();
         await RefreshCalendarAsync();
         Status = $"同期が完了しました: 送信 {result.Pushed} 件、取得 {result.Pulled} 件。";
     }
@@ -537,6 +1362,133 @@ public sealed class MainViewModel : ObservableObject
     private async Task SaveOAuthPathAsync()
     {
         _settings.OAuthClientJsonPath = string.IsNullOrWhiteSpace(OAuthClientJsonPath) ? null : OAuthClientJsonPath.Trim();
+        _settings.VisibleCalendarIds = AvailableCalendars.Where(item => item.IsSelected).Select(item => item.Id).ToList();
+        _settings.ActiveCalendarId = ResolveEditorCalendarId();
         await _repository.SaveSettingsAsync(_settings);
     }
+
+    private void ApplyFavGCalSchedulerSettings(string sourceFolder)
+    {
+        var iniPath = Path.Combine(sourceFolder, "FavGCalScheduler.ini");
+        if (!File.Exists(iniPath))
+        {
+            return;
+        }
+
+        var values = File.ReadLines(iniPath)
+            .Select(line => line.Split('=', 2))
+            .Where(parts => parts.Length == 2)
+            .ToDictionary(parts => parts[0].Trim(), parts => parts[1].Trim(), StringComparer.OrdinalIgnoreCase);
+
+        if (values.TryGetValue("DeletePopup", out var deletePopup))
+        {
+            _settings.ConfirmBeforeDelete = deletePopup != "0";
+        }
+
+        if (values.TryGetValue("AppClose", out var appClose))
+        {
+            _settings.CloseButtonExitsApplication = appClose != "0";
+        }
+
+        if (values.TryGetValue("ScheduleDeaultAllDay", out var defaultAllDay))
+        {
+            _settings.DefaultNewEventIsAllDay = defaultAllDay != "0";
+        }
+    }
+
+    private async Task<IReadOnlyList<GoogleCalendarSelectionItem>> LoadAvailableCalendarsCoreAsync()
+    {
+        IReadOnlyList<GoogleCalendarInfo> calendars;
+        if (!string.IsNullOrWhiteSpace(_settings.OAuthClientJsonPath) && File.Exists(_settings.OAuthClientJsonPath))
+        {
+            try
+            {
+                calendars = await _syncService.ListCalendarsAsync(_settings.OAuthClientJsonPath);
+            }
+            catch
+            {
+                calendars = [];
+            }
+        }
+        else
+        {
+            calendars = [];
+        }
+
+        var selectedIds = _settings.VisibleCalendarIds.Count == 0
+            ? [string.IsNullOrWhiteSpace(_settings.ActiveCalendarId) ? GoogleCalendarDefaults.PrimaryCalendarId : _settings.ActiveCalendarId]
+            : _settings.VisibleCalendarIds;
+
+        if (calendars.Count == 0)
+        {
+            calendars = selectedIds
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct(StringComparer.Ordinal)
+                .Select(id => new GoogleCalendarInfo(id, id))
+                .ToList();
+        }
+
+        if (calendars.Count == 0)
+        {
+            calendars = [new GoogleCalendarInfo(GoogleCalendarDefaults.PrimaryCalendarId, "primary")];
+        }
+
+        return calendars
+            .Select(calendar => new GoogleCalendarSelectionItem
+            {
+                Id = calendar.Id,
+                Summary = calendar.Summary,
+                IsSelected = selectedIds.Contains(calendar.Id, StringComparer.Ordinal)
+            })
+            .ToArray();
+    }
+
+    private void RefreshCalendarNames()
+    {
+        CalendarNames.Clear();
+        foreach (var calendar in AvailableCalendars)
+        {
+            CalendarNames.Add(calendar.Summary);
+        }
+    }
+
+    private string ResolveEditorCalendarId()
+    {
+        if (AvailableCalendars.Any(item => item.Id == EditorCalendarId))
+        {
+            return EditorCalendarId;
+        }
+
+        if (AvailableCalendars.Any(item => item.IsSelected))
+        {
+            return AvailableCalendars.First(item => item.IsSelected).Id;
+        }
+
+        if (AvailableCalendars.Count > 0)
+        {
+            return AvailableCalendars[0].Id;
+        }
+
+        return string.IsNullOrWhiteSpace(_settings.ActiveCalendarId) ? GoogleCalendarDefaults.PrimaryCalendarId : _settings.ActiveCalendarId;
+    }
+
+    private static AppSettings NormalizeSettings(AppSettings settings)
+    {
+        settings.StartupTabIndex = NormalizeTabIndex(settings.StartupTabIndex);
+        settings.VisibleCalendarIds = settings.VisibleCalendarIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (settings.VisibleCalendarIds.Count == 0)
+        {
+            settings.VisibleCalendarIds.Add(string.IsNullOrWhiteSpace(settings.ActiveCalendarId) ? GoogleCalendarDefaults.PrimaryCalendarId : settings.ActiveCalendarId);
+        }
+
+        settings.ActiveCalendarId = string.IsNullOrWhiteSpace(settings.ActiveCalendarId)
+            ? settings.VisibleCalendarIds[0]
+            : settings.ActiveCalendarId;
+        return settings;
+    }
+
+    private static int NormalizeTabIndex(int tabIndex) => Math.Clamp(tabIndex, 0, 4);
 }

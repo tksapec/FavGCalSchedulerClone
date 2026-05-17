@@ -4,47 +4,62 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
-        Title="FavGCalScheduler" Height="760" Width="1180" MinHeight="720" MinWidth="1040"
+        Title="FavGCalSchedulerClone" Height="760" Width="1180" MinHeight="720" MinWidth="1040"
         FontFamily="Meiryo UI" FontSize="12"
-        Loaded="Window_Loaded">
+        Background="#EDF1F5"
+        Loaded="Window_Loaded"
+        Closing="Window_Closing">
     <Window.Resources>
-        <SolidColorBrush x:Key="GridLineBrush" Color="#777777" />
-        <SolidColorBrush x:Key="MenuBarBrush" Color="#FFFFFF" />
-        <SolidColorBrush x:Key="MonthBarBrush" Color="#9B1C20" />
-        <SolidColorBrush x:Key="SundayBrush" Color="#FFC3C5" />
-        <SolidColorBrush x:Key="SaturdayBrush" Color="#C5C4F7" />
-        <SolidColorBrush x:Key="WeekdayBrush" Color="#F8F8F8" />
-        <SolidColorBrush x:Key="OutsideMonthBrush" Color="#E5E5E5" />
+        <SolidColorBrush x:Key="ChromeBrush" Color="#243447" />
+        <SolidColorBrush x:Key="ChromeHoverBrush" Color="#31465C" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#2563EB" />
+        <SolidColorBrush x:Key="GridLineBrush" Color="#CBD5E1" />
+        <SolidColorBrush x:Key="MenuBarBrush" Color="#F8FAFC" />
+        <SolidColorBrush x:Key="PanelBrush" Color="#F8FAFC" />
+        <SolidColorBrush x:Key="WeekdayBrush" Color="#FFFFFF" />
+        <SolidColorBrush x:Key="SundayBrush" Color="#FFF1F2" />
+        <SolidColorBrush x:Key="SaturdayBrush" Color="#EFF6FF" />
+        <SolidColorBrush x:Key="HolidayBrush" Color="#FFE4E6" />
+        <SolidColorBrush x:Key="OutsideMonthBrush" Color="#F1F5F9" />
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
 
         <Style x:Key="FlatMenuStyle" TargetType="Menu">
             <Setter Property="Background" Value="{StaticResource MenuBarBrush}" />
-            <Setter Property="Foreground" Value="#000000" />
+            <Setter Property="Foreground" Value="#1E293B" />
             <Setter Property="FontSize" Value="13" />
-            <Setter Property="Padding" Value="0" />
+            <Setter Property="Padding" Value="2,1" />
+        </Style>
+
+        <Style TargetType="Button">
+            <Setter Property="MinWidth" Value="72" />
+            <Setter Property="Height" Value="28" />
+            <Setter Property="Padding" Value="12,2" />
+            <Setter Property="Margin" Value="4,0,0,0" />
         </Style>
 
         <Style x:Key="MonthNavButton" TargetType="Button">
-            <Setter Property="MinWidth" Value="70" />
-            <Setter Property="Height" Value="26" />
-            <Setter Property="Padding" Value="4,0" />
-            <Setter Property="Margin" Value="2,0" />
+            <Setter Property="MinWidth" Value="76" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="Padding" Value="8,0" />
+            <Setter Property="Margin" Value="3,0" />
             <Setter Property="Foreground" Value="#FFFFFF" />
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderBrush" Value="Transparent" />
-            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Background" Value="#34495E" />
+            <Setter Property="BorderBrush" Value="#50657A" />
+            <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1" CornerRadius="3">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Background" Value="#B12B31" />
-                                <Setter Property="BorderBrush" Value="#D56A70" />
+                                <Setter Property="Background" Value="{StaticResource ChromeHoverBrush}" />
+                                <Setter Property="BorderBrush" Value="#6B7F93" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter Property="Background" Value="#7F151A" />
+                                <Setter Property="Background" Value="#1D2A38" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -56,7 +71,7 @@
             <Setter Property="Background" Value="{StaticResource WeekdayBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource GridLineBrush}" />
             <Setter Property="BorderThickness" Value="0,0,1,1" />
-            <Setter Property="Padding" Value="3" />
+            <Setter Property="Padding" Value="5" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding IsSunday}" Value="True">
                     <Setter Property="Background" Value="{StaticResource SundayBrush}" />
@@ -66,49 +81,32 @@
                 </DataTrigger>
                 <DataTrigger Binding="{Binding IsCurrentMonth}" Value="False">
                     <Setter Property="Background" Value="{StaticResource OutsideMonthBrush}" />
-                    <Setter Property="Opacity" Value="0.82" />
+                    <Setter Property="Opacity" Value="0.78" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding IsHoliday}" Value="True">
-                    <Setter Property="Background" Value="#F4B7B9" />
+                    <Setter Property="Background" Value="{StaticResource HolidayBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding IsWorkdayOverride}" Value="True">
                     <Setter Property="Background" Value="{StaticResource WeekdayBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding IsToday}" Value="True">
-                    <Setter Property="BorderBrush" Value="#42E02D" />
-                    <Setter Property="BorderThickness" Value="3" />
+                    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                    <Setter Property="BorderThickness" Value="2" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
-                    <Setter Property="BorderBrush" Value="#42E02D" />
-                    <Setter Property="BorderThickness" Value="4" />
+                    <Setter Property="BorderBrush" Value="#0F766E" />
+                    <Setter Property="BorderThickness" Value="3" />
                 </DataTrigger>
             </Style.Triggers>
         </Style>
 
         <Style x:Key="EventBar" TargetType="Border">
-            <Setter Property="BorderBrush" Value="#555555" />
+            <Setter Property="BorderBrush" Value="#94A3B8" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Height" Value="19" />
-            <Setter Property="Margin" Value="0,1,0,0" />
-            <Setter Property="Padding" Value="3,0" />
-        </Style>
-
-        <Style x:Key="BottomButton" TargetType="Button">
-            <Setter Property="MinWidth" Value="58" />
-            <Setter Property="Height" Value="25" />
-            <Setter Property="Margin" Value="2,0" />
-            <Setter Property="Padding" Value="8,1" />
-        </Style>
-
-        <Style TargetType="TabControl">
-            <Setter Property="Background" Value="#EFEFEF" />
-            <Setter Property="BorderBrush" Value="#A0A0A0" />
-            <Setter Property="BorderThickness" Value="1" />
-        </Style>
-
-        <Style TargetType="TabItem">
-            <Setter Property="Padding" Value="9,3" />
-            <Setter Property="FontSize" Value="13" />
+            <Setter Property="CornerRadius" Value="3" />
+            <Setter Property="Height" Value="20" />
+            <Setter Property="Margin" Value="0,2,0,0" />
+            <Setter Property="Padding" Value="5,0" />
         </Style>
 
         <Style TargetType="DataGrid">
@@ -116,53 +114,71 @@
             <Setter Property="HeadersVisibility" Value="Column" />
             <Setter Property="CanUserAddRows" Value="False" />
             <Setter Property="AutoGenerateColumns" Value="False" />
-            <Setter Property="RowHeight" Value="22" />
-            <Setter Property="ColumnHeaderHeight" Value="23" />
+            <Setter Property="RowHeight" Value="24" />
+            <Setter Property="ColumnHeaderHeight" Value="26" />
             <Setter Property="FontSize" Value="12" />
+            <Setter Property="Background" Value="#FFFFFF" />
+            <Setter Property="BorderBrush" Value="#CBD5E1" />
+            <Setter Property="HorizontalGridLinesBrush" Value="#E2E8F0" />
+        </Style>
+
+        <Style x:Key="CalendarMenuItemStyle" TargetType="MenuItem">
+            <Setter Property="Header" Value="{Binding Summary}" />
+            <Setter Property="IsCheckable" Value="True" />
+            <Setter Property="IsChecked" Value="{Binding IsSelected, Mode=TwoWay}" />
+            <Setter Property="StaysOpenOnClick" Value="True" />
+            <EventSetter Event="Checked" Handler="CalendarSelectionMenu_Checked" />
+            <EventSetter Event="Unchecked" Handler="CalendarSelectionMenu_Unchecked" />
         </Style>
     </Window.Resources>
 
-    <DockPanel Background="#D6D6D6">
+    <DockPanel Background="#EDF1F5">
         <Menu DockPanel.Dock="Top" Style="{StaticResource FlatMenuStyle}">
             <MenuItem Header="ファイル(_F)">
-                <MenuItem Header="全カレンダーのバックアップ(_B)" IsEnabled="False" />
-                <MenuItem Header="全カレンダーのリストア(_R)" IsEnabled="False" />
+                <MenuItem Header="全カレンダーのバックアップ(_B)" Click="BackupAllCalendarsMenu_Click" />
+                <MenuItem Header="全カレンダーのリストア(_R)" Click="RestoreAllCalendarsMenu_Click" />
                 <Separator />
-                <MenuItem Header="インポート(_I)" IsEnabled="False" />
-                <MenuItem Header="エクスポート(_E)" IsEnabled="False" />
+                <MenuItem Header="FavGCalSchedulerデータ移行..." Click="ImportFavGCalSchedulerMenu_Click" />
                 <Separator />
-                <MenuItem Header="印刷" IsEnabled="False" />
+                <MenuItem Header="インポート(_I)" Click="ImportCsvMenu_Click" />
+                <MenuItem Header="エクスポート(_E)" Click="ExportCsvMenu_Click" />
+                <Separator />
+                <MenuItem Header="印刷" Click="PrintMenu_Click" />
                 <MenuItem Header="印刷設定" IsEnabled="False" />
-                <MenuItem Header="印刷プレビュー" IsEnabled="False" />
+                <MenuItem Header="印刷プレビュー" Click="PrintPreviewMenu_Click" />
                 <Separator />
                 <MenuItem Header="アプリケーションの終了(_X)" Click="ExitMenu_Click" />
             </MenuItem>
             <MenuItem Header="編集(_E)">
                 <MenuItem Header="スケジュールの追加(_A)" Click="AddScheduleMenu_Click" />
-                <MenuItem Header="ＴｏＤｏの追加(_D)" Click="AddTodoMenu_Click" />
+                <MenuItem Header="ToDoの追加(_D)" Click="AddTodoMenu_Click" />
                 <Separator />
                 <MenuItem Header="スケジュール一覧(_L)" Click="ScheduleListMenu_Click" />
             </MenuItem>
             <MenuItem Header="表示(_V)">
-                <MenuItem Header="月表示(_M)" InputGestureText="F5" IsEnabled="False" />
-                <MenuItem Header="週表示(_W)" InputGestureText="F5" IsEnabled="False" />
-                <MenuItem Header="日表示(_D)" InputGestureText="F5" IsEnabled="False" />
-                <Separator />
-                <MenuItem Header="天気予報表示エリアの変更(_W)" InputGestureText="F6" Click="WeatherAreaMenu_Click" />
+                <MenuItem Header="月表示(_M)" InputGestureText="F5" Command="{Binding ShowMonthViewCommand}" />
+                <MenuItem Header="週表示(_W)" InputGestureText="F6" Command="{Binding ShowWeekViewCommand}" />
+                <MenuItem Header="日表示(_D)" InputGestureText="F7" Command="{Binding ShowDayViewCommand}" />
             </MenuItem>
             <MenuItem Header="移動(_M)">
-                <MenuItem Header="現在の月へ(_D)" InputGestureText="home" Command="{Binding TodayCommand}" />
+                <MenuItem Header="現在の表示へ(_D)" InputGestureText="Home" Command="{Binding TodayCommand}" />
                 <Separator />
-                <MenuItem Header="前月(_P)" InputGestureText="page-up" Command="{Binding PreviousMonthCommand}" />
-                <MenuItem Header="次月(_N)" InputGestureText="page-down" Command="{Binding NextMonthCommand}" />
+                <MenuItem Header="前へ(_P)" InputGestureText="PageUp" Command="{Binding PreviousMonthCommand}" />
+                <MenuItem Header="次へ(_N)" InputGestureText="PageDown" Command="{Binding NextMonthCommand}" />
                 <Separator />
-                <MenuItem Header="前年(_-)" Command="{Binding PreviousYearCommand}" />
-                <MenuItem Header="次年(_+)" Command="{Binding NextYearCommand}" />
+                <MenuItem Header="大きく前へ(_-)" Command="{Binding PreviousYearCommand}" />
+                <MenuItem Header="大きく次へ(_+)" Command="{Binding NextYearCommand}" />
             </MenuItem>
             <MenuItem Header="検索(_S)" Click="SearchMenu_Click" />
-            <MenuItem Header="Googleカレンダー(_G)" Command="{Binding AuthorizeCommand}" />
-            <MenuItem Header="同期(_D)">
-                <MenuItem Header="Googleカレンダーと同期する(_S)" InputGestureText="F7" Command="{Binding SyncCommand}" />
+            <MenuItem Header="Googleカレンダー(_G)">
+                <MenuItem Header="OAuth JSONを選択..." Command="{Binding BrowseOAuthClientCommand}" />
+                <MenuItem Header="Google認証" Command="{Binding AuthorizeCommand}" />
+                <MenuItem Header="トークン削除" Command="{Binding ClearTokensCommand}" />
+                <Separator />
+                <MenuItem Header="同期する" InputGestureText="F8" Command="{Binding SyncCommand}" />
+                <MenuItem Header="カレンダー一覧を更新" Command="{Binding ReloadCalendarListCommand}" />
+                <Separator />
+                <MenuItem Header="表示カレンダー" ItemsSource="{Binding AvailableCalendars}" ItemContainerStyle="{StaticResource CalendarMenuItemStyle}" />
             </MenuItem>
             <MenuItem Header="設定(_C)">
                 <MenuItem Header="アプリ設定(_A)" Click="SettingsMenu_Click" />
@@ -174,234 +190,237 @@
             </MenuItem>
         </Menu>
 
-        <Grid DockPanel.Dock="Top" Height="28" Background="{StaticResource MonthBarBrush}">
+        <Grid DockPanel.Dock="Top" Height="46" Background="{StaticResource ChromeBrush}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="82" />
-                <ColumnDefinition Width="82" />
-                <ColumnDefinition Width="280" />
-                <ColumnDefinition Width="82" />
-                <ColumnDefinition Width="82" />
+                <ColumnDefinition Width="92" />
+                <ColumnDefinition Width="92" />
+                <ColumnDefinition Width="300" />
+                <ColumnDefinition Width="92" />
+                <ColumnDefinition Width="92" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <Button Grid.Column="1" Style="{StaticResource MonthNavButton}" Content="&lt;&lt;" Command="{Binding PreviousYearCommand}" />
-            <Button Grid.Column="2" Style="{StaticResource MonthNavButton}" Content="&lt;" Command="{Binding PreviousMonthCommand}" />
-            <TextBlock Grid.Column="3" Text="{Binding JapaneseMonthTitle}" Foreground="#FFFFFF" FontWeight="Bold"
-                       HorizontalAlignment="Center" VerticalAlignment="Center" />
-            <Button Grid.Column="4" Style="{StaticResource MonthNavButton}" Content="&gt;" Command="{Binding NextMonthCommand}" />
-            <Button Grid.Column="5" Style="{StaticResource MonthNavButton}" Content="&gt;&gt;" Command="{Binding NextYearCommand}" />
+            <Button Grid.Column="1" Style="{StaticResource MonthNavButton}" Content="{Binding PreviousYearLabel}" Command="{Binding PreviousYearCommand}" />
+            <Button Grid.Column="2" Style="{StaticResource MonthNavButton}" Content="{Binding PreviousMonthLabel}" Command="{Binding PreviousMonthCommand}" />
+            <StackPanel Grid.Column="3" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <TextBlock Text="{Binding CurrentPeriodTitle}" Foreground="#FFFFFF" FontSize="15" FontWeight="SemiBold"
+                           HorizontalAlignment="Center" />
+                <Button Style="{StaticResource MonthNavButton}" Content="今日" Command="{Binding TodayCommand}"
+                        MinWidth="64" Height="20" FontSize="11" Padding="8,0" Margin="0,2,0,0" />
+            </StackPanel>
+            <Button Grid.Column="4" Style="{StaticResource MonthNavButton}" Content="{Binding NextMonthLabel}" Command="{Binding NextMonthCommand}" />
+            <Button Grid.Column="5" Style="{StaticResource MonthNavButton}" Content="{Binding NextYearLabel}" Command="{Binding NextYearCommand}" />
         </Grid>
 
-        <StatusBar DockPanel.Dock="Bottom" Background="#EFEFEF" BorderBrush="#B0B0B0" BorderThickness="1,1,0,0" Height="26">
-            <TextBlock Text="{Binding CalendarStatusText}" />
+        <StatusBar DockPanel.Dock="Bottom" Background="#F8FAFC" BorderBrush="#CBD5E1" BorderThickness="1,1,0,0" Height="26">
+            <TextBlock Text="{Binding CalendarStatusText}" Foreground="#475569" />
         </StatusBar>
 
-        <Grid>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="*" />
-                <RowDefinition Height="4" />
-                <RowDefinition Height="132" />
-            </Grid.RowDefinitions>
+        <Grid Margin="8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="330" />
+                </Grid.ColumnDefinitions>
 
-            <Border Grid.Row="0" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="1,1,0,0" Background="White">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="22" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-                    <UniformGrid Columns="7" Background="#EDEDED">
-                        <TextBlock Text="Sunday" Foreground="#FF0000" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10" />
-                        <TextBlock Text="Monday" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10" />
-                        <TextBlock Text="Tuesday" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10" />
-                        <TextBlock Text="Wednesday" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10" />
-                        <TextBlock Text="Thursday" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10" />
-                        <TextBlock Text="Friday" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10" />
-                        <TextBlock Text="Saturday" Foreground="#0000FF" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10" />
-                    </UniformGrid>
+                <Grid Grid.Column="0">
+                    <Border BorderBrush="{StaticResource GridLineBrush}" BorderThickness="1" Background="White"
+                            Visibility="{Binding IsMonthView, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="28" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <UniformGrid Columns="7" Background="#E2E8F0">
+                                <TextBlock Text="Sun" Foreground="#B91C1C" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
+                                <TextBlock Text="Mon" Foreground="#334155" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
+                                <TextBlock Text="Tue" Foreground="#334155" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
+                                <TextBlock Text="Wed" Foreground="#334155" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
+                                <TextBlock Text="Thu" Foreground="#334155" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
+                                <TextBlock Text="Fri" Foreground="#334155" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
+                                <TextBlock Text="Sat" Foreground="#1D4ED8" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
+                            </UniformGrid>
 
-                    <ListBox x:Name="DayList" Grid.Row="1" ItemsSource="{Binding CalendarDays}" SelectedItem="{Binding SelectedDay}"
-                             BorderThickness="0" Background="Transparent" ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                             MouseDoubleClick="DayList_MouseDoubleClick">
-                        <ListBox.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <UniformGrid Columns="7" Rows="6" />
-                            </ItemsPanelTemplate>
-                        </ListBox.ItemsPanel>
-                        <ListBox.ItemContainerStyle>
-                            <Style TargetType="ListBoxItem">
-                                <Setter Property="Padding" Value="0" />
-                                <Setter Property="Margin" Value="0" />
-                                <Setter Property="BorderThickness" Value="0" />
-                                <Setter Property="Background" Value="Transparent" />
-                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                <Setter Property="VerticalContentAlignment" Value="Stretch" />
-                                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
-                                <Setter Property="Template">
-                                    <Setter.Value>
-                                        <ControlTemplate TargetType="ListBoxItem">
-                                            <ContentPresenter />
-                                        </ControlTemplate>
-                                    </Setter.Value>
-                                </Setter>
-                            </Style>
-                        </ListBox.ItemContainerStyle>
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <Border Style="{StaticResource DayCell}">
-                                    <DockPanel LastChildFill="True">
-                                        <TextBlock DockPanel.Dock="Top" Text="{Binding Date.Day}" Foreground="#FFFFFF"
-                                                   FontSize="16" FontWeight="Bold" TextOptions.TextFormattingMode="Display">
-                                            <TextBlock.Effect>
-                                                <DropShadowEffect Color="#555555" Direction="315" ShadowDepth="1" BlurRadius="0" />
-                                            </TextBlock.Effect>
-                                        </TextBlock>
-                                        <ItemsControl ItemsSource="{Binding Events}" Margin="0,3,0,0">
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate>
-                                                    <Border Style="{StaticResource EventBar}" Background="{Binding DisplayColor}">
-                                                        <TextBlock Text="{Binding CalendarDisplayText}" FontSize="11" Foreground="#111111"
-                                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                                                    </Border>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-                                    </DockPanel>
-                                </Border>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-                </Grid>
-            </Border>
-
-            <GridSplitter Grid.Row="1" Height="4" HorizontalAlignment="Stretch" Background="#B8B8B8" />
-
-            <Grid Grid.Row="2" Background="#EFEFEF">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="29" />
-                </Grid.RowDefinitions>
-
-                <TabControl Grid.Row="0" Margin="2,2,2,0">
-                    <TabItem Header="カレンダー">
-                        <Grid Margin="4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="240" />
-                                <ColumnDefinition Width="8" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <DataGrid ItemsSource="{Binding CalendarNames}" HeadersVisibility="Column" AutoGenerateColumns="False">
-                                <DataGrid.Columns>
-                                    <DataGridTextColumn Header="カレンダー名称" Binding="{Binding}" Width="*" />
-                                </DataGrid.Columns>
-                            </DataGrid>
-                            <Grid Grid.Column="2">
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
-                                <TextBox Text="{Binding OAuthClientJsonPath, UpdateSourceTrigger=PropertyChanged}" Height="24" Margin="0,0,0,4" />
-                                <StackPanel Grid.Row="1" Orientation="Horizontal">
-                                    <Button Content="JSON選択" Command="{Binding BrowseOAuthClientCommand}" Padding="10,2" Margin="0,0,6,0" />
-                                    <Button Content="Google認証" Command="{Binding AuthorizeCommand}" Padding="10,2" Margin="0,0,6,0" />
-                                    <Button Content="トークン削除" Command="{Binding ClearTokensCommand}" Padding="10,2" />
-                                </StackPanel>
-                            </Grid>
+                            <ListBox x:Name="DayList" Grid.Row="1" ItemsSource="{Binding VisibleCalendarDays}" SelectedItem="{Binding SelectedDay}"
+                                     BorderThickness="0" Background="Transparent" ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                     MouseDoubleClick="DayList_MouseDoubleClick">
+                                <ListBox.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <UniformGrid Columns="7" Rows="6" />
+                                    </ItemsPanelTemplate>
+                                </ListBox.ItemsPanel>
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem">
+                                        <Setter Property="Padding" Value="0" />
+                                        <Setter Property="Margin" Value="0" />
+                                        <Setter Property="BorderThickness" Value="0" />
+                                        <Setter Property="Background" Value="Transparent" />
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                        <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                                        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="ListBoxItem">
+                                                    <ContentPresenter />
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Style="{StaticResource DayCell}">
+                                            <DockPanel LastChildFill="True">
+                                                <TextBlock DockPanel.Dock="Top" Text="{Binding Date.Day}" Foreground="#334155"
+                                                           FontSize="15" FontWeight="SemiBold" />
+                                                <ItemsControl ItemsSource="{Binding Events}" Margin="0,4,0,0">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Border Style="{StaticResource EventBar}" Background="{Binding DisplayColor}">
+                                                                <TextBlock Text="{Binding CalendarDisplayText}" FontSize="11" Foreground="#111827"
+                                                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                            </Border>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </DockPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
                         </Grid>
-                    </TabItem>
+                    </Border>
 
-                    <TabItem Header="1日の予定">
-                        <Grid Margin="4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="1.1*" />
-                                <ColumnDefinition Width="8" />
-                                <ColumnDefinition Width="1.2*" />
-                            </Grid.ColumnDefinitions>
-                            <DataGrid ItemsSource="{Binding SelectedDayEvents}" SelectedItem="{Binding SelectedEvent}">
+                    <Border BorderBrush="{StaticResource GridLineBrush}" BorderThickness="1" Background="White"
+                            Visibility="{Binding IsWeekView, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="28" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <UniformGrid Columns="7" Background="#E2E8F0">
+                                <TextBlock Text="Sun" Foreground="#B91C1C" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
+                                <TextBlock Text="Mon" Foreground="#334155" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
+                                <TextBlock Text="Tue" Foreground="#334155" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
+                                <TextBlock Text="Wed" Foreground="#334155" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
+                                <TextBlock Text="Thu" Foreground="#334155" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
+                                <TextBlock Text="Fri" Foreground="#334155" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
+                                <TextBlock Text="Sat" Foreground="#1D4ED8" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
+                            </UniformGrid>
+
+                            <ListBox Grid.Row="1" ItemsSource="{Binding VisibleCalendarDays}" SelectedItem="{Binding SelectedDay}"
+                                     BorderThickness="0" Background="Transparent" ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                     MouseDoubleClick="DayList_MouseDoubleClick">
+                                <ListBox.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <UniformGrid Columns="7" Rows="1" />
+                                    </ItemsPanelTemplate>
+                                </ListBox.ItemsPanel>
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem">
+                                        <Setter Property="Padding" Value="0" />
+                                        <Setter Property="Margin" Value="0" />
+                                        <Setter Property="BorderThickness" Value="0" />
+                                        <Setter Property="Background" Value="Transparent" />
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                        <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                                        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="ListBoxItem">
+                                                    <ContentPresenter />
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Style="{StaticResource DayCell}">
+                                            <DockPanel LastChildFill="True">
+                                                <TextBlock DockPanel.Dock="Top" Text="{Binding Date.Day}" Foreground="#334155"
+                                                           FontSize="16" FontWeight="SemiBold" />
+                                                <ItemsControl ItemsSource="{Binding Events}" Margin="0,4,0,0">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Border Style="{StaticResource EventBar}" Background="{Binding DisplayColor}">
+                                                                <TextBlock Text="{Binding CalendarDisplayText}" FontSize="11" Foreground="#111827"
+                                                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                            </Border>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </DockPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Grid>
+                    </Border>
+
+                    <Border BorderBrush="{StaticResource GridLineBrush}" BorderThickness="1" Background="White"
+                            Visibility="{Binding IsDayView, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <Grid Margin="12">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="{Binding CurrentPeriodTitle}" FontSize="20" FontWeight="SemiBold" Foreground="#1E293B" Margin="0,0,0,10" />
+                            <DataGrid Grid.Row="1" ItemsSource="{Binding SelectedDayEvents}" SelectedItem="{Binding SelectedEvent}">
                                 <DataGrid.Columns>
-                                    <DataGridTextColumn Header="日時" Binding="{Binding DateDisplayText}" Width="130" />
-                                    <DataGridTextColumn Header="件名" Binding="{Binding Title}" Width="*" />
+                                    <DataGridTextColumn Header="日時" Binding="{Binding DateDisplayText}" Width="180" />
+                                    <DataGridTextColumn Header="件名" Binding="{Binding Title}" Width="220" />
+                                    <DataGridTextColumn Header="内容" Binding="{Binding Description}" Width="*" />
                                 </DataGrid.Columns>
                             </DataGrid>
-                            <Grid Grid.Column="2">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="70" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="70" />
-                                    <ColumnDefinition Width="90" />
-                                </Grid.ColumnDefinitions>
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <Border Grid.Column="1" Margin="8,0,0,0" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="1"
+                        Background="{StaticResource PanelBrush}"
+                        Visibility="{Binding IsMonthView, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="8" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.Row="0" Background="#FFFFFF" Padding="10">
+                            <Grid>
                                 <Grid.RowDefinitions>
-                                    <RowDefinition Height="26" />
-                                    <RowDefinition Height="26" />
-                                    <RowDefinition Height="26" />
+                                    <RowDefinition Height="Auto" />
                                     <RowDefinition Height="*" />
                                 </Grid.RowDefinitions>
-                                <TextBlock Text="件名" VerticalAlignment="Center" />
-                                <TextBox Grid.Column="1" Grid.ColumnSpan="3" Text="{Binding Title, UpdateSourceTrigger=PropertyChanged}" />
-                                <TextBlock Grid.Row="1" Text="開始" VerticalAlignment="Center" />
-                                <DatePicker Grid.Row="1" Grid.Column="1" SelectedDate="{Binding StartDate}" />
-                                <TextBox Grid.Row="1" Grid.Column="2" Text="{Binding StartTime, UpdateSourceTrigger=PropertyChanged}" Margin="4,0" />
-                                <CheckBox Grid.Row="1" Grid.Column="3" Content="終日" IsChecked="{Binding IsAllDay}" VerticalAlignment="Center" />
-                                <TextBlock Grid.Row="2" Text="終了" VerticalAlignment="Center" />
-                                <DatePicker Grid.Row="2" Grid.Column="1" SelectedDate="{Binding EndDate}" />
-                                <TextBox Grid.Row="2" Grid.Column="2" Text="{Binding EndTime, UpdateSourceTrigger=PropertyChanged}" Margin="4,0" />
-                                <StackPanel Grid.Row="2" Grid.Column="3" Orientation="Horizontal">
-                                    <Button Content="保存" Command="{Binding SaveEventCommand}" Width="42" Margin="0,0,3,0" />
-                                    <Button Content="削除" Command="{Binding DeleteEventCommand}" Width="42" />
-                                </StackPanel>
-                                <TextBlock Grid.Row="3" Text="内容" VerticalAlignment="Top" Margin="0,4,0,0" />
-                                <TextBox Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3" Text="{Binding Description, UpdateSourceTrigger=PropertyChanged}"
-                                         AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Margin="0,4,0,0" />
+                                <TextBlock Text="選択日の予定" FontSize="13" FontWeight="SemiBold" Foreground="#1E293B" Margin="0,0,0,8" />
+                                <DataGrid Grid.Row="1" ItemsSource="{Binding SelectedDayEvents}" SelectedItem="{Binding SelectedEvent}"
+                                          MouseDoubleClick="SelectedDayEventsGrid_MouseDoubleClick">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="時間" Binding="{Binding DateDisplayText}" Width="120" />
+                                        <DataGridTextColumn Header="件名" Binding="{Binding Title}" Width="*" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
                             </Grid>
-                        </Grid>
-                    </TabItem>
+                        </Border>
 
-                    <TabItem Header="7日先までの予定">
-                        <DataGrid Margin="4" ItemsSource="{Binding SevenDayEvents}">
-                            <DataGrid.Columns>
-                                <DataGridTextColumn Header="日時" Binding="{Binding DateDisplayText}" Width="150" />
-                                <DataGridTextColumn Header="カレンダー名称" Binding="{Binding CalendarId}" Width="160" />
-                                <DataGridTextColumn Header="件名" Binding="{Binding Title}" Width="*" />
-                            </DataGrid.Columns>
-                        </DataGrid>
-                    </TabItem>
-
-                    <TabItem Header="ToDo(未処理)">
-                        <DockPanel Margin="4">
-                            <Button DockPanel.Dock="Bottom" Content="選択ToDoを100%にする" Command="{Binding MarkSelectedTodoDoneCommand}"
-                                    HorizontalAlignment="Right" Height="24" Padding="10,1" Margin="0,4,0,0" />
-                            <DataGrid ItemsSource="{Binding TodoEvents}" SelectedItem="{Binding SelectedEvent}">
-                                <DataGrid.Columns>
-                                    <DataGridTextColumn Header="期限" Binding="{Binding DateDisplayText}" Width="130" />
-                                    <DataGridTextColumn Header="優先度" Binding="{Binding TodoPriority}" Width="70" />
-                                    <DataGridTextColumn Header="進捗" Binding="{Binding TodoProgressText}" Width="70" />
-                                    <DataGridTextColumn Header="件名" Binding="{Binding Title}" Width="*" />
-                                    <DataGridTextColumn Header="カレンダー名称" Binding="{Binding CalendarId}" Width="150" />
-                                </DataGrid.Columns>
-                            </DataGrid>
-                        </DockPanel>
-                    </TabItem>
-
-                    <TabItem Header="ToDo(処理済み)">
-                        <DataGrid Margin="4" ItemsSource="{Binding CompletedTodoEvents}" SelectedItem="{Binding SelectedEvent}">
-                            <DataGrid.Columns>
-                                <DataGridTextColumn Header="期限" Binding="{Binding DateDisplayText}" Width="130" />
-                                <DataGridTextColumn Header="優先度" Binding="{Binding TodoPriority}" Width="70" />
-                                <DataGridTextColumn Header="進捗" Binding="{Binding TodoProgressText}" Width="70" />
-                                <DataGridTextColumn Header="件名" Binding="{Binding Title}" Width="*" />
-                                <DataGridTextColumn Header="カレンダー名称" Binding="{Binding CalendarId}" Width="150" />
-                            </DataGrid.Columns>
-                        </DataGrid>
-                    </TabItem>
-                </TabControl>
-
-                <DockPanel Grid.Row="1" Margin="2,2,2,2">
-                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                        <Button Style="{StaticResource BottomButton}" Content="表示" Command="{Binding TodayCommand}" />
-                        <Button Style="{StaticResource BottomButton}" Content="天気" IsEnabled="False" />
-                        <Button Style="{StaticResource BottomButton}" Content="同期" Command="{Binding SyncCommand}" />
-                    </StackPanel>
-                    <TextBlock Text="{Binding Status}" VerticalAlignment="Center" Margin="6,0,0,0" />
-                </DockPanel>
+                        <Border Grid.Row="2" Background="#FFFFFF" Padding="10">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="未完了タスク" FontSize="13" FontWeight="SemiBold" Foreground="#1E293B" Margin="0,0,0,8" />
+                                <DataGrid Grid.Row="1" ItemsSource="{Binding TodoEvents}" SelectedItem="{Binding SelectedEvent}">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="期限" Binding="{Binding DateDisplayText}" Width="120" />
+                                        <DataGridTextColumn Header="件名" Binding="{Binding Title}" Width="*" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Border>
             </Grid>
         </Grid>
     </DockPanel>

@@ -4,6 +4,10 @@ public sealed class CalendarEvent
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string? GoogleEventId { get; set; }
+    public string? RecurringEventId { get; set; }
+    public string? RecurringParentId { get; set; }
+    public DateTimeOffset? OriginalStart { get; set; }
+    public bool IsRecurrenceException { get; set; }
     public string CalendarId { get; set; } = GoogleCalendarDefaults.PrimaryCalendarId;
     public string Title { get; set; } = "";
     public string? Description { get; set; }
@@ -19,6 +23,7 @@ public sealed class CalendarEvent
     public bool IsDirty { get; set; } = true;
     public bool IsTodoLike { get; set; }
     public string DisplayColor { get; set; } = "#E5E7EB";
+    public bool IsGeneratedOccurrence { get; set; }
 
     public string SearchText => $"{Title} {Description} {Location}".Trim();
     public string CalendarDisplayText => IsAllDay ? Title : $"{Start:HH:mm} {Title}";
@@ -28,4 +33,6 @@ public sealed class CalendarEvent
     public int TodoProgress => TodoMetadata?.Progress ?? 0;
     public string TodoProgressText => TodoMetadata?.ProgressText ?? "";
     public bool IsTodoDone => TodoMetadata?.IsDone == true;
+    public bool IsRecurringMaster => !string.IsNullOrWhiteSpace(RecurrenceJson) && !IsRecurrenceException;
+    public bool IsRecurringSeriesItem => IsRecurringMaster || IsRecurrenceException || IsGeneratedOccurrence || !string.IsNullOrWhiteSpace(RecurringEventId) || !string.IsNullOrWhiteSpace(RecurringParentId);
 }

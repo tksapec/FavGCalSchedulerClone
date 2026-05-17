@@ -13,6 +13,8 @@ public sealed class CalendarRepository
         _databasePath = databasePath ?? AppPaths.DatabasePath;
     }
 
+    public string DatabasePath => _databasePath;
+
     public async Task InitializeAsync()
     {
         AppPaths.Ensure();
@@ -21,6 +23,10 @@ public sealed class CalendarRepository
             CREATE TABLE IF NOT EXISTS events (
                 id TEXT PRIMARY KEY,
                 google_event_id TEXT,
+                recurring_event_id TEXT,
+                recurring_parent_id TEXT,
+                original_start TEXT,
+                is_recurrence_exception INTEGER NOT NULL DEFAULT 0,
                 calendar_id TEXT NOT NULL,
                 title TEXT NOT NULL,
                 description TEXT,
@@ -37,8 +43,11 @@ public sealed class CalendarRepository
                 is_todo_like INTEGER NOT NULL
             );
             """);
+        await EnsureEventColumnsAsync(connection);
         await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_events_dates ON events(start, end);");
         await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_events_google ON events(calendar_id, google_event_id);");
+        await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_events_recurring_parent ON events(recurring_parent_id, original_start);");
+        await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_events_recurring_event ON events(recurring_event_id, original_start);");
         await ExecuteAsync(connection, "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);");
         await ExecuteAsync(connection, "CREATE TABLE IF NOT EXISTS tags (name TEXT PRIMARY KEY, color TEXT NOT NULL, is_visible INTEGER NOT NULL, priority INTEGER NOT NULL);");
         await SeedTagsAsync(connection);
@@ -105,10 +114,13 @@ public sealed class CalendarRepository
         await using var connection = OpenConnection();
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, google_event_id, calendar_id, title, description, location, start, end, is_all_day,
+            SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
+                   calendar_id, title, description, location, start, end, is_all_day,
                    color_id, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
             FROM events
-            WHERE start < $end AND end > $start
+            WHERE ((start < $end AND end > $start)
+                OR recurrence_json IS NOT NULL
+                OR is_recurrence_exception = 1)
               AND ($includeDeleted = 1 OR is_deleted = 0)
             ORDER BY start, title
             """;
@@ -123,12 +135,99 @@ public sealed class CalendarRepository
         await using var connection = OpenConnection();
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, google_event_id, calendar_id, title, description, location, start, end, is_all_day,
+            SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
+                   calendar_id, title, description, location, start, end, is_all_day,
                    color_id, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
             FROM events
             WHERE is_dirty = 1
             ORDER BY updated_at
             """;
+        return await ReadEventsAsync(command);
+    }
+
+    public async Task<CalendarEvent?> FindEventByGoogleEventIdAsync(string calendarId, string? googleEventId)
+    {
+        if (string.IsNullOrWhiteSpace(googleEventId))
+        {
+            return null;
+        }
+
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
+                   calendar_id, title, description, location, start, end, is_all_day,
+                   color_id, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
+            FROM events
+            WHERE calendar_id = $calendar_id AND google_event_id = $google_event_id
+            LIMIT 1
+            """;
+        command.Parameters.AddWithValue("$calendar_id", calendarId);
+        command.Parameters.AddWithValue("$google_event_id", googleEventId);
+        return (await ReadEventsAsync(command)).FirstOrDefault();
+    }
+
+    public async Task<CalendarEvent?> FindDuplicateEventAsync(CalendarEvent calendarEvent)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
+                   calendar_id, title, description, location, start, end, is_all_day,
+                   color_id, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
+            FROM events
+            WHERE calendar_id = $calendar_id
+              AND title = $title
+              AND start = $start
+              AND end = $end
+              AND COALESCE(location, '') = COALESCE($location, '')
+              AND is_deleted = 0
+            LIMIT 1
+            """;
+        command.Parameters.AddWithValue("$calendar_id", calendarEvent.CalendarId);
+        command.Parameters.AddWithValue("$title", calendarEvent.Title);
+        command.Parameters.AddWithValue("$start", calendarEvent.Start.ToString("O"));
+        command.Parameters.AddWithValue("$end", calendarEvent.End.ToString("O"));
+        command.Parameters.AddWithValue("$location", (object?)calendarEvent.Location ?? DBNull.Value);
+        return (await ReadEventsAsync(command)).FirstOrDefault();
+    }
+
+    public async Task<CalendarEvent?> FindMasterByIdAsync(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return null;
+        }
+
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
+                   calendar_id, title, description, location, start, end, is_all_day,
+                   color_id, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
+            FROM events
+            WHERE id = $id
+            LIMIT 1
+            """;
+        command.Parameters.AddWithValue("$id", id);
+        return (await ReadEventsAsync(command)).FirstOrDefault();
+    }
+
+    public async Task<IReadOnlyList<CalendarEvent>> LoadSeriesEventsAsync(string? recurringParentId, string? recurringEventId)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
+                   calendar_id, title, description, location, start, end, is_all_day,
+                   color_id, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
+            FROM events
+            WHERE ($recurring_parent_id IS NOT NULL AND recurring_parent_id = $recurring_parent_id)
+               OR ($recurring_event_id IS NOT NULL AND recurring_event_id = $recurring_event_id)
+            ORDER BY original_start, start
+            """;
+        command.Parameters.AddWithValue("$recurring_parent_id", (object?)recurringParentId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$recurring_event_id", (object?)recurringEventId ?? DBNull.Value);
         return await ReadEventsAsync(command);
     }
 
@@ -210,10 +309,12 @@ public sealed class CalendarRepository
         await using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT OR REPLACE INTO events(
-                id, google_event_id, calendar_id, title, description, location, start, end, is_all_day,
+                id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
+                calendar_id, title, description, location, start, end, is_all_day,
                 color_id, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like)
             VALUES(
-                $id, $google_event_id, $calendar_id, $title, $description, $location, $start, $end, $is_all_day,
+                $id, $google_event_id, $recurring_event_id, $recurring_parent_id, $original_start, $is_recurrence_exception,
+                $calendar_id, $title, $description, $location, $start, $end, $is_all_day,
                 $color_id, $recurrence_json, $is_deleted, $updated_at, $last_synced_at, $is_dirty, $is_todo_like)
             """;
         AddEventParameters(command, calendarEvent);
@@ -282,20 +383,24 @@ public sealed class CalendarRepository
             {
                 Id = reader.GetString(0),
                 GoogleEventId = reader.IsDBNull(1) ? null : reader.GetString(1),
-                CalendarId = reader.GetString(2),
-                Title = reader.GetString(3),
-                Description = reader.IsDBNull(4) ? null : reader.GetString(4),
-                Location = reader.IsDBNull(5) ? null : reader.GetString(5),
-                Start = DateTimeOffset.Parse(reader.GetString(6)),
-                End = DateTimeOffset.Parse(reader.GetString(7)),
-                IsAllDay = reader.GetInt32(8) != 0,
-                ColorId = reader.IsDBNull(9) ? null : reader.GetString(9),
-                RecurrenceJson = reader.IsDBNull(10) ? null : reader.GetString(10),
-                IsDeleted = reader.GetInt32(11) != 0,
-                UpdatedAt = DateTimeOffset.Parse(reader.GetString(12)),
-                LastSyncedAt = reader.IsDBNull(13) ? null : DateTimeOffset.Parse(reader.GetString(13)),
-                IsDirty = reader.GetInt32(14) != 0,
-                IsTodoLike = reader.GetInt32(15) != 0
+                RecurringEventId = reader.IsDBNull(2) ? null : reader.GetString(2),
+                RecurringParentId = reader.IsDBNull(3) ? null : reader.GetString(3),
+                OriginalStart = reader.IsDBNull(4) ? null : DateTimeOffset.Parse(reader.GetString(4)),
+                IsRecurrenceException = reader.GetInt32(5) != 0,
+                CalendarId = reader.GetString(6),
+                Title = reader.GetString(7),
+                Description = reader.IsDBNull(8) ? null : reader.GetString(8),
+                Location = reader.IsDBNull(9) ? null : reader.GetString(9),
+                Start = DateTimeOffset.Parse(reader.GetString(10)),
+                End = DateTimeOffset.Parse(reader.GetString(11)),
+                IsAllDay = reader.GetInt32(12) != 0,
+                ColorId = reader.IsDBNull(13) ? null : reader.GetString(13),
+                RecurrenceJson = reader.IsDBNull(14) ? null : reader.GetString(14),
+                IsDeleted = reader.GetInt32(15) != 0,
+                UpdatedAt = DateTimeOffset.Parse(reader.GetString(16)),
+                LastSyncedAt = reader.IsDBNull(17) ? null : DateTimeOffset.Parse(reader.GetString(17)),
+                IsDirty = reader.GetInt32(18) != 0,
+                IsTodoLike = reader.GetInt32(19) != 0
             });
         }
 
@@ -306,6 +411,10 @@ public sealed class CalendarRepository
     {
         command.Parameters.AddWithValue("$id", calendarEvent.Id);
         command.Parameters.AddWithValue("$google_event_id", (object?)calendarEvent.GoogleEventId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$recurring_event_id", (object?)calendarEvent.RecurringEventId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$recurring_parent_id", (object?)calendarEvent.RecurringParentId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$original_start", calendarEvent.OriginalStart?.ToString("O") ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$is_recurrence_exception", calendarEvent.IsRecurrenceException ? 1 : 0);
         command.Parameters.AddWithValue("$calendar_id", calendarEvent.CalendarId);
         command.Parameters.AddWithValue("$title", calendarEvent.Title);
         command.Parameters.AddWithValue("$description", (object?)calendarEvent.Description ?? DBNull.Value);
@@ -320,5 +429,29 @@ public sealed class CalendarRepository
         command.Parameters.AddWithValue("$last_synced_at", calendarEvent.LastSyncedAt?.ToString("O") ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$is_dirty", calendarEvent.IsDirty ? 1 : 0);
         command.Parameters.AddWithValue("$is_todo_like", calendarEvent.IsTodoLike ? 1 : 0);
+    }
+
+    private static async Task EnsureEventColumnsAsync(SqliteConnection connection)
+    {
+        await EnsureColumnAsync(connection, "events", "recurring_event_id", "TEXT");
+        await EnsureColumnAsync(connection, "events", "recurring_parent_id", "TEXT");
+        await EnsureColumnAsync(connection, "events", "original_start", "TEXT");
+        await EnsureColumnAsync(connection, "events", "is_recurrence_exception", "INTEGER NOT NULL DEFAULT 0");
+    }
+
+    private static async Task EnsureColumnAsync(SqliteConnection connection, string tableName, string columnName, string sqlDefinition)
+    {
+        await using var pragma = connection.CreateCommand();
+        pragma.CommandText = $"PRAGMA table_info({tableName})";
+        await using var reader = await pragma.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            if (string.Equals(reader.GetString(1), columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+        }
+
+        await ExecuteAsync(connection, $"ALTER TABLE {tableName} ADD COLUMN {columnName} {sqlDefinition};");
     }
 }
