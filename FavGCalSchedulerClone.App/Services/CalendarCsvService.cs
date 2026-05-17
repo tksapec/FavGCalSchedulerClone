@@ -138,6 +138,11 @@ public sealed class CalendarCsvService
                 throw new FormatException("TodoProgress must be a number.");
             }
 
+            if (todoProgress is < 0 or > 100)
+            {
+                throw new InvalidDataException("TodoProgress must be between 0 and 100.");
+            }
+
             description = TagService.UpdateTodoMarker(description, todoPriority, todoProgress);
         }
 

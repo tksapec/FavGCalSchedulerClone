@@ -200,58 +200,36 @@ internal static class RecurrenceRuleHelper
         DateTimeOffset rangeStart,
         DateTimeOffset rangeEnd)
     {
-        var yielded = 0;
-        switch (rule.Frequency)
+        var totalOccurrences = 0;
+        foreach (var occurrence in GenerateOccurrences(seriesStart, isAllDay, rule, rangeEnd))
         {
-            case RecurrenceFrequency.Daily:
-                foreach (var occurrence in ExpandDaily(seriesStart, isAllDay, rule, rangeStart, rangeEnd))
-                {
-                    yielded++;
-                    if (rule.Count is int count && yielded > count)
-                    {
-                        yield break;
-                    }
+            totalOccurrences++;
+            if (rule.Count is int count && totalOccurrences > count)
+            {
+                yield break;
+            }
 
-                    yield return occurrence;
-                }
-                break;
-            case RecurrenceFrequency.Weekly:
-                foreach (var occurrence in ExpandWeekly(seriesStart, isAllDay, rule, rangeStart, rangeEnd))
-                {
-                    yielded++;
-                    if (rule.Count is int count && yielded > count)
-                    {
-                        yield break;
-                    }
-
-                    yield return occurrence;
-                }
-                break;
-            case RecurrenceFrequency.Monthly:
-                foreach (var occurrence in ExpandMonthly(seriesStart, isAllDay, rule, rangeStart, rangeEnd))
-                {
-                    yielded++;
-                    if (rule.Count is int count && yielded > count)
-                    {
-                        yield break;
-                    }
-
-                    yield return occurrence;
-                }
-                break;
-            case RecurrenceFrequency.Yearly:
-                foreach (var occurrence in ExpandYearly(seriesStart, isAllDay, rule, rangeStart, rangeEnd))
-                {
-                    yielded++;
-                    if (rule.Count is int count && yielded > count)
-                    {
-                        yield break;
-                    }
-
-                    yield return occurrence;
-                }
-                break;
+            if (occurrence >= rangeStart && occurrence < rangeEnd)
+            {
+                yield return occurrence;
+            }
         }
+    }
+
+    private static IEnumerable<DateTimeOffset> GenerateOccurrences(
+        DateTimeOffset seriesStart,
+        bool isAllDay,
+        RecurrenceRuleDefinition rule,
+        DateTimeOffset rangeEnd)
+    {
+        return rule.Frequency switch
+        {
+            RecurrenceFrequency.Daily => ExpandDaily(seriesStart, isAllDay, rule, seriesStart, rangeEnd),
+            RecurrenceFrequency.Weekly => ExpandWeekly(seriesStart, isAllDay, rule, seriesStart, rangeEnd),
+            RecurrenceFrequency.Monthly => ExpandMonthly(seriesStart, isAllDay, rule, seriesStart, rangeEnd),
+            RecurrenceFrequency.Yearly => ExpandYearly(seriesStart, isAllDay, rule, seriesStart, rangeEnd),
+            _ => []
+        };
     }
 
     public static string? BuildSplitSourceRecurrenceJson(CalendarEvent masterEvent, DateTimeOffset occurrenceStart)

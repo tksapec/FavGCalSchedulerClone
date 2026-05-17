@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Windows.Input;
 
 namespace FavGCalSchedulerClone.App.ViewModels;
@@ -6,12 +7,14 @@ public sealed class AsyncRelayCommand : ICommand
 {
     private readonly Func<Task> _execute;
     private readonly Func<bool>? _canExecute;
+    private readonly Func<Exception, Task>? _onException;
     private bool _isRunning;
 
-    public AsyncRelayCommand(Func<Task> execute, Func<bool>? canExecute = null)
+    public AsyncRelayCommand(Func<Task> execute, Func<bool>? canExecute = null, Func<Exception, Task>? onException = null)
     {
         _execute = execute;
         _canExecute = canExecute;
+        _onException = onException;
     }
 
     public event EventHandler? CanExecuteChanged;
@@ -30,6 +33,14 @@ public sealed class AsyncRelayCommand : ICommand
             _isRunning = true;
             RaiseCanExecuteChanged();
             await _execute();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(ex);
+            if (_onException is not null)
+            {
+                await _onException(ex);
+            }
         }
         finally
         {

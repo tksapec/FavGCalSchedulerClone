@@ -24,14 +24,17 @@ public sealed class BackupService
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(backupZipPath))!);
         var tempZipPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(backupZipPath))!, $"{Path.GetFileName(backupZipPath)}.{Guid.NewGuid():N}.tmp");
+        var tempDatabasePath = Path.Combine(Path.GetTempPath(), $"{Path.GetFileName(databasePath)}.backup-{Guid.NewGuid():N}.tmp");
 
         try
         {
+            await CreateConsistentDatabaseCopyAsync(databasePath, tempDatabasePath, cancellationToken);
+
             await using (var fileStream = new FileStream(tempZipPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
             using (var archive = new ZipArchive(fileStream, ZipArchiveMode.Create))
             {
                 var dbEntry = archive.CreateEntry(DatabaseEntryName, CompressionLevel.Optimal);
-                await using (var source = new FileStream(databasePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                await using (var source = new FileStream(tempDatabasePath, FileMode.Open, FileAccess.Read, FileShare.Read))
                 await using (var destination = dbEntry.Open())
                 {
                     await source.CopyToAsync(destination, cancellationToken);
@@ -58,6 +61,13 @@ public sealed class BackupService
             }
 
             throw;
+        }
+        finally
+        {
+            if (File.Exists(tempDatabasePath))
+            {
+                File.Delete(tempDatabasePath);
+            }
         }
     }
 
@@ -121,6 +131,33 @@ public sealed class BackupService
         if (manifestEntry is null || dbEntry is null)
         {
             throw new InvalidDataException("The selected file is not a FavGCalSchedulerClone backup.");
+        }
+    }
+
+    private static async Task CreateConsistentDatabaseCopyAsync(string databasePath, string destinationPath, CancellationToken cancellationToken)
+    {
+        SqliteConnection.ClearAllPools();
+        try
+        {
+            await using var connection = new SqliteConnection($"Data Source={databasePath}");
+            await connection.OpenAsync(cancellationToken);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "VACUUM INTO $destination";
+            command.Parameters.AddWithValue("$destination", destinationPath);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            SqliteConnection.ClearAllPools();
+            File.Copy(databasePath, destinationPath, true);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
         }
     }
 }

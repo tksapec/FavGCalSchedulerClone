@@ -8,10 +8,9 @@ public static class RecurrenceExpansionService
     {
         var source = storedEvents.ToArray();
         var recurringMasters = source.Where(item => item.IsRecurringMaster && !item.IsDeleted).ToArray();
-        var exceptionsByParent = source
-            .Where(item => item.IsRecurrenceException && (!item.IsDeleted || item.IsDeleted))
-            .GroupBy(GetSeriesKey)
-            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
+        var recurrenceExceptions = source
+            .Where(item => item.IsRecurrenceException)
+            .ToArray();
 
         var results = new List<CalendarEvent>();
 
@@ -25,8 +24,9 @@ public static class RecurrenceExpansionService
 
         foreach (var master in recurringMasters)
         {
-            var key = GetSeriesKey(master);
-            var seriesExceptions = exceptionsByParent.TryGetValue(key, out var values) ? values : [];
+            var seriesExceptions = recurrenceExceptions
+                .Where(item => BelongsToMaster(item, master))
+                .ToArray();
 
             foreach (var occurrenceStart in RecurrenceRuleHelper.ExpandOccurrences(master, rangeStart, rangeEnd))
             {
@@ -73,11 +73,19 @@ public static class RecurrenceExpansionService
             .ToArray();
     }
 
-    private static string GetSeriesKey(CalendarEvent calendarEvent)
+    private static bool BelongsToMaster(CalendarEvent exception, CalendarEvent master)
     {
-        return calendarEvent.RecurringParentId
-            ?? calendarEvent.RecurringEventId
-            ?? calendarEvent.Id;
+        return MatchesKey(exception.RecurringParentId, master.Id)
+            || MatchesKey(exception.RecurringParentId, master.GoogleEventId)
+            || MatchesKey(exception.RecurringEventId, master.Id)
+            || MatchesKey(exception.RecurringEventId, master.GoogleEventId);
+    }
+
+    private static bool MatchesKey(string? left, string? right)
+    {
+        return !string.IsNullOrWhiteSpace(left)
+            && !string.IsNullOrWhiteSpace(right)
+            && string.Equals(left, right, StringComparison.Ordinal);
     }
 
     private static CalendarEvent Clone(CalendarEvent source)

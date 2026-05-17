@@ -519,9 +519,9 @@ public partial class MainWindow : Window
         var root = CreateDialogRoot();
         window.Content = root;
 
-        var sourceFolder = new TextBox { Text = @"C:\Users\e1399\Documents\FavGCalScheduler" };
+        var sourceFolder = new TextBox { Text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "FavGCalScheduler") };
         var oauthPath = new TextBox { Text = _viewModel.OAuthClientJsonPath };
-        var comparisonZip = new TextBox { Text = @"C:\Users\e1399\Desktop\e1399068@gmail.com.ical.zip" };
+        var comparisonZip = new TextBox { Text = "" };
         var targetCalendar = new ComboBox
         {
             ItemsSource = _viewModel.AvailableCalendars,

@@ -78,6 +78,24 @@ public sealed class CalendarCsvServiceTests
     }
 
     [Fact]
+    public async Task ImportAsync_ReturnsRowErrorForTodoProgressOutsideRange()
+    {
+        var csvPath = Path.Combine(CreateTempDirectory(), "invalid-progress.csv");
+        await File.WriteAllTextAsync(csvPath, string.Join(Environment.NewLine,
+        [
+            string.Join(",", CalendarCsvService.Headers),
+            "ToDo,隧ｳ邏ｰ,,2026-05-17T00:00:00+09:00,2026-05-18T00:00:00+09:00,true,primary,,#private,A,101"
+        ]), Encoding.UTF8);
+
+        var result = await new CalendarCsvService().ImportAsync(csvPath);
+
+        Assert.Empty(result.Events);
+        var error = Assert.Single(result.Errors);
+        Assert.Equal(2, error.RowNumber);
+        Assert.Contains("TodoProgress", error.Message);
+    }
+
+    [Fact]
     public async Task ImportCsvAsync_SavesImportedEventsAsDirty()
     {
         var directory = CreateTempDirectory();

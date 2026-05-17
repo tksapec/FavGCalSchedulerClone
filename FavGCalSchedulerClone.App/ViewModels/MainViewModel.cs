@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Globalization;
 using FavGCalSchedulerClone.App.Models;
 using FavGCalSchedulerClone.App.Services;
@@ -34,6 +35,7 @@ public sealed class MainViewModel : ObservableObject
     private DateTime? _pendingSelectedDate;
     private CalendarViewMode _currentViewMode = CalendarViewMode.Month;
     private string _editorCalendarId = GoogleCalendarDefaults.PrimaryCalendarId;
+    private int _refreshGeneration;
 
     public MainViewModel(CalendarRepository repository, GoogleCalendarSyncService syncService)
     {
@@ -142,7 +144,7 @@ public sealed class MainViewModel : ObservableObject
             {
                 OnPropertyChanged(nameof(MonthTitle));
                 OnPropertyChanged(nameof(JapaneseMonthTitle));
-                _ = RefreshCalendarAsync();
+                StartRefreshCalendar();
             }
         }
     }
@@ -623,17 +625,43 @@ public sealed class MainViewModel : ObservableObject
         await RefreshCalendarAsync();
     }
 
+    private void StartRefreshCalendar()
+    {
+        _ = RefreshCalendarSafelyAsync();
+    }
+
+    private async Task RefreshCalendarSafelyAsync()
+    {
+        try
+        {
+            await RefreshCalendarAsync();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(ex);
+            Status = "カレンダー表示の更新に失敗しました。";
+        }
+    }
+
     private async Task RefreshCalendarAsync()
     {
+        var generation = Interlocked.Increment(ref _refreshGeneration);
         _settings.DisplayMonth = CurrentMonth;
         await _repository.SaveSettingsAsync(_settings);
 
         var (gridStart, gridEnd) = DateRangeHelper.MonthGridRange(CurrentMonth);
-        _storedEvents = await _repository.LoadEventsAsync(new DateTimeOffset(gridStart), new DateTimeOffset(gridEnd), includeDeleted: true);
-        _visibleEvents = RecurrenceExpansionService
-            .ExpandForRange(_storedEvents, new DateTimeOffset(gridStart), new DateTimeOffset(gridEnd))
+        var storedEvents = await _repository.LoadEventsAsync(new DateTimeOffset(gridStart), new DateTimeOffset(gridEnd), includeDeleted: true);
+        var visibleEvents = RecurrenceExpansionService
+            .ExpandForRange(storedEvents, new DateTimeOffset(gridStart), new DateTimeOffset(gridEnd))
             .Where(IsVisible)
             .ToArray();
+        if (generation != _refreshGeneration)
+        {
+            return;
+        }
+
+        _storedEvents = storedEvents;
+        _visibleEvents = visibleEvents;
         ApplyDisplayColors(_visibleEvents);
 
         CalendarDays.Clear();
@@ -759,7 +787,7 @@ public sealed class MainViewModel : ObservableObject
     {
         _pendingSelectedDate = targetDate.Date;
         SetCurrentMonthWithoutRefreshing(targetDate.Date);
-        _ = RefreshCalendarAsync();
+        StartRefreshCalendar();
     }
 
     private void RefreshVisibleCalendarDays()
@@ -1285,64 +1313,6 @@ public sealed class MainViewModel : ObservableObject
         };
     }
 
-    private async Task SaveEventAsync()
-    {
-        if (string.IsNullOrWhiteSpace(Title))
-        {
-            Status = "件名を入力してください。";
-            return;
-        }
-
-        var calendarEvent = SelectedEvent ?? new CalendarEvent();
-        calendarEvent.Title = Title.Trim();
-        calendarEvent.Description = string.IsNullOrWhiteSpace(Description) ? null : Description.Trim();
-        calendarEvent.Location = string.IsNullOrWhiteSpace(Location) ? null : Location.Trim();
-        calendarEvent.CalendarId = ResolveEditorCalendarId();
-        calendarEvent.IsAllDay = IsAllDay;
-        calendarEvent.IsDirty = true;
-        calendarEvent.IsDeleted = false;
-
-        if (IsAllDay)
-        {
-            calendarEvent.Start = new DateTimeOffset(StartDate.Date);
-            calendarEvent.End = new DateTimeOffset(EndDate.Date.AddDays(1));
-        }
-        else
-        {
-            if (!TimeSpan.TryParse(StartTime, out var startTime) || !TimeSpan.TryParse(EndTime, out var endTime))
-            {
-                Status = "時刻は HH:mm 形式で入力してください。";
-                return;
-            }
-
-            calendarEvent.Start = new DateTimeOffset(StartDate.Date.Add(startTime));
-            calendarEvent.End = new DateTimeOffset(EndDate.Date.Add(endTime));
-            if (calendarEvent.End <= calendarEvent.Start)
-            {
-                Status = "終了日時は開始日時より後にしてください。";
-                return;
-            }
-        }
-
-        await _repository.SaveEventAsync(calendarEvent);
-        SelectedEvent = calendarEvent;
-        await RefreshCalendarAsync();
-        Status = "スケジュールを保存しました。同期するとGoogleカレンダーへ反映されます。";
-    }
-
-    private async Task DeleteEventAsync()
-    {
-        if (SelectedEvent is null)
-        {
-            return;
-        }
-
-        await _repository.DeleteEventAsync(SelectedEvent);
-        SelectedEvent = null;
-        await RefreshCalendarAsync();
-        Status = "スケジュールを削除しました。同期するとGoogleカレンダーへ反映されます。";
-    }
-
     private async Task BrowseOAuthClientAsync()
     {
         var dialog = new OpenFileDialog
@@ -1438,8 +1408,10 @@ public sealed class MainViewModel : ObservableObject
             {
                 calendars = await _syncService.ListCalendarsAsync(_settings.OAuthClientJsonPath);
             }
-            catch
+            catch (Exception ex)
             {
+                Debug.WriteLine(ex);
+                Status = "Googleカレンダー一覧を取得できませんでした。OAuth設定またはネットワークを確認してください。";
                 calendars = [];
             }
         }
