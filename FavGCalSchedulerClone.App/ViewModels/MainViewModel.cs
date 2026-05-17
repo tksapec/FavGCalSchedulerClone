@@ -176,14 +176,19 @@ public sealed class MainViewModel : ObservableObject
         {
             if (SetProperty(ref _selectedDay, value))
             {
+                if (SelectedEvent is not null && (value is null || !DateRangeHelper.OccursOn(SelectedEvent, value.Date)))
+                {
+                    SelectedEvent = null;
+                }
+
                 RefreshSelectedDayEvents();
                 RefreshSevenDayEvents();
-                RefreshVisibleCalendarDays();
                 OnPropertyChanged(nameof(CurrentPeriodTitle));
                 if (value is not null)
                 {
                     StartDate = value.Date;
                     EndDate = value.Date;
+                    Status = $"{value.Date:yyyy/MM/dd} を選択しました。";
                 }
             }
         }
@@ -322,13 +327,30 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        _pendingSelectedDate = occurrenceStart.Date;
-        SetCurrentMonthWithoutRefreshing(occurrenceStart.Date);
-        await RefreshCalendarAsync();
+        await NavigateToDateAsync(occurrenceStart.Date);
         SelectedEvent = _visibleEvents.FirstOrDefault(item =>
                 string.Equals(item.Id, eventId, StringComparison.Ordinal)
                 && item.Start.Date == occurrenceStart.Date)
             ?? _visibleEvents.FirstOrDefault(item => string.Equals(item.Id, eventId, StringComparison.Ordinal));
+    }
+
+    public async Task NavigateToDateAsync(DateTime targetDate)
+    {
+        _pendingSelectedDate = targetDate.Date;
+        SetCurrentMonthWithoutRefreshing(targetDate.Date);
+        await RefreshCalendarAsync();
+    }
+
+    public void SelectEvent(CalendarEvent calendarEvent, bool selectEventDay = true)
+    {
+        if (selectEventDay)
+        {
+            var day = CalendarDays.FirstOrDefault(d => DateRangeHelper.OccursOn(calendarEvent, d.Date))
+                ?? FindOrCreateCalendarDay(calendarEvent.Start.Date);
+            SelectedDay = day;
+        }
+
+        SelectedEvent = calendarEvent;
     }
 
     public void BeginNewEvent(DateTime date)

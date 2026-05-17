@@ -94,7 +94,33 @@ public partial class MainWindow : Window
 
     private async void DayList_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
+        _viewModel.SelectedEvent = null;
         await ShowScheduleDialogAsync();
+    }
+
+    private void DayCell_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: CalendarDay day })
+        {
+            _viewModel.SelectedDay = day;
+            _viewModel.SelectedEvent = null;
+        }
+    }
+
+    private async void EventBar_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: CalendarEvent calendarEvent })
+        {
+            return;
+        }
+
+        _viewModel.SelectEvent(calendarEvent);
+        e.Handled = true;
+
+        if (e.ClickCount >= 2)
+        {
+            await OpenSelectedEventEditorAsync();
+        }
     }
 
     private async void AddScheduleMenu_Click(object sender, RoutedEventArgs e)
@@ -301,11 +327,31 @@ public partial class MainWindow : Window
 
     private async void SelectedDayEventsGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
+        await OpenSelectedEventEditorAsync();
+    }
+
+    private async void TodoEventsGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        await OpenSelectedEventEditorAsync();
+    }
+
+    private async Task OpenSelectedEventEditorAsync()
+    {
         if (_viewModel.SelectedEvent is null)
         {
             return;
         }
 
+        var calendarEvent = _viewModel.SelectedEvent;
+        await _viewModel.NavigateToDateAsync(calendarEvent.Start.Date);
+        _viewModel.SelectEvent(calendarEvent);
+        await ShowScheduleDialogAsync();
+    }
+
+    private async Task OpenCalendarEventEditorAsync(CalendarEvent calendarEvent)
+    {
+        await _viewModel.NavigateToDateAsync(calendarEvent.Start.Date);
+        _viewModel.SelectEvent(calendarEvent);
         await ShowScheduleDialogAsync();
     }
 
@@ -649,6 +695,7 @@ public partial class MainWindow : Window
         var events = string.IsNullOrWhiteSpace(query)
             ? await _viewModel.LoadYearEventsAsync(_viewModel.CurrentMonth)
             : await _viewModel.SearchYearEventsAsync(_viewModel.CurrentMonth, query);
+        var eventItems = new ObservableCollection<CalendarEvent>(events);
 
         var window = CreateOwnedDialog(title, 840, 540);
         var panel = new DockPanel { Margin = new Thickness(12), LastChildFill = true };
@@ -663,12 +710,29 @@ public partial class MainWindow : Window
 
         var grid = new DataGrid
         {
-            ItemsSource = new ObservableCollection<CalendarEvent>(events),
+            ItemsSource = eventItems,
             AutoGenerateColumns = false,
             CanUserAddRows = false,
             IsReadOnly = true,
             HeadersVisibility = DataGridHeadersVisibility.Column,
             RowHeight = 24
+        };
+        grid.MouseDoubleClick += async (_, _) =>
+        {
+            if (grid.SelectedItem is not CalendarEvent calendarEvent)
+            {
+                return;
+            }
+
+            await OpenCalendarEventEditorAsync(calendarEvent);
+            eventItems.Clear();
+            var refreshedEvents = string.IsNullOrWhiteSpace(query)
+                ? await _viewModel.LoadYearEventsAsync(_viewModel.CurrentMonth)
+                : await _viewModel.SearchYearEventsAsync(_viewModel.CurrentMonth, query);
+            foreach (var refreshedEvent in refreshedEvents)
+            {
+                eventItems.Add(refreshedEvent);
+            }
         };
         grid.Columns.Add(new DataGridTextColumn { Header = "日時", Binding = new Binding(nameof(CalendarEvent.DateDisplayText)), Width = 150 });
         grid.Columns.Add(new DataGridTextColumn { Header = "カレンダー", Binding = new Binding(nameof(CalendarEvent.CalendarId)), Width = 150 });

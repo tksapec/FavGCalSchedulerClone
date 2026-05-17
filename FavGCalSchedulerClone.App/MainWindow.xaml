@@ -242,7 +242,7 @@
                                 <TextBlock Text="Sat" Foreground="#1D4ED8" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
                             </UniformGrid>
 
-                            <ListBox x:Name="DayList" Grid.Row="1" ItemsSource="{Binding VisibleCalendarDays}" SelectedItem="{Binding SelectedDay}"
+                            <ListBox x:Name="DayList" Grid.Row="1" ItemsSource="{Binding VisibleCalendarDays}" SelectedItem="{Binding SelectedDay, Mode=TwoWay}"
                                      BorderThickness="0" Background="Transparent" ScrollViewer.VerticalScrollBarVisibility="Disabled"
                                      MouseDoubleClick="DayList_MouseDoubleClick">
                                 <ListBox.ItemsPanel>
@@ -270,14 +270,14 @@
                                 </ListBox.ItemContainerStyle>
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
-                                        <Border Style="{StaticResource DayCell}">
+                                        <Border Style="{StaticResource DayCell}" MouseLeftButtonDown="DayCell_MouseLeftButtonDown">
                                             <DockPanel LastChildFill="True">
                                                 <TextBlock DockPanel.Dock="Top" Text="{Binding Date.Day}" Foreground="#334155"
                                                            FontSize="15" FontWeight="SemiBold" />
                                                 <ItemsControl ItemsSource="{Binding Events}" Margin="0,4,0,0">
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate>
-                                                            <Border Style="{StaticResource EventBar}" Background="{Binding DisplayColor}">
+                                                            <Border Style="{StaticResource EventBar}" Background="{Binding DisplayColor}" MouseLeftButtonDown="EventBar_MouseLeftButtonDown">
                                                                 <TextBlock Text="{Binding CalendarDisplayText}" FontSize="11" Foreground="#111827"
                                                                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                                             </Border>
@@ -309,7 +309,7 @@
                                 <TextBlock Text="Sat" Foreground="#1D4ED8" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
                             </UniformGrid>
 
-                            <ListBox Grid.Row="1" ItemsSource="{Binding VisibleCalendarDays}" SelectedItem="{Binding SelectedDay}"
+                            <ListBox Grid.Row="1" ItemsSource="{Binding VisibleCalendarDays}" SelectedItem="{Binding SelectedDay, Mode=TwoWay}"
                                      BorderThickness="0" Background="Transparent" ScrollViewer.VerticalScrollBarVisibility="Disabled"
                                      MouseDoubleClick="DayList_MouseDoubleClick">
                                 <ListBox.ItemsPanel>
@@ -337,14 +337,14 @@
                                 </ListBox.ItemContainerStyle>
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
-                                        <Border Style="{StaticResource DayCell}">
+                                        <Border Style="{StaticResource DayCell}" MouseLeftButtonDown="DayCell_MouseLeftButtonDown">
                                             <DockPanel LastChildFill="True">
                                                 <TextBlock DockPanel.Dock="Top" Text="{Binding Date.Day}" Foreground="#334155"
                                                            FontSize="16" FontWeight="SemiBold" />
                                                 <ItemsControl ItemsSource="{Binding Events}" Margin="0,4,0,0">
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate>
-                                                            <Border Style="{StaticResource EventBar}" Background="{Binding DisplayColor}">
+                                                            <Border Style="{StaticResource EventBar}" Background="{Binding DisplayColor}" MouseLeftButtonDown="EventBar_MouseLeftButtonDown">
                                                                 <TextBlock Text="{Binding CalendarDisplayText}" FontSize="11" Foreground="#111827"
                                                                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                                             </Border>
@@ -367,7 +367,8 @@
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
                             <TextBlock Text="{Binding CurrentPeriodTitle}" FontSize="20" FontWeight="SemiBold" Foreground="#1E293B" Margin="0,0,0,10" />
-                            <DataGrid Grid.Row="1" ItemsSource="{Binding SelectedDayEvents}" SelectedItem="{Binding SelectedEvent}">
+                            <DataGrid Grid.Row="1" ItemsSource="{Binding SelectedDayEvents}" SelectedItem="{Binding SelectedEvent}"
+                                      MouseDoubleClick="SelectedDayEventsGrid_MouseDoubleClick">
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="日時" Binding="{Binding DateDisplayText}" Width="180" />
                                     <DataGridTextColumn Header="件名" Binding="{Binding Title}" Width="220" />
@@ -412,7 +413,8 @@
                                     <RowDefinition Height="*" />
                                 </Grid.RowDefinitions>
                                 <TextBlock Text="未完了タスク" FontSize="13" FontWeight="SemiBold" Foreground="#1E293B" Margin="0,0,0,8" />
-                                <DataGrid Grid.Row="1" ItemsSource="{Binding TodoEvents}" SelectedItem="{Binding SelectedEvent}">
+                                <DataGrid Grid.Row="1" ItemsSource="{Binding TodoEvents}" SelectedItem="{Binding SelectedEvent}"
+                                          MouseDoubleClick="TodoEventsGrid_MouseDoubleClick">
                                     <DataGrid.Columns>
                                         <DataGridTextColumn Header="期限" Binding="{Binding DateDisplayText}" Width="120" />
                                         <DataGridTextColumn Header="件名" Binding="{Binding Title}" Width="*" />

@@ -60,14 +60,96 @@ public sealed class MainViewModelViewModeTests
         Assert.Equal(baseline.AddDays(-6), viewModel.SelectedDay?.Date);
     }
 
+    [Fact]
+    public async Task SelectedDayChange_RefreshesSelectedDayEventsWithoutRebuildingVisibleDays()
+    {
+        var selectedDate = DateTime.Today;
+        var otherDate = selectedDate.AddDays(1);
+        var viewModel = await CreateViewModelAsync([
+            CreateEvent("Selected date event", selectedDate),
+            CreateEvent("Other date event", otherDate)
+        ]);
+        var visibleDays = viewModel.VisibleCalendarDays.ToArray();
+
+        viewModel.SelectedDay = viewModel.CalendarDays.First(day => day.Date == otherDate.Date);
+
+        Assert.Equal(visibleDays, viewModel.VisibleCalendarDays);
+        Assert.Single(viewModel.SelectedDayEvents);
+        Assert.Equal("Other date event", viewModel.SelectedDayEvents[0].Title);
+        Assert.Equal($"{otherDate:yyyy/MM/dd} を選択しました。", viewModel.Status);
+    }
+
+    [Fact]
+    public async Task SelectedDayChange_ClearsSelectedEventWhenEventIsOnDifferentDate()
+    {
+        var selectedDate = DateTime.Today;
+        var otherDate = selectedDate.AddDays(1);
+        var selectedEvent = CreateEvent("Selected date event", selectedDate);
+        var viewModel = await CreateViewModelAsync([selectedEvent]);
+
+        viewModel.SelectedEvent = selectedEvent;
+        viewModel.SelectedDay = viewModel.CalendarDays.First(day => day.Date == otherDate.Date);
+
+        Assert.Null(viewModel.SelectedEvent);
+        Assert.Equal(otherDate.Date, viewModel.SelectedDay?.Date);
+    }
+
+    [Fact]
+    public async Task SelectEvent_SelectsEventAndItsDate()
+    {
+        var eventDate = DateTime.Today.AddDays(2);
+        var calendarEvent = CreateEvent("Target event", eventDate);
+        var viewModel = await CreateViewModelAsync([calendarEvent]);
+
+        viewModel.SelectEvent(calendarEvent);
+
+        Assert.Same(calendarEvent, viewModel.SelectedEvent);
+        Assert.Equal(eventDate.Date, viewModel.SelectedDay?.Date);
+    }
+
+    [Fact]
+    public async Task NavigateToDateAsync_SelectsTargetDateWithoutRevertingToToday()
+    {
+        var targetDate = DateTime.Today.AddMonths(1).AddDays(3);
+        var viewModel = await CreateViewModelAsync();
+
+        await viewModel.NavigateToDateAsync(targetDate);
+
+        Assert.Equal(new DateTime(targetDate.Year, targetDate.Month, 1), viewModel.CurrentMonth);
+        Assert.Equal(targetDate.Date, viewModel.SelectedDay?.Date);
+        Assert.NotEqual(DateTime.Today, viewModel.SelectedDay?.Date);
+    }
+
     private static async Task<MainViewModel> CreateViewModelAsync()
+    {
+        return await CreateViewModelAsync([]);
+    }
+
+    private static async Task<MainViewModel> CreateViewModelAsync(IEnumerable<CalendarEvent> events)
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
         var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        foreach (var calendarEvent in events)
+        {
+            await repository.SaveEventAsync(calendarEvent);
+        }
+
         var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
         await viewModel.InitializeAsync();
         viewModel.CurrentMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
         await Task.Delay(50);
         return viewModel;
+    }
+
+    private static CalendarEvent CreateEvent(string title, DateTime date)
+    {
+        return new CalendarEvent
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Title = title,
+            Start = new DateTimeOffset(date.Date.AddHours(9)),
+            End = new DateTimeOffset(date.Date.AddHours(10))
+        };
     }
 }
