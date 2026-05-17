@@ -28,6 +28,7 @@ public sealed class MainViewModel : ObservableObject
     private string _startTime = "09:00";
     private string _endTime = "10:00";
     private bool _isAllDay = true;
+    private int? _reminderMinutesBeforeStart;
     private string _oauthClientJsonPath = "";
     private int _selectedTabIndex;
     private DateTime? _pendingSelectedDate;
@@ -69,6 +70,7 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<GoogleCalendarSelectionItem> AvailableCalendars { get; } = [];
     public ObservableCollection<CalendarTag> Tags { get; } = [];
     public ObservableCollection<string> CalendarNames { get; } = ["primary"];
+    public IReadOnlyList<ReminderOption> ReminderOptions { get; } = ReminderOption.Defaults;
 
     public RelayCommand PreviousMonthCommand { get; }
     public RelayCommand NextMonthCommand { get; }
@@ -253,6 +255,12 @@ public sealed class MainViewModel : ObservableObject
         set => SetProperty(ref _isAllDay, value);
     }
 
+    public int? ReminderMinutesBeforeStart
+    {
+        get => _reminderMinutesBeforeStart;
+        set => SetProperty(ref _reminderMinutesBeforeStart, value);
+    }
+
     public string OAuthClientJsonPath
     {
         get => _oauthClientJsonPath;
@@ -275,6 +283,7 @@ public sealed class MainViewModel : ObservableObject
     public bool ConfirmBeforeDelete => _settings.ConfirmBeforeDelete;
     public bool CloseButtonExitsApplication => _settings.CloseButtonExitsApplication;
     public bool DefaultNewEventIsAllDay => _settings.DefaultNewEventIsAllDay;
+    public bool UseWindowsToastNotifications => _settings.UseWindowsToastNotifications;
     public string DefaultBackupFileName => $"FavGCalSchedulerClone-backup-{DateTime.Now:yyyyMMdd-HHmmss}.zip";
 
     public async Task InitializeAsync()
@@ -304,6 +313,22 @@ public sealed class MainViewModel : ObservableObject
         Status = "今日を表示しました。";
     }
 
+    public async Task SelectReminderEventAsync(string eventId, DateTimeOffset occurrenceStart)
+    {
+        if (string.IsNullOrWhiteSpace(eventId))
+        {
+            return;
+        }
+
+        _pendingSelectedDate = occurrenceStart.Date;
+        SetCurrentMonthWithoutRefreshing(occurrenceStart.Date);
+        await RefreshCalendarAsync();
+        SelectedEvent = _visibleEvents.FirstOrDefault(item =>
+                string.Equals(item.Id, eventId, StringComparison.Ordinal)
+                && item.Start.Date == occurrenceStart.Date)
+            ?? _visibleEvents.FirstOrDefault(item => string.Equals(item.Id, eventId, StringComparison.Ordinal));
+    }
+
     public void BeginNewEvent(DateTime date)
     {
         SelectedEvent = null;
@@ -315,6 +340,7 @@ public sealed class MainViewModel : ObservableObject
         StartTime = "09:00";
         EndTime = "10:00";
         IsAllDay = _settings.DefaultNewEventIsAllDay;
+        ReminderMinutesBeforeStart = null;
         Status = "新しいスケジュールを入力してください。";
     }
 
@@ -341,7 +367,8 @@ public sealed class MainViewModel : ObservableObject
             IsAllDay = true,
             IsDirty = true,
             IsDeleted = false,
-            IsTodoLike = true
+            IsTodoLike = true,
+            ReminderMinutesBeforeStart = ReminderMinutesBeforeStart
         };
 
         await _repository.SaveEventAsync(todoEvent);
@@ -412,18 +439,21 @@ public sealed class MainViewModel : ObservableObject
         int startupTabIndex,
         bool confirmBeforeDelete,
         bool closeButtonExitsApplication,
-        bool defaultNewEventIsAllDay)
+        bool defaultNewEventIsAllDay,
+        bool useWindowsToastNotifications)
     {
         _settings.StartupTabIndex = NormalizeTabIndex(startupTabIndex);
         _settings.ConfirmBeforeDelete = confirmBeforeDelete;
         _settings.CloseButtonExitsApplication = closeButtonExitsApplication;
         _settings.DefaultNewEventIsAllDay = defaultNewEventIsAllDay;
+        _settings.UseWindowsToastNotifications = useWindowsToastNotifications;
         await _repository.SaveSettingsAsync(_settings);
 
         OnPropertyChanged(nameof(StartupTabIndex));
         OnPropertyChanged(nameof(ConfirmBeforeDelete));
         OnPropertyChanged(nameof(CloseButtonExitsApplication));
         OnPropertyChanged(nameof(DefaultNewEventIsAllDay));
+        OnPropertyChanged(nameof(UseWindowsToastNotifications));
         Status = "アプリ設定を保存しました。";
     }
 
@@ -851,6 +881,7 @@ public sealed class MainViewModel : ObservableObject
         StartTime = calendarEvent.Start.ToString("HH:mm", CultureInfo.InvariantCulture);
         EndTime = calendarEvent.End.ToString("HH:mm", CultureInfo.InvariantCulture);
         IsAllDay = calendarEvent.IsAllDay;
+        ReminderMinutesBeforeStart = calendarEvent.ReminderMinutesBeforeStart;
     }
 
     private async Task SaveEventWithRecurrenceAsync(RecurrenceEditScope? recurrenceScope)
@@ -937,6 +968,7 @@ public sealed class MainViewModel : ObservableObject
         calendarEvent.Location = string.IsNullOrWhiteSpace(Location) ? null : Location.Trim();
         calendarEvent.CalendarId = ResolveEditorCalendarId();
         calendarEvent.IsAllDay = IsAllDay;
+        calendarEvent.ReminderMinutesBeforeStart = ReminderMinutesBeforeStart;
         calendarEvent.IsDirty = true;
         calendarEvent.IsDeleted = false;
 
@@ -1241,6 +1273,7 @@ public sealed class MainViewModel : ObservableObject
             End = source.End,
             IsAllDay = source.IsAllDay,
             ColorId = source.ColorId,
+            ReminderMinutesBeforeStart = source.ReminderMinutesBeforeStart,
             RecurrenceJson = source.RecurrenceJson,
             IsDeleted = source.IsDeleted,
             UpdatedAt = source.UpdatedAt,

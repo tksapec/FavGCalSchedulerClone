@@ -104,6 +104,7 @@ public static class RecurrenceExpansionService
             LastSyncedAt = source.LastSyncedAt,
             IsDirty = source.IsDirty,
             IsTodoLike = source.IsTodoLike,
+            ReminderMinutesBeforeStart = source.ReminderMinutesBeforeStart,
             DisplayColor = source.DisplayColor,
             IsGeneratedOccurrence = source.IsGeneratedOccurrence
         };

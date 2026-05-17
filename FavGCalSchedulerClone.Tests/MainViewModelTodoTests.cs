@@ -49,7 +49,8 @@ public sealed class MainViewModelTodoTests
             startupTabIndex: 3,
             confirmBeforeDelete: false,
             closeButtonExitsApplication: false,
-            defaultNewEventIsAllDay: false);
+            defaultNewEventIsAllDay: false,
+            useWindowsToastNotifications: false);
 
         var reloadedRepository = new CalendarRepository(dbPath);
         var reloaded = new MainViewModel(reloadedRepository, new GoogleCalendarSyncService(reloadedRepository));
@@ -60,6 +61,7 @@ public sealed class MainViewModelTodoTests
         Assert.False(reloaded.ConfirmBeforeDelete);
         Assert.False(reloaded.CloseButtonExitsApplication);
         Assert.False(reloaded.DefaultNewEventIsAllDay);
+        Assert.False(reloaded.UseWindowsToastNotifications);
     }
 
     [Fact]
@@ -70,7 +72,8 @@ public sealed class MainViewModelTodoTests
             startupTabIndex: 0,
             confirmBeforeDelete: true,
             closeButtonExitsApplication: true,
-            defaultNewEventIsAllDay: false);
+            defaultNewEventIsAllDay: false,
+            useWindowsToastNotifications: true);
 
         viewModel.BeginNewEvent(DateTime.Today);
 
@@ -114,7 +117,8 @@ public sealed class MainViewModelTodoTests
             startupTabIndex: 99,
             confirmBeforeDelete: true,
             closeButtonExitsApplication: true,
-            defaultNewEventIsAllDay: true);
+            defaultNewEventIsAllDay: true,
+            useWindowsToastNotifications: true);
 
         Assert.Equal(4, viewModel.StartupTabIndex);
     }

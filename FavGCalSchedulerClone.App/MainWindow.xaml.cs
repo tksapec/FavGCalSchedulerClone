@@ -7,6 +7,7 @@ using System.Windows.Data;
 using FavGCalSchedulerClone.App.Models;
 using FavGCalSchedulerClone.App.Services;
 using FavGCalSchedulerClone.App.ViewModels;
+using Microsoft.Toolkit.Uwp.Notifications;
 using Microsoft.Win32;
 
 namespace FavGCalSchedulerClone.App;
@@ -14,6 +15,7 @@ namespace FavGCalSchedulerClone.App;
 public partial class MainWindow : Window
 {
     private readonly MainViewModel _viewModel;
+    private readonly ReminderNotificationService _reminderService;
     private bool _exitRequested;
 
     public MainWindow()
@@ -21,7 +23,9 @@ public partial class MainWindow : Window
         InitializeComponent();
         var repository = new CalendarRepository();
         _viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        _reminderService = new ReminderNotificationService(repository);
         DataContext = _viewModel;
+        ToastNotificationManagerCompat.OnActivated += ToastNotificationManagerCompat_OnActivated;
     }
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
@@ -29,6 +33,8 @@ public partial class MainWindow : Window
         try
         {
             await _viewModel.InitializeAsync();
+            _reminderService.SetNotifier(CreateReminderNotifier());
+            await _reminderService.StartAsync();
         }
         catch (Exception ex)
         {
@@ -40,11 +46,50 @@ public partial class MainWindow : Window
     {
         if (_exitRequested || _viewModel.CloseButtonExitsApplication)
         {
+            _reminderService.Stop();
+            _reminderService.Dispose();
+            ToastNotificationManagerCompat.OnActivated -= ToastNotificationManagerCompat_OnActivated;
             return;
         }
 
         e.Cancel = true;
         WindowState = WindowState.Minimized;
+    }
+
+    private IReminderNotifier CreateReminderNotifier()
+    {
+        var fallback = new MessageBoxReminderNotifier(this);
+        return _viewModel.UseWindowsToastNotifications
+            ? new FallbackReminderNotifier(new WindowsToastReminderNotifier(), fallback)
+            : fallback;
+    }
+
+    private async void ToastNotificationManagerCompat_OnActivated(ToastNotificationActivatedEventArgsCompat args)
+    {
+        var arguments = ToastArguments.Parse(args.Argument);
+        if (!arguments.TryGetValue("action", out var action)
+            || !arguments.TryGetValue("occurrenceKey", out var occurrenceKey))
+        {
+            return;
+        }
+
+        if (string.Equals(action, "snooze", StringComparison.OrdinalIgnoreCase)
+            && arguments.TryGetValue("minutes", out var minutesValue)
+            && int.TryParse(minutesValue, out var minutes))
+        {
+            await _reminderService.SnoozeAsync(occurrenceKey, minutes);
+            return;
+        }
+
+        if (string.Equals(action, "open", StringComparison.OrdinalIgnoreCase))
+        {
+            var history = await _reminderService.LoadHistoryAsync();
+            var item = history.FirstOrDefault(entry => string.Equals(entry.OccurrenceKey, occurrenceKey, StringComparison.Ordinal));
+            if (item is not null)
+            {
+                await Dispatcher.InvokeAsync(async () => await OpenReminderHistoryItemAsync(item));
+            }
+        }
     }
 
     private async void DayList_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
@@ -244,6 +289,11 @@ public partial class MainWindow : Window
         ShowSettingsDialog();
     }
 
+    private async void ReminderHistoryMenu_Click(object sender, RoutedEventArgs e)
+    {
+        await ShowReminderHistoryDialogAsync();
+    }
+
     private async void DeleteEventButton_Click(object sender, RoutedEventArgs e)
     {
         await DeleteSelectedEventWithOptionalConfirmationAsync();
@@ -337,6 +387,13 @@ public partial class MainWindow : Window
             IsChecked = editingEvent?.IsAllDay ?? _viewModel.DefaultNewEventIsAllDay,
             VerticalAlignment = VerticalAlignment.Center
         };
+        var reminder = new ComboBox
+        {
+            ItemsSource = _viewModel.ReminderOptions,
+            DisplayMemberPath = nameof(ReminderOption.Label),
+            SelectedValuePath = nameof(ReminderOption.MinutesBeforeStart),
+            SelectedValue = editingEvent?.ReminderMinutesBeforeStart
+        };
         var location = new TextBox { Text = editingEvent?.Location ?? string.Empty };
         var calendar = new ComboBox
         {
@@ -359,7 +416,8 @@ public partial class MainWindow : Window
         root.Children.Add(FormGrid(
             ("開始日", startDate, "終了日", endDate),
             ("開始時刻", startTime, "終了時刻", endTime),
-            ("", isAllDay, "保存先カレンダー", calendar)));
+            ("", isAllDay, "通知", reminder),
+            ("保存先カレンダー", calendar, "", new TextBlock())));
         root.Children.Add(SectionHeader("詳細"));
         root.Children.Add(WideField("件名", title));
         root.Children.Add(WideField("場所", location));
@@ -382,6 +440,7 @@ public partial class MainWindow : Window
         _viewModel.StartTime = startTime.Text;
         _viewModel.EndTime = endTime.Text;
         _viewModel.IsAllDay = isAllDay.IsChecked == true;
+        _viewModel.ReminderMinutesBeforeStart = reminder.SelectedValue as int?;
         _viewModel.Location = location.Text;
         _viewModel.Title = title.Text;
         _viewModel.Description = description.Text;
@@ -410,6 +469,12 @@ public partial class MainWindow : Window
         var progress = new Slider { Minimum = 0, Maximum = 100, TickFrequency = 10, IsSnapToTickEnabled = true, Width = 210 };
         var progressLabel = new TextBlock { Text = "進捗 0%", VerticalAlignment = VerticalAlignment.Center };
         progress.ValueChanged += (_, _) => progressLabel.Text = $"進捗 {(int)progress.Value}%";
+        var reminder = new ComboBox
+        {
+            ItemsSource = _viewModel.ReminderOptions,
+            DisplayMemberPath = nameof(ReminderOption.Label),
+            SelectedValuePath = nameof(ReminderOption.MinutesBeforeStart)
+        };
         var calendar = new ComboBox
         {
             ItemsSource = _viewModel.AvailableCalendars,
@@ -423,7 +488,8 @@ public partial class MainWindow : Window
         root.Children.Add(SectionHeader("期限と進捗"));
         root.Children.Add(FormGrid(
             ("期限", dueDate, "優先度", priority),
-            ("進捗", progress, "", progressLabel)));
+            ("進捗", progress, "", progressLabel),
+            ("通知", reminder, "", new TextBlock())));
         root.Children.Add(SectionHeader("詳細"));
         root.Children.Add(WideField("件名", title));
         root.Children.Add(WideField("内容", description));
@@ -437,6 +503,7 @@ public partial class MainWindow : Window
         }
 
         _viewModel.EditorCalendarId = calendar.SelectedValue?.ToString() ?? _viewModel.EditorCalendarId;
+        _viewModel.ReminderMinutesBeforeStart = reminder.SelectedValue as int?;
         await _viewModel.SaveTodoAsync(
             dueDate.SelectedDate ?? date,
             priority.SelectedItem?.ToString() ?? "A",
@@ -611,6 +678,58 @@ public partial class MainWindow : Window
         window.ShowDialog();
     }
 
+    private async Task ShowReminderHistoryDialogAsync()
+    {
+        var history = await _reminderService.LoadHistoryAsync();
+        var window = CreateOwnedDialog("通知一覧", 760, 460);
+        var panel = new DockPanel { Margin = new Thickness(12), LastChildFill = true };
+        window.Content = panel;
+
+        var close = new Button { Content = "閉じる", MinWidth = 96, Height = 28 };
+        close.Click += (_, _) => window.Close();
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0) };
+        buttons.Children.Add(close);
+        DockPanel.SetDock(buttons, Dock.Bottom);
+        panel.Children.Add(buttons);
+
+        var grid = new DataGrid
+        {
+            ItemsSource = new ObservableCollection<ReminderHistoryItem>(history),
+            AutoGenerateColumns = false,
+            CanUserAddRows = false,
+            IsReadOnly = true,
+            HeadersVisibility = DataGridHeadersVisibility.Column,
+            RowHeight = 24
+        };
+        grid.MouseDoubleClick += async (_, _) =>
+        {
+            if (grid.SelectedItem is ReminderHistoryItem item)
+            {
+                await OpenReminderHistoryItemAsync(item);
+                window.Close();
+            }
+        };
+        grid.Columns.Add(new DataGridTextColumn { Header = "通知日時", Binding = new Binding(nameof(ReminderHistoryItem.NotifiedAtText)), Width = 140 });
+        grid.Columns.Add(new DataGridTextColumn { Header = "種別", Binding = new Binding(nameof(ReminderHistoryItem.KindText)), Width = 70 });
+        grid.Columns.Add(new DataGridTextColumn { Header = "予定日時", Binding = new Binding(nameof(ReminderHistoryItem.DateDisplayText)), Width = 140 });
+        grid.Columns.Add(new DataGridTextColumn { Header = "件名", Binding = new Binding(nameof(ReminderHistoryItem.Title)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
+        grid.Columns.Add(new DataGridTextColumn { Header = "スヌーズ", Binding = new Binding(nameof(ReminderHistoryItem.SnoozedUntilText)), Width = 140 });
+        panel.Children.Add(grid);
+
+        window.ShowDialog();
+    }
+
+    private async Task OpenReminderHistoryItemAsync(ReminderHistoryItem item)
+    {
+        if (WindowState == WindowState.Minimized)
+        {
+            WindowState = WindowState.Normal;
+        }
+
+        Activate();
+        await _viewModel.SelectReminderEventAsync(item.EventId, item.OccurrenceStart);
+    }
+
     private async void ShowSettingsDialog()
     {
         var window = CreateOwnedDialog("アプリ設定", 560, 320);
@@ -632,11 +751,17 @@ public partial class MainWindow : Window
             Content = "新規予定を既定で終日にする",
             IsChecked = _viewModel.DefaultNewEventIsAllDay
         };
+        var useWindowsToast = new CheckBox
+        {
+            Content = "Windowsトースト通知を使う",
+            IsChecked = _viewModel.UseWindowsToastNotifications
+        };
 
         root.Children.Add(SectionHeader("動作"));
         root.Children.Add(confirmBeforeDelete);
         root.Children.Add(closeButtonExits);
         root.Children.Add(defaultAllDay);
+        root.Children.Add(useWindowsToast);
         root.Children.Add(DialogButtons(window, "保存", "キャンセル"));
 
         if (window.ShowDialog() != true)
@@ -648,7 +773,9 @@ public partial class MainWindow : Window
             _viewModel.StartupTabIndex,
             confirmBeforeDelete.IsChecked == true,
             closeButtonExits.IsChecked == true,
-            defaultAllDay.IsChecked == true);
+            defaultAllDay.IsChecked == true,
+            useWindowsToast.IsChecked == true);
+        _reminderService.SetNotifier(CreateReminderNotifier());
     }
 
     private async Task DeleteSelectedEventWithOptionalConfirmationAsync()

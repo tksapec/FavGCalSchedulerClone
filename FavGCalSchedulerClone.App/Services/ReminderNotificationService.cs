@@ -1,0 +1,313 @@
+using System.Text.Json;
+using FavGCalSchedulerClone.App.Models;
+
+namespace FavGCalSchedulerClone.App.Services;
+
+public sealed class ReminderNotificationService : IDisposable
+{
+    private const string ReminderStateKey = "reminder:fired";
+    private const string ReminderSnoozeKey = "reminder:snoozed";
+    private const string ReminderHistoryKey = "reminder:history";
+    private const int MaxHistoryCount = 50;
+    private readonly CalendarRepository _repository;
+    private readonly Timer _timer;
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private IReminderNotifier? _notifier;
+    private bool _disposed;
+
+    public ReminderNotificationService(CalendarRepository repository, IReminderNotifier? notifier = null)
+    {
+        _repository = repository;
+        _notifier = notifier;
+        _timer = new Timer(async _ => await CheckDueRemindersAsync(), null, Timeout.Infinite, Timeout.Infinite);
+    }
+
+    public event Func<ReminderNotification, Task>? ReminderTriggered;
+
+    public void SetNotifier(IReminderNotifier notifier)
+    {
+        _notifier = notifier;
+    }
+
+    public async Task StartAsync(CancellationToken cancellationToken = default)
+    {
+        await CheckDueRemindersAsync(DateTimeOffset.Now, cancellationToken);
+        _timer.Change(TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+    }
+
+    public void Stop()
+    {
+        _timer.Change(Timeout.Infinite, Timeout.Infinite);
+    }
+
+    public async Task CheckDueRemindersAsync(DateTimeOffset? now = null, CancellationToken cancellationToken = default)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        var current = now ?? DateTimeOffset.Now;
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var fired = await LoadFiredStateAsync();
+            var snoozed = await LoadSnoozeStateAsync();
+            PruneFiredState(fired, current);
+            PruneSnoozeState(snoozed, current.AddDays(-7));
+
+            var windowStart = current.AddDays(-1);
+            var windowEnd = current.AddDays(30);
+            var storedEvents = await _repository.LoadEventsAsync(windowStart, windowEnd, includeDeleted: false);
+            var expandedEvents = RecurrenceExpansionService.ExpandForRange(storedEvents, windowStart, windowEnd);
+            var dueNotifications = expandedEvents
+                .Where(ShouldConsiderReminder)
+                .Select(item => CreateReminderNotification(item, current))
+                .Where(item => item is not null)
+                .Cast<ReminderNotification>()
+                .Where(item => IsDue(item, current, fired, snoozed))
+                .OrderBy(item => item.RemindAt)
+                .ThenBy(item => item.EventStart)
+                .ToArray();
+
+            foreach (var notification in dueNotifications)
+            {
+                await DispatchNotificationAsync(notification, cancellationToken);
+                fired[notification.OccurrenceKey] = current.ToString("O");
+                snoozed.Remove(notification.OccurrenceKey);
+                await AddHistoryAsync(notification, current, null);
+            }
+
+            await SaveFiredStateAsync(fired);
+            await SaveSnoozeStateAsync(snoozed);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task SnoozeAsync(string occurrenceKey, int minutes, DateTimeOffset? now = null)
+    {
+        if (string.IsNullOrWhiteSpace(occurrenceKey) || minutes <= 0)
+        {
+            return;
+        }
+
+        var current = now ?? DateTimeOffset.Now;
+        await _gate.WaitAsync();
+        try
+        {
+            var snoozed = await LoadSnoozeStateAsync();
+            var snoozeUntil = current.AddMinutes(minutes);
+            snoozed[occurrenceKey] = snoozeUntil.ToString("O");
+            await SaveSnoozeStateAsync(snoozed);
+            await MarkHistorySnoozedAsync(occurrenceKey, snoozeUntil);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<IReadOnlyList<ReminderHistoryItem>> LoadHistoryAsync()
+    {
+        var json = await _repository.LoadSettingValueAsync(ReminderHistoryKey);
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return [];
+        }
+
+        return JsonSerializer.Deserialize<List<ReminderHistoryItem>>(json) ?? [];
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _timer.Dispose();
+        _gate.Dispose();
+    }
+
+    private async Task DispatchNotificationAsync(ReminderNotification notification, CancellationToken cancellationToken)
+    {
+        if (_notifier is not null)
+        {
+            await _notifier.ShowAsync(notification, cancellationToken);
+        }
+
+        if (ReminderTriggered is not null)
+        {
+            await ReminderTriggered.Invoke(notification);
+        }
+    }
+
+    private static bool ShouldConsiderReminder(CalendarEvent calendarEvent)
+    {
+        return !calendarEvent.IsDeleted
+            && !calendarEvent.IsTodoDone
+            && calendarEvent.ReminderMinutesBeforeStart is >= 0;
+    }
+
+    private static ReminderNotification? CreateReminderNotification(CalendarEvent calendarEvent, DateTimeOffset now)
+    {
+        if (calendarEvent.ReminderMinutesBeforeStart is not int reminderMinutes)
+        {
+            return null;
+        }
+
+        var baseTime = calendarEvent.IsAllDay
+            ? new DateTimeOffset(calendarEvent.Start.Date.AddHours(9), TimeZoneInfo.Local.GetUtcOffset(calendarEvent.Start.Date))
+            : calendarEvent.Start;
+        var remindAt = baseTime.AddMinutes(-reminderMinutes);
+        var occurrenceStart = calendarEvent.OriginalStart ?? calendarEvent.Start;
+
+        return new ReminderNotification(
+            BuildOccurrenceKey(calendarEvent, reminderMinutes),
+            calendarEvent.Id,
+            calendarEvent.Title,
+            calendarEvent.DateDisplayText,
+            remindAt,
+            calendarEvent.Start,
+            occurrenceStart,
+            calendarEvent.CalendarId,
+            calendarEvent.IsTodoLike);
+    }
+
+    private static bool IsDue(
+        ReminderNotification notification,
+        DateTimeOffset current,
+        Dictionary<string, string> fired,
+        Dictionary<string, string> snoozed)
+    {
+        if (snoozed.TryGetValue(notification.OccurrenceKey, out var snoozeValue)
+            && DateTimeOffset.TryParse(snoozeValue, out var snoozeUntil))
+        {
+            return snoozeUntil <= current;
+        }
+
+        return notification.RemindAt <= current && !fired.ContainsKey(notification.OccurrenceKey);
+    }
+
+    private static string BuildOccurrenceKey(CalendarEvent calendarEvent, int reminderMinutes)
+    {
+        var anchor = calendarEvent.OriginalStart ?? calendarEvent.Start;
+        var seriesKey = calendarEvent.RecurringParentId
+            ?? calendarEvent.RecurringEventId
+            ?? calendarEvent.Id;
+        return $"{seriesKey}:{anchor.UtcTicks}:{reminderMinutes}";
+    }
+
+    private async Task<Dictionary<string, string>> LoadFiredStateAsync()
+    {
+        return await LoadStringDictionaryAsync(ReminderStateKey);
+    }
+
+    private async Task SaveFiredStateAsync(Dictionary<string, string> fired)
+    {
+        await SaveStringDictionaryAsync(ReminderStateKey, fired);
+    }
+
+    private async Task<Dictionary<string, string>> LoadSnoozeStateAsync()
+    {
+        return await LoadStringDictionaryAsync(ReminderSnoozeKey);
+    }
+
+    private async Task SaveSnoozeStateAsync(Dictionary<string, string> snoozed)
+    {
+        await SaveStringDictionaryAsync(ReminderSnoozeKey, snoozed);
+    }
+
+    private async Task<Dictionary<string, string>> LoadStringDictionaryAsync(string key)
+    {
+        var json = await _repository.LoadSettingValueAsync(key);
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        return JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? new Dictionary<string, string>(StringComparer.Ordinal);
+    }
+
+    private async Task SaveStringDictionaryAsync(string key, Dictionary<string, string> values)
+    {
+        var json = values.Count == 0 ? null : JsonSerializer.Serialize(values);
+        await _repository.SaveSettingValueAsync(key, json);
+    }
+
+    private async Task AddHistoryAsync(ReminderNotification notification, DateTimeOffset notifiedAt, DateTimeOffset? snoozedUntil)
+    {
+        var history = (await LoadHistoryAsync()).ToList();
+        history.Insert(0, new ReminderHistoryItem
+        {
+            OccurrenceKey = notification.OccurrenceKey,
+            EventId = notification.EventId,
+            Title = notification.Title,
+            DateDisplayText = notification.DateDisplayText,
+            NotifiedAt = notifiedAt,
+            RemindAt = notification.RemindAt,
+            EventStart = notification.EventStart,
+            OccurrenceStart = notification.OccurrenceStart,
+            CalendarId = notification.CalendarId,
+            IsTodoLike = notification.IsTodoLike,
+            SnoozedUntil = snoozedUntil
+        });
+
+        await SaveHistoryAsync(history.Take(MaxHistoryCount).ToList());
+    }
+
+    private async Task MarkHistorySnoozedAsync(string occurrenceKey, DateTimeOffset snoozedUntil)
+    {
+        var history = (await LoadHistoryAsync()).ToList();
+        var item = history.FirstOrDefault(entry => string.Equals(entry.OccurrenceKey, occurrenceKey, StringComparison.Ordinal));
+        if (item is not null)
+        {
+            item.SnoozedUntil = snoozedUntil;
+            await SaveHistoryAsync(history.Take(MaxHistoryCount).ToList());
+        }
+    }
+
+    private async Task SaveHistoryAsync(IReadOnlyList<ReminderHistoryItem> history)
+    {
+        var json = history.Count == 0 ? null : JsonSerializer.Serialize(history);
+        await _repository.SaveSettingValueAsync(ReminderHistoryKey, json);
+    }
+
+    private static void PruneFiredState(Dictionary<string, string> fired, DateTimeOffset now)
+    {
+        var cutoff = now.AddDays(-60);
+        foreach (var key in fired
+                     .Where(pair => DateTimeOffset.TryParse(pair.Value, out var firedAt) && firedAt < cutoff)
+                     .Select(pair => pair.Key)
+                     .ToArray())
+        {
+            fired.Remove(key);
+        }
+    }
+
+    private static void PruneSnoozeState(Dictionary<string, string> snoozed, DateTimeOffset cutoff)
+    {
+        foreach (var key in snoozed
+                     .Where(pair => DateTimeOffset.TryParse(pair.Value, out var snoozedUntil) && snoozedUntil < cutoff)
+                     .Select(pair => pair.Key)
+                     .ToArray())
+        {
+            snoozed.Remove(key);
+        }
+    }
+}
+
+public sealed record ReminderNotification(
+    string OccurrenceKey,
+    string EventId,
+    string Title,
+    string DateDisplayText,
+    DateTimeOffset RemindAt,
+    DateTimeOffset EventStart,
+    DateTimeOffset OccurrenceStart,
+    string CalendarId,
+    bool IsTodoLike);

@@ -35,6 +35,7 @@ public sealed class CalendarRepository
                 end TEXT NOT NULL,
                 is_all_day INTEGER NOT NULL,
                 color_id TEXT,
+                reminder_minutes_before_start INTEGER,
                 recurrence_json TEXT,
                 is_deleted INTEGER NOT NULL,
                 updated_at TEXT NOT NULL,
@@ -70,6 +71,33 @@ public sealed class CalendarRepository
         await using var command = connection.CreateCommand();
         command.CommandText = "INSERT OR REPLACE INTO settings(key, value) VALUES('app', $value)";
         command.Parameters.AddWithValue("$value", JsonSerializer.Serialize(settings));
+        await command.ExecuteNonQueryAsync();
+    }
+
+    public async Task<string?> LoadSettingValueAsync(string key)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT value FROM settings WHERE key = $key";
+        command.Parameters.AddWithValue("$key", key);
+        return await command.ExecuteScalarAsync() as string;
+    }
+
+    public async Task SaveSettingValueAsync(string key, string? value)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            command.CommandText = "DELETE FROM settings WHERE key = $key";
+            command.Parameters.AddWithValue("$key", key);
+            await command.ExecuteNonQueryAsync();
+            return;
+        }
+
+        command.CommandText = "INSERT OR REPLACE INTO settings(key, value) VALUES($key, $value)";
+        command.Parameters.AddWithValue("$key", key);
+        command.Parameters.AddWithValue("$value", value);
         await command.ExecuteNonQueryAsync();
     }
 
@@ -116,7 +144,7 @@ public sealed class CalendarRepository
         command.CommandText = """
             SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
                    calendar_id, title, description, location, start, end, is_all_day,
-                   color_id, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
+                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
             FROM events
             WHERE ((start < $end AND end > $start)
                 OR recurrence_json IS NOT NULL
@@ -137,7 +165,7 @@ public sealed class CalendarRepository
         command.CommandText = """
             SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
                    calendar_id, title, description, location, start, end, is_all_day,
-                   color_id, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
+                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
             FROM events
             WHERE is_dirty = 1
             ORDER BY updated_at
@@ -157,7 +185,7 @@ public sealed class CalendarRepository
         command.CommandText = """
             SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
                    calendar_id, title, description, location, start, end, is_all_day,
-                   color_id, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
+                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
             FROM events
             WHERE calendar_id = $calendar_id AND google_event_id = $google_event_id
             LIMIT 1
@@ -174,7 +202,7 @@ public sealed class CalendarRepository
         command.CommandText = """
             SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
                    calendar_id, title, description, location, start, end, is_all_day,
-                   color_id, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
+                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
             FROM events
             WHERE calendar_id = $calendar_id
               AND title = $title
@@ -204,7 +232,7 @@ public sealed class CalendarRepository
         command.CommandText = """
             SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
                    calendar_id, title, description, location, start, end, is_all_day,
-                   color_id, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
+                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
             FROM events
             WHERE id = $id
             LIMIT 1
@@ -220,7 +248,7 @@ public sealed class CalendarRepository
         command.CommandText = """
             SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
                    calendar_id, title, description, location, start, end, is_all_day,
-                   color_id, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
+                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
             FROM events
             WHERE ($recurring_parent_id IS NOT NULL AND recurring_parent_id = $recurring_parent_id)
                OR ($recurring_event_id IS NOT NULL AND recurring_event_id = $recurring_event_id)
@@ -240,10 +268,11 @@ public sealed class CalendarRepository
 
     public async Task UpsertSyncedEventAsync(CalendarEvent calendarEvent)
     {
-        var existingId = await FindLocalIdByGoogleEventIdAsync(calendarEvent.CalendarId, calendarEvent.GoogleEventId);
-        if (!string.IsNullOrWhiteSpace(existingId))
+        var existing = await FindEventByGoogleEventIdAsync(calendarEvent.CalendarId, calendarEvent.GoogleEventId);
+        if (existing is not null)
         {
-            calendarEvent.Id = existingId;
+            calendarEvent.Id = existing.Id;
+            calendarEvent.ReminderMinutesBeforeStart = existing.ReminderMinutesBeforeStart;
         }
 
         calendarEvent.IsDirty = false;
@@ -311,11 +340,11 @@ public sealed class CalendarRepository
             INSERT OR REPLACE INTO events(
                 id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
                 calendar_id, title, description, location, start, end, is_all_day,
-                color_id, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like)
+                color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like)
             VALUES(
                 $id, $google_event_id, $recurring_event_id, $recurring_parent_id, $original_start, $is_recurrence_exception,
                 $calendar_id, $title, $description, $location, $start, $end, $is_all_day,
-                $color_id, $recurrence_json, $is_deleted, $updated_at, $last_synced_at, $is_dirty, $is_todo_like)
+                $color_id, $reminder_minutes_before_start, $recurrence_json, $is_deleted, $updated_at, $last_synced_at, $is_dirty, $is_todo_like)
             """;
         AddEventParameters(command, calendarEvent);
         await command.ExecuteNonQueryAsync();
@@ -395,12 +424,13 @@ public sealed class CalendarRepository
                 End = DateTimeOffset.Parse(reader.GetString(11)),
                 IsAllDay = reader.GetInt32(12) != 0,
                 ColorId = reader.IsDBNull(13) ? null : reader.GetString(13),
-                RecurrenceJson = reader.IsDBNull(14) ? null : reader.GetString(14),
-                IsDeleted = reader.GetInt32(15) != 0,
-                UpdatedAt = DateTimeOffset.Parse(reader.GetString(16)),
-                LastSyncedAt = reader.IsDBNull(17) ? null : DateTimeOffset.Parse(reader.GetString(17)),
-                IsDirty = reader.GetInt32(18) != 0,
-                IsTodoLike = reader.GetInt32(19) != 0
+                ReminderMinutesBeforeStart = reader.IsDBNull(14) ? null : reader.GetInt32(14),
+                RecurrenceJson = reader.IsDBNull(15) ? null : reader.GetString(15),
+                IsDeleted = reader.GetInt32(16) != 0,
+                UpdatedAt = DateTimeOffset.Parse(reader.GetString(17)),
+                LastSyncedAt = reader.IsDBNull(18) ? null : DateTimeOffset.Parse(reader.GetString(18)),
+                IsDirty = reader.GetInt32(19) != 0,
+                IsTodoLike = reader.GetInt32(20) != 0
             });
         }
 
@@ -423,6 +453,7 @@ public sealed class CalendarRepository
         command.Parameters.AddWithValue("$end", calendarEvent.End.ToString("O"));
         command.Parameters.AddWithValue("$is_all_day", calendarEvent.IsAllDay ? 1 : 0);
         command.Parameters.AddWithValue("$color_id", (object?)calendarEvent.ColorId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$reminder_minutes_before_start", calendarEvent.ReminderMinutesBeforeStart ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$recurrence_json", (object?)calendarEvent.RecurrenceJson ?? DBNull.Value);
         command.Parameters.AddWithValue("$is_deleted", calendarEvent.IsDeleted ? 1 : 0);
         command.Parameters.AddWithValue("$updated_at", calendarEvent.UpdatedAt.ToString("O"));
@@ -437,6 +468,7 @@ public sealed class CalendarRepository
         await EnsureColumnAsync(connection, "events", "recurring_parent_id", "TEXT");
         await EnsureColumnAsync(connection, "events", "original_start", "TEXT");
         await EnsureColumnAsync(connection, "events", "is_recurrence_exception", "INTEGER NOT NULL DEFAULT 0");
+        await EnsureColumnAsync(connection, "events", "reminder_minutes_before_start", "INTEGER");
     }
 
     private static async Task EnsureColumnAsync(SqliteConnection connection, string tableName, string columnName, string sqlDefinition)

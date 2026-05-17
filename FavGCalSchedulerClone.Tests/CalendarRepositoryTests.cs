@@ -25,6 +25,7 @@ public sealed class CalendarRepositoryTests
         Assert.True(settings.ConfirmBeforeDelete);
         Assert.True(settings.CloseButtonExitsApplication);
         Assert.True(settings.DefaultNewEventIsAllDay);
+        Assert.True(settings.UseWindowsToastNotifications);
     }
 
     [Fact]
@@ -43,7 +44,8 @@ public sealed class CalendarRepositoryTests
             StartupTabIndex = 3,
             ConfirmBeforeDelete = false,
             CloseButtonExitsApplication = false,
-            DefaultNewEventIsAllDay = false
+            DefaultNewEventIsAllDay = false,
+            UseWindowsToastNotifications = false
         });
 
         var settings = await repository.LoadSettingsAsync();
@@ -55,6 +57,7 @@ public sealed class CalendarRepositoryTests
         Assert.False(settings.ConfirmBeforeDelete);
         Assert.False(settings.CloseButtonExitsApplication);
         Assert.False(settings.DefaultNewEventIsAllDay);
+        Assert.False(settings.UseWindowsToastNotifications);
     }
 
     [Fact]
@@ -110,7 +113,8 @@ public sealed class CalendarRepositoryTests
             OriginalStart = new DateTimeOffset(2026, 5, 16, 9, 0, 0, TimeSpan.Zero),
             IsRecurrenceException = true,
             Start = new DateTimeOffset(2026, 5, 16, 11, 0, 0, TimeSpan.Zero),
-            End = new DateTimeOffset(2026, 5, 16, 12, 0, 0, TimeSpan.Zero)
+            End = new DateTimeOffset(2026, 5, 16, 12, 0, 0, TimeSpan.Zero),
+            ReminderMinutesBeforeStart = 10
         };
 
         await repository.SaveEventAsync(item);
@@ -121,5 +125,6 @@ public sealed class CalendarRepositoryTests
         Assert.Equal("local-series-1", loaded.RecurringParentId);
         Assert.Equal(item.OriginalStart, loaded.OriginalStart);
         Assert.True(loaded.IsRecurrenceException);
+        Assert.Equal(10, loaded.ReminderMinutesBeforeStart);
     }
 }

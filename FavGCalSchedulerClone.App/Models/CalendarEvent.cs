@@ -22,6 +22,7 @@ public sealed class CalendarEvent
     public DateTimeOffset? LastSyncedAt { get; set; }
     public bool IsDirty { get; set; } = true;
     public bool IsTodoLike { get; set; }
+    public int? ReminderMinutesBeforeStart { get; set; }
     public string DisplayColor { get; set; } = "#E5E7EB";
     public bool IsGeneratedOccurrence { get; set; }
 

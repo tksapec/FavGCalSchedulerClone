@@ -182,6 +182,7 @@
             </MenuItem>
             <MenuItem Header="設定(_C)">
                 <MenuItem Header="アプリ設定(_A)" Click="SettingsMenu_Click" />
+                <MenuItem Header="通知一覧..." Click="ReminderHistoryMenu_Click" />
             </MenuItem>
             <MenuItem Header="ヘルプ(_H)">
                 <MenuItem Header="サポートサイト" IsEnabled="False" />

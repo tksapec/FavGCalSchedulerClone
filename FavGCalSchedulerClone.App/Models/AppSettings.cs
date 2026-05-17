@@ -10,4 +10,5 @@ public sealed class AppSettings
     public bool ConfirmBeforeDelete { get; set; } = true;
     public bool CloseButtonExitsApplication { get; set; } = true;
     public bool DefaultNewEventIsAllDay { get; set; } = true;
+    public bool UseWindowsToastNotifications { get; set; } = true;
 }
