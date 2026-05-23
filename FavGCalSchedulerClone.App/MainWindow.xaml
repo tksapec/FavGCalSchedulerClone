@@ -270,14 +270,14 @@
                                 </ListBox.ItemContainerStyle>
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
-                                        <Border Style="{StaticResource DayCell}" MouseLeftButtonDown="DayCell_MouseLeftButtonDown">
+                                        <Border Style="{StaticResource DayCell}" MouseLeftButtonDown="DayCell_MouseLeftButtonDown" MouseRightButtonDown="DayCell_MouseRightButtonDown">
                                             <DockPanel LastChildFill="True">
                                                 <TextBlock DockPanel.Dock="Top" Text="{Binding Date.Day}" Foreground="#334155"
                                                            FontSize="15" FontWeight="SemiBold" />
                                                 <ItemsControl ItemsSource="{Binding Events}" Margin="0,4,0,0">
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate>
-                                                            <Border Style="{StaticResource EventBar}" Background="{Binding DisplayColor}" MouseLeftButtonDown="EventBar_MouseLeftButtonDown">
+                                                            <Border Style="{StaticResource EventBar}" Background="{Binding DisplayColor}" MouseLeftButtonDown="EventBar_MouseLeftButtonDown" MouseRightButtonDown="EventBar_MouseRightButtonDown">
                                                                 <TextBlock Text="{Binding CalendarCellDisplayText}" FontSize="11" Foreground="#111827"
                                                                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                                             </Border>
@@ -337,14 +337,14 @@
                                 </ListBox.ItemContainerStyle>
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
-                                        <Border Style="{StaticResource DayCell}" MouseLeftButtonDown="DayCell_MouseLeftButtonDown">
+                                        <Border Style="{StaticResource DayCell}" MouseLeftButtonDown="DayCell_MouseLeftButtonDown" MouseRightButtonDown="DayCell_MouseRightButtonDown">
                                             <DockPanel LastChildFill="True">
                                                 <TextBlock DockPanel.Dock="Top" Text="{Binding Date.Day}" Foreground="#334155"
                                                            FontSize="16" FontWeight="SemiBold" />
                                                 <ItemsControl ItemsSource="{Binding Events}" Margin="0,4,0,0">
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate>
-                                                            <Border Style="{StaticResource EventBar}" Background="{Binding DisplayColor}" MouseLeftButtonDown="EventBar_MouseLeftButtonDown">
+                                                            <Border Style="{StaticResource EventBar}" Background="{Binding DisplayColor}" MouseLeftButtonDown="EventBar_MouseLeftButtonDown" MouseRightButtonDown="EventBar_MouseRightButtonDown">
                                                                 <TextBlock Text="{Binding CalendarCellDisplayText}" FontSize="11" Foreground="#111827"
                                                                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                                             </Border>
@@ -416,7 +416,14 @@
                                 <DataGrid Grid.Row="1" ItemsSource="{Binding TodoEvents}" SelectedItem="{Binding SelectedEvent}"
                                           MouseDoubleClick="TodoEventsGrid_MouseDoubleClick">
                                     <DataGrid.Columns>
-                                        <DataGridTextColumn Header="" Binding="{Binding TodoDoneGlyph}" Width="34" />
+                                        <DataGridTemplateColumn Header="" Width="34">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <Button Content="{Binding TodoDoneGlyph}" Padding="0" MinWidth="24" Height="20"
+                                                            Click="TodoDoneButton_Click" />
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
                                         <DataGridTextColumn Header="P" Binding="{Binding TodoPriorityDisplayText}" Width="34" />
                                         <DataGridTextColumn Header="%" Binding="{Binding TodoProgressText}" Width="48" />
                                         <DataGridTextColumn Header="期限" Binding="{Binding DateDisplayText}" Width="120" />

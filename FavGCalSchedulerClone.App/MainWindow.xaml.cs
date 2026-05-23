@@ -107,6 +107,19 @@ public partial class MainWindow : Window
         }
     }
 
+    private void DayCell_MouseRightButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: CalendarDay day } element)
+        {
+            return;
+        }
+
+        _viewModel.SelectedDay = day;
+        _viewModel.SelectedEvent = null;
+        e.Handled = true;
+        ShowCalendarContextMenu(element);
+    }
+
     private async void EventBar_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (sender is not FrameworkElement { DataContext: CalendarEvent calendarEvent })
@@ -121,6 +134,72 @@ public partial class MainWindow : Window
         {
             await OpenSelectedEventEditorAsync();
         }
+    }
+
+    private void EventBar_MouseRightButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: CalendarEvent calendarEvent } element)
+        {
+            return;
+        }
+
+        _viewModel.SelectEvent(calendarEvent);
+        e.Handled = true;
+        ShowCalendarContextMenu(element);
+    }
+
+    private void ShowCalendarContextMenu(FrameworkElement placementTarget)
+    {
+        var menu = new ContextMenu { PlacementTarget = placementTarget };
+
+        var addSchedule = new MenuItem { Header = "スケジュールの追加" };
+        addSchedule.Click += async (_, _) => await ShowScheduleDialogAsync();
+        menu.Items.Add(addSchedule);
+
+        var addTodo = new MenuItem { Header = "ToDoの追加" };
+        addTodo.Click += async (_, _) => await ShowTodoDialogAsync();
+        menu.Items.Add(addTodo);
+
+        menu.Items.Add(new Separator());
+
+        var edit = new MenuItem { Header = "編集", IsEnabled = _viewModel.SelectedEvent is not null };
+        edit.Click += async (_, _) =>
+        {
+            if (_viewModel.SelectedEvent?.IsTodoLike == true)
+            {
+                await ShowSelectedTodoDialogAsync();
+                return;
+            }
+
+            await OpenSelectedEventEditorAsync();
+        };
+        menu.Items.Add(edit);
+
+        var delete = new MenuItem { Header = "削除", IsEnabled = _viewModel.SelectedEvent is not null };
+        delete.Click += async (_, _) => await DeleteSelectedEventWithOptionalConfirmationAsync();
+        menu.Items.Add(delete);
+
+        var completeTodo = new MenuItem
+        {
+            Header = "ToDoを完了にする",
+            IsEnabled = _viewModel.SelectedEvent?.IsTodoLike == true && !_viewModel.SelectedEvent.IsTodoDone
+        };
+        completeTodo.Click += async (_, _) =>
+        {
+            if (_viewModel.SelectedEvent?.IsTodoLike == true)
+            {
+                await _viewModel.MarkTodoDoneAsync(_viewModel.SelectedEvent);
+            }
+        };
+        menu.Items.Add(completeTodo);
+
+        menu.Items.Add(new Separator());
+
+        var list = new MenuItem { Header = "スケジュール一覧" };
+        list.Click += async (_, _) => await ShowEventListDialogAsync("スケジュール一覧", string.Empty);
+        menu.Items.Add(list);
+
+        menu.IsOpen = true;
     }
 
     private async void AddScheduleMenu_Click(object sender, RoutedEventArgs e)
@@ -343,6 +422,18 @@ public partial class MainWindow : Window
         }
 
         await ShowSelectedTodoDialogAsync();
+    }
+
+    private async void TodoDoneButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: CalendarEvent calendarEvent })
+        {
+            return;
+        }
+
+        e.Handled = true;
+        _viewModel.SelectEvent(calendarEvent);
+        await _viewModel.MarkTodoDoneAsync(calendarEvent);
     }
 
     private async Task OpenSelectedEventEditorAsync()
@@ -791,14 +882,29 @@ public partial class MainWindow : Window
             HeadersVisibility = DataGridHeadersVisibility.Column,
             RowHeight = 24
         };
-        grid.MouseDoubleClick += async (_, _) =>
+        grid.MouseDoubleClick += async (_, e) =>
         {
+            if (!DataGridDoubleClickHelper.IsEditableRowDoubleClickTarget(e.OriginalSource))
+            {
+                return;
+            }
+
             if (grid.SelectedItem is not CalendarEvent calendarEvent)
             {
                 return;
             }
 
-            await OpenCalendarEventEditorAsync(calendarEvent);
+            if (calendarEvent.IsTodoLike)
+            {
+                await _viewModel.NavigateToDateAsync(calendarEvent.Start.Date);
+                _viewModel.SelectEvent(calendarEvent);
+                await ShowSelectedTodoDialogAsync();
+            }
+            else
+            {
+                await OpenCalendarEventEditorAsync(calendarEvent);
+            }
+
             eventItems.Clear();
             var refreshedEvents = string.IsNullOrWhiteSpace(query)
                 ? await _viewModel.LoadYearEventsAsync(_viewModel.CurrentMonth)

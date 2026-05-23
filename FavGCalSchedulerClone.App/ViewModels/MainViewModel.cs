@@ -454,6 +454,22 @@ public sealed class MainViewModel : ObservableObject
         Status = "ToDoを処理済みにしました。同期するとGoogleカレンダーへ反映されます。";
     }
 
+    public async Task MarkTodoDoneAsync(CalendarEvent todoEvent)
+    {
+        if (!todoEvent.IsTodoLike)
+        {
+            return;
+        }
+
+        var priority = todoEvent.TodoPriority;
+        todoEvent.Description = TagService.UpdateTodoMarker(todoEvent.Description, priority, 100);
+        todoEvent.IsDirty = true;
+        await _repository.SaveEventAsync(todoEvent);
+        await RefreshCalendarAsync();
+        MarkSelectedTodoDoneCommand.RaiseCanExecuteChanged();
+        Status = "ToDoを処理済みにしました。";
+    }
+
     public async Task<IReadOnlyList<CalendarEvent>> LoadYearEventsAsync(DateTime yearInView)
     {
         var start = new DateTime(yearInView.Year, 1, 1);

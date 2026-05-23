@@ -227,6 +227,22 @@ public sealed class MainViewModelTodoTests
         Assert.Single(System.Text.RegularExpressions.Regex.Matches(viewModel.CompletedTodoEvents[0].Description ?? "", "#todo", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
     }
 
+    [Fact]
+    public async Task MarkTodoDoneAsync_MovesSpecificTodoToCompletedCollection()
+    {
+        var viewModel = await CreateViewModelAsync();
+        await viewModel.SaveTodoAsync(DateTime.Today, "C", 30, "Click done", "body #todoA10%");
+        var todo = viewModel.TodoEvents.Single();
+
+        await viewModel.MarkTodoDoneAsync(todo);
+
+        Assert.Empty(viewModel.TodoEvents);
+        Assert.Single(viewModel.CompletedTodoEvents);
+        Assert.Equal(todo.Id, viewModel.CompletedTodoEvents[0].Id);
+        Assert.Contains("#todoC100%", viewModel.CompletedTodoEvents[0].Description);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(viewModel.CompletedTodoEvents[0].Description ?? "", "#todo", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+    }
+
     private static async Task<MainViewModel> CreateViewModelAsync()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
