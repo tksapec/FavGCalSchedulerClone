@@ -35,6 +35,7 @@ public sealed class MainViewModel : ObservableObject
     private DateTime? _pendingSelectedDate;
     private CalendarViewMode _currentViewMode = CalendarViewMode.Month;
     private string _editorCalendarId = GoogleCalendarDefaults.PrimaryCalendarId;
+    private string? _editorColorId;
     private int _refreshGeneration;
     private IReadOnlyDictionary<string, EventDisplayColors> _eventColorPalette = TagService.DefaultEventColorPalette;
 
@@ -281,6 +282,24 @@ public sealed class MainViewModel : ObservableObject
         set => SetProperty(ref _editorCalendarId, string.IsNullOrWhiteSpace(value) ? GoogleCalendarDefaults.PrimaryCalendarId : value);
     }
 
+    public string? EditorColorId
+    {
+        get => _editorColorId;
+        set => SetProperty(ref _editorColorId, string.IsNullOrWhiteSpace(value) ? null : value);
+    }
+
+    public IReadOnlyList<EventColorSelectionItem> EventColorOptions =>
+        new[] { new EventColorSelectionItem(null, "未指定", TagService.DefaultDisplayColor, TagService.DefaultDisplayForegroundColor) }
+            .Concat(Enumerable.Range(1, 11).Select(index =>
+            {
+                var id = index.ToString(CultureInfo.InvariantCulture);
+                var colors = _eventColorPalette.TryGetValue(id, out var configured)
+                    ? configured
+                    : TagService.DefaultEventColorPalette[id];
+                return new EventColorSelectionItem(id, $"色 {id}", colors.Background, colors.Foreground);
+            }))
+            .ToArray();
+
     public int SelectedTabIndex
     {
         get => _selectedTabIndex;
@@ -367,6 +386,7 @@ public sealed class MainViewModel : ObservableObject
         EndTime = "10:00";
         IsAllDay = _settings.DefaultNewEventIsAllDay;
         ReminderMinutesBeforeStart = null;
+        EditorColorId = null;
         Status = "新しいスケジュールを入力してください。";
     }
 
@@ -394,7 +414,8 @@ public sealed class MainViewModel : ObservableObject
             IsDirty = true,
             IsDeleted = false,
             IsTodoLike = true,
-            ReminderMinutesBeforeStart = ReminderMinutesBeforeStart
+            ReminderMinutesBeforeStart = null,
+            ColorId = EditorColorId
         };
 
         await _repository.SaveEventAsync(todoEvent);
@@ -419,7 +440,7 @@ public sealed class MainViewModel : ObservableObject
         editingTodo.IsDirty = true;
         editingTodo.IsDeleted = false;
         editingTodo.IsTodoLike = true;
-        editingTodo.ReminderMinutesBeforeStart = ReminderMinutesBeforeStart;
+        editingTodo.ColorId = EditorColorId;
 
         await _repository.SaveEventAsync(editingTodo);
         await RefreshCalendarAsync();
@@ -990,6 +1011,7 @@ public sealed class MainViewModel : ObservableObject
         EndTime = calendarEvent.End.ToString("HH:mm", CultureInfo.InvariantCulture);
         IsAllDay = calendarEvent.IsAllDay;
         ReminderMinutesBeforeStart = calendarEvent.ReminderMinutesBeforeStart;
+        EditorColorId = calendarEvent.ColorId;
     }
 
     private async Task SaveEventWithRecurrenceAsync(RecurrenceEditScope? recurrenceScope)
@@ -1077,6 +1099,7 @@ public sealed class MainViewModel : ObservableObject
         calendarEvent.CalendarId = ResolveEditorCalendarId();
         calendarEvent.IsAllDay = IsAllDay;
         calendarEvent.ReminderMinutesBeforeStart = ReminderMinutesBeforeStart;
+        calendarEvent.ColorId = EditorColorId;
         calendarEvent.IsDirty = true;
         calendarEvent.IsDeleted = false;
 
@@ -1608,3 +1631,5 @@ public sealed class MainViewModel : ObservableObject
 
     private static int NormalizeTabIndex(int tabIndex) => Math.Clamp(tabIndex, 0, 4);
 }
+
+public sealed record EventColorSelectionItem(string? Id, string Label, string Background, string Foreground);

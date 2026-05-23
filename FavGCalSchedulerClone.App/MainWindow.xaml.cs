@@ -515,8 +515,8 @@ public partial class MainWindow : Window
     {
         var date = _viewModel.SelectedDay?.Date ?? DateTime.Today;
         var editingEvent = _viewModel.SelectedEvent;
-        var window = CreateOwnedDialog(editingEvent is null ? "スケジュール追加" : "スケジュール編集", 640, 520);
-        var root = CreateDialogRoot();
+        var window = CreateOwnedDialog(editingEvent is null ? "スケジュールの追加" : "スケジュールの編集", 1120, 720);
+        var root = CreateEditorDialogRoot();
         window.Content = root;
 
         var startDate = new DatePicker { SelectedDate = editingEvent?.Start.Date ?? date };
@@ -528,6 +528,7 @@ public partial class MainWindow : Window
         };
         var startTime = TimeComboBox(editingEvent?.Start.ToString("HH:mm") ?? "09:00");
         var endTime = TimeComboBox(editingEvent?.End.ToString("HH:mm") ?? "10:00");
+        var dayCount = new TextBox { Width = 48, Text = "1", HorizontalContentAlignment = HorizontalAlignment.Right };
         var isAllDay = new CheckBox
         {
             Content = "終日",
@@ -549,39 +550,119 @@ public partial class MainWindow : Window
             SelectedValuePath = nameof(GoogleCalendarSelectionItem.Id),
             SelectedValue = editingEvent?.CalendarId ?? _viewModel.EditorCalendarId
         };
+        var color = CreateColorComboBox(editingEvent?.ColorId);
         var title = new TextBox { Text = editingEvent?.Title ?? string.Empty };
         var description = new TextBox
         {
             Text = editingEvent?.Description ?? string.Empty,
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
-            Height = 96,
+            AcceptsTab = true,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto
         };
 
-        root.Children.Add(SectionHeader("日時"));
-        root.Children.Add(FormGrid(
-            ("開始日", startDate, "終了日", endDate),
-            ("開始時刻", startTime, "終了時刻", endTime),
-            ("", isAllDay, "通知", reminder),
-            ("保存先カレンダー", calendar, "", new TextBlock())));
-        root.Children.Add(SectionHeader("詳細"));
-        root.Children.Add(WideField("件名", title));
-        root.Children.Add(WideField("場所", location));
-        root.Children.Add(WideField("内容", description));
-        root.Children.Add(DialogButtons(window, "保存", "キャンセル"));
+        var updatingDateRange = false;
+        void UpdateDayCount()
+        {
+            if (updatingDateRange || startDate.SelectedDate is null || endDate.SelectedDate is null)
+            {
+                return;
+            }
+
+            updatingDateRange = true;
+            var days = Math.Max(1, (endDate.SelectedDate.Value.Date - startDate.SelectedDate.Value.Date).Days + 1);
+            if (endDate.SelectedDate.Value.Date < startDate.SelectedDate.Value.Date)
+            {
+                endDate.SelectedDate = startDate.SelectedDate;
+            }
+            dayCount.Text = days.ToString();
+            updatingDateRange = false;
+        }
+        void UpdateEndDateFromCount()
+        {
+            if (updatingDateRange || startDate.SelectedDate is null || !int.TryParse(dayCount.Text, out var days))
+            {
+                return;
+            }
+
+            updatingDateRange = true;
+            days = Math.Max(1, days);
+            dayCount.Text = days.ToString();
+            endDate.SelectedDate = startDate.SelectedDate.Value.Date.AddDays(days - 1);
+            updatingDateRange = false;
+        }
+        startDate.SelectedDateChanged += (_, _) => UpdateDayCount();
+        endDate.SelectedDateChanged += (_, _) => UpdateDayCount();
+        dayCount.LostFocus += (_, _) => UpdateEndDateFromCount();
+        UpdateDayCount();
+
+        var timeGroup = new GroupBox { Header = "開始時間／終了時間", Margin = new Thickness(0, 0, 10, 10), Padding = new Thickness(14, 14, 14, 6) };
+        var timeGrid = new Grid();
+        AddEditorColumns(timeGrid, 4);
+        AddEditorRow(timeGrid, 0, "開始日", startDate, "終了日", endDate);
+        var dayPanel = new StackPanel { Orientation = Orientation.Horizontal };
+        dayPanel.Children.Add(dayCount);
+        dayPanel.Children.Add(new TextBlock { Text = " 日数", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) });
+        AddEditorRow(timeGrid, 1, "", new TextBlock(), "", dayPanel);
+        AddEditorRow(timeGrid, 2, "開始時間", startTime, "終了時間", endTime);
+        AddEditorRow(timeGrid, 3, "", new TextBlock { Text = "～", HorizontalAlignment = HorizontalAlignment.Right }, "", isAllDay);
+        timeGroup.Content = timeGrid;
+
+        var alarmGroup = new GroupBox { Header = "アラーム", Margin = new Thickness(0, 0, 0, 10), Padding = new Thickness(14, 14, 14, 6) };
+        var alarmGrid = new Grid();
+        AddEditorColumns(alarmGrid, 2);
+        AddEditorRow(alarmGrid, 0, "通知時間", reminder);
+        alarmGroup.Content = alarmGrid;
+
+        var upper = new Grid();
+        upper.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(460) });
+        upper.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumn(timeGroup, 0);
+        Grid.SetColumn(alarmGroup, 1);
+        upper.Children.Add(timeGroup);
+        upper.Children.Add(alarmGroup);
+        Grid.SetRow(upper, 0);
+        root.Children.Add(upper);
+
+        var detailsGroup = new GroupBox { Header = "予定詳細", Padding = new Thickness(18, 14, 18, 10), Margin = new Thickness(0, 0, 0, 10) };
+        var details = new Grid();
+        details.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        details.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        details.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        details.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(90) });
+        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(92) });
+        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(120) });
+        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(88) });
+        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(300) });
+        AddPositionedField(details, 0, 0, "場所", location, 1, 1);
+        AddPositionedField(details, 0, 2, "予定の色", color, 3, 1);
+        AddPositionedField(details, 0, 4, "カレンダー", calendar, 5, 1);
+        AddPositionedField(details, 1, 0, "件名", title, 1, 5);
+        AddPositionedField(details, 2, 0, "内容", description, 1, 5);
+        Grid.SetRowSpan(description, 2);
+        detailsGroup.Content = details;
+        Grid.SetRow(detailsGroup, 1);
+        root.Children.Add(detailsGroup);
+
+        var buttons = DialogButtons(window, "設定", "キャンセル");
+        Grid.SetRow(buttons, 2);
+        root.Children.Add(buttons);
 
         if (window.ShowDialog() != true)
         {
             return;
         }
 
-        _viewModel.EditorCalendarId = calendar.SelectedValue?.ToString() ?? _viewModel.EditorCalendarId;
+        UpdateEndDateFromCount();
         if (editingEvent is null)
         {
             _viewModel.BeginNewEvent(startDate.SelectedDate ?? date);
         }
 
+        _viewModel.EditorCalendarId = calendar.SelectedValue?.ToString() ?? _viewModel.EditorCalendarId;
+        _viewModel.EditorColorId = color.SelectedValue?.ToString();
         _viewModel.StartDate = startDate.SelectedDate ?? date;
         _viewModel.EndDate = endDate.SelectedDate ?? _viewModel.StartDate;
         _viewModel.StartTime = startTime.Text;
@@ -613,8 +694,8 @@ public partial class MainWindow : Window
 
         var editingTodo = _viewModel.SelectedEvent;
         var date = editingTodo.Start.Date;
-        var window = CreateOwnedDialog("ToDoの編集", 560, 430);
-        var root = CreateDialogRoot();
+        var window = CreateOwnedDialog("ＴＯＤＯの編集", 820, 600);
+        var root = CreateEditorDialogRoot();
         window.Content = root;
 
         var dueDate = new DatePicker { SelectedDate = date };
@@ -623,13 +704,6 @@ public partial class MainWindow : Window
         var progress = new Slider { Minimum = 0, Maximum = 100, TickFrequency = 1, IsSnapToTickEnabled = true, Width = 210, Value = editingTodo.TodoProgress };
         var progressLabel = new TextBlock { Text = $"進捗 {editingTodo.TodoProgress}%", VerticalAlignment = VerticalAlignment.Center };
         progress.ValueChanged += (_, _) => progressLabel.Text = $"進捗 {(int)progress.Value}%";
-        var reminder = new ComboBox
-        {
-            ItemsSource = _viewModel.ReminderOptions,
-            DisplayMemberPath = nameof(ReminderOption.Label),
-            SelectedValuePath = nameof(ReminderOption.MinutesBeforeStart),
-            SelectedValue = editingTodo.ReminderMinutesBeforeStart
-        };
         var calendar = new ComboBox
         {
             ItemsSource = _viewModel.AvailableCalendars,
@@ -637,20 +711,11 @@ public partial class MainWindow : Window
             SelectedValuePath = nameof(GoogleCalendarSelectionItem.Id),
             SelectedValue = editingTodo.CalendarId
         };
+        var color = CreateColorComboBox(editingTodo.ColorId);
         var title = new TextBox { Text = editingTodo.Title };
-        var description = new TextBox { Text = editingTodo.Description ?? string.Empty, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 90, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        var description = new TextBox { Text = editingTodo.Description ?? string.Empty, AcceptsReturn = true, AcceptsTab = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
 
-        root.Children.Add(SectionHeader("期限と進捗"));
-        root.Children.Add(FormGrid(
-            ("期限", dueDate, "優先度", priority),
-            ("進捗", progress, "", progressLabel),
-            ("通知", reminder, "", new TextBlock())));
-        root.Children.Add(SectionHeader("詳細"));
-        root.Children.Add(WideField("件名", title));
-        root.Children.Add(WideField("内容", description));
-        root.Children.Add(SectionHeader("保存先"));
-        root.Children.Add(FormGrid(("カレンダー", calendar, "", new TextBlock())));
-        root.Children.Add(DialogButtons(window, "保存", "キャンセル"));
+        AddTodoEditorLayout(root, window, dueDate, priority, progress, progressLabel, color, calendar, title, description);
 
         if (window.ShowDialog() != true)
         {
@@ -658,7 +723,7 @@ public partial class MainWindow : Window
         }
 
         _viewModel.EditorCalendarId = calendar.SelectedValue?.ToString() ?? _viewModel.EditorCalendarId;
-        _viewModel.ReminderMinutesBeforeStart = reminder.SelectedValue as int?;
+        _viewModel.EditorColorId = color.SelectedValue?.ToString();
         await _viewModel.SaveTodoAsync(
             editingTodo,
             dueDate.SelectedDate ?? date,
@@ -671,21 +736,15 @@ public partial class MainWindow : Window
     private async Task ShowTodoDialogAsync()
     {
         var date = _viewModel.SelectedDay?.Date ?? DateTime.Today;
-        var window = CreateOwnedDialog("ToDo追加", 560, 430);
-        var root = CreateDialogRoot();
+        var window = CreateOwnedDialog("ＴＯＤＯの追加", 820, 600);
+        var root = CreateEditorDialogRoot();
         window.Content = root;
 
         var dueDate = new DatePicker { SelectedDate = date };
         var priority = new ComboBox { SelectedIndex = 0, ItemsSource = new[] { "A", "B", "C", "D", "E", "F" } };
-        var progress = new Slider { Minimum = 0, Maximum = 100, TickFrequency = 1, IsSnapToTickEnabled = true, Width = 210 };
-        var progressLabel = new TextBlock { Text = "進捗 0%", VerticalAlignment = VerticalAlignment.Center };
-        progress.ValueChanged += (_, _) => progressLabel.Text = $"進捗 {(int)progress.Value}%";
-        var reminder = new ComboBox
-        {
-            ItemsSource = _viewModel.ReminderOptions,
-            DisplayMemberPath = nameof(ReminderOption.Label),
-            SelectedValuePath = nameof(ReminderOption.MinutesBeforeStart)
-        };
+        var done = new CheckBox { Content = "進捗(0%)", VerticalAlignment = VerticalAlignment.Center };
+        done.Checked += (_, _) => done.Content = "進捗(100%)";
+        done.Unchecked += (_, _) => done.Content = "進捗(0%)";
         var calendar = new ComboBox
         {
             ItemsSource = _viewModel.AvailableCalendars,
@@ -693,20 +752,11 @@ public partial class MainWindow : Window
             SelectedValuePath = nameof(GoogleCalendarSelectionItem.Id),
             SelectedValue = _viewModel.EditorCalendarId
         };
+        var color = CreateColorComboBox(null);
         var title = new TextBox();
-        var description = new TextBox { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 90, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        var description = new TextBox { AcceptsReturn = true, AcceptsTab = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
 
-        root.Children.Add(SectionHeader("期限と進捗"));
-        root.Children.Add(FormGrid(
-            ("期限", dueDate, "優先度", priority),
-            ("進捗", progress, "", progressLabel),
-            ("通知", reminder, "", new TextBlock())));
-        root.Children.Add(SectionHeader("詳細"));
-        root.Children.Add(WideField("件名", title));
-        root.Children.Add(WideField("内容", description));
-        root.Children.Add(SectionHeader("保存先"));
-        root.Children.Add(FormGrid(("カレンダー", calendar, "", new TextBlock())));
-        root.Children.Add(DialogButtons(window, "保存", "キャンセル"));
+        AddTodoEditorLayout(root, window, dueDate, priority, done, new TextBlock(), color, calendar, title, description);
 
         if (window.ShowDialog() != true)
         {
@@ -714,11 +764,11 @@ public partial class MainWindow : Window
         }
 
         _viewModel.EditorCalendarId = calendar.SelectedValue?.ToString() ?? _viewModel.EditorCalendarId;
-        _viewModel.ReminderMinutesBeforeStart = reminder.SelectedValue as int?;
+        _viewModel.EditorColorId = color.SelectedValue?.ToString();
         await _viewModel.SaveTodoAsync(
             dueDate.SelectedDate ?? date,
             priority.SelectedItem?.ToString() ?? "A",
-            (int)progress.Value,
+            done.IsChecked == true ? 100 : 0,
             title.Text,
             description.Text);
     }
@@ -1210,6 +1260,175 @@ public partial class MainWindow : Window
             Margin = new Thickness(16),
             Orientation = Orientation.Vertical
         };
+    }
+
+    private static Grid CreateEditorDialogRoot()
+    {
+        var grid = new Grid { Margin = new Thickness(10) };
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        return grid;
+    }
+
+    private ComboBox CreateColorComboBox(string? selectedColorId)
+    {
+        var combo = new ComboBox
+        {
+            ItemsSource = _viewModel.EventColorOptions,
+            SelectedValuePath = nameof(EventColorSelectionItem.Id),
+            SelectedValue = selectedColorId,
+            MinWidth = 106
+        };
+
+        var template = new DataTemplate(typeof(EventColorSelectionItem));
+        var panel = new FrameworkElementFactory(typeof(StackPanel));
+        panel.SetValue(StackPanel.OrientationProperty, Orientation.Horizontal);
+        var color = new FrameworkElementFactory(typeof(Border));
+        color.SetValue(Border.WidthProperty, 54.0);
+        color.SetValue(Border.HeightProperty, 14.0);
+        color.SetValue(Border.BorderBrushProperty, System.Windows.Media.Brushes.SlateGray);
+        color.SetValue(Border.BorderThicknessProperty, new Thickness(1));
+        color.SetValue(Border.MarginProperty, new Thickness(0, 0, 8, 0));
+        color.SetBinding(Border.BackgroundProperty, new Binding(nameof(EventColorSelectionItem.Background)));
+        var label = new FrameworkElementFactory(typeof(TextBlock));
+        label.SetBinding(TextBlock.TextProperty, new Binding(nameof(EventColorSelectionItem.Label)));
+        label.SetValue(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center);
+        panel.AppendChild(color);
+        panel.AppendChild(label);
+        template.VisualTree = panel;
+        combo.ItemTemplate = template;
+        combo.SelectedIndex = string.IsNullOrWhiteSpace(selectedColorId) ? 0 : combo.SelectedIndex;
+        return combo;
+    }
+
+    private static void AddEditorColumns(Grid grid, int columns)
+    {
+        for (var index = 0; index < columns; index++)
+        {
+            grid.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = index % 2 == 0 ? GridLength.Auto : new GridLength(1, GridUnitType.Star)
+            });
+        }
+    }
+
+    private static void AddEditorRow(Grid grid, int row, string leftLabel, FrameworkElement leftInput)
+    {
+        AddEditorRow(grid, row, leftLabel, leftInput, "", new TextBlock());
+    }
+
+    private static void AddEditorRow(
+        Grid grid,
+        int row,
+        string leftLabel,
+        FrameworkElement leftInput,
+        string rightLabel,
+        FrameworkElement rightInput)
+    {
+        while (grid.RowDefinitions.Count <= row)
+        {
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        }
+
+        AddPositionedField(grid, row, 0, leftLabel, leftInput, 1, 1);
+        if (grid.ColumnDefinitions.Count >= 4)
+        {
+            AddPositionedField(grid, row, 2, rightLabel, rightInput, 3, 1);
+        }
+    }
+
+    private static void AddPositionedField(
+        Grid grid,
+        int row,
+        int labelColumn,
+        string label,
+        FrameworkElement input,
+        int inputColumn,
+        int inputColumnSpan)
+    {
+        if (!string.IsNullOrWhiteSpace(label))
+        {
+            var text = new TextBlock
+            {
+                Text = label,
+                Margin = new Thickness(0, 0, 10, 12),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetRow(text, row);
+            Grid.SetColumn(text, labelColumn);
+            grid.Children.Add(text);
+        }
+
+        input.Margin = new Thickness(0, 0, 16, 12);
+        input.HorizontalAlignment = HorizontalAlignment.Stretch;
+        Grid.SetRow(input, row);
+        Grid.SetColumn(input, inputColumn);
+        Grid.SetColumnSpan(input, inputColumnSpan);
+        grid.Children.Add(input);
+    }
+
+    private static void AddTodoEditorLayout(
+        Grid root,
+        Window window,
+        DatePicker dueDate,
+        ComboBox priority,
+        FrameworkElement progressInput,
+        FrameworkElement progressValue,
+        ComboBox color,
+        ComboBox calendar,
+        TextBox title,
+        TextBox description)
+    {
+        var dueGroup = new GroupBox { Header = "期限／進捗", Padding = new Thickness(16, 16, 16, 8), Margin = new Thickness(0, 0, 10, 10) };
+        var dueGrid = new Grid();
+        AddEditorColumns(dueGrid, 2);
+        AddEditorRow(dueGrid, 0, "期限", dueDate);
+        var progressPanel = new StackPanel { Orientation = Orientation.Horizontal };
+        progressPanel.Children.Add(progressInput);
+        if (progressValue is TextBlock text && !string.IsNullOrWhiteSpace(text.Text))
+        {
+            progressPanel.Children.Add(progressValue);
+        }
+        AddEditorRow(dueGrid, 1, "", progressPanel);
+        dueGroup.Content = dueGrid;
+
+        var priorityGroup = new GroupBox { Header = "優先度", Padding = new Thickness(16), Margin = new Thickness(0, 0, 0, 10) };
+        var priorityGrid = new Grid();
+        AddEditorColumns(priorityGrid, 2);
+        AddEditorRow(priorityGrid, 0, "優先度", priority);
+        priorityGroup.Content = priorityGrid;
+
+        var upper = new Grid();
+        upper.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
+        upper.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumn(dueGroup, 0);
+        Grid.SetColumn(priorityGroup, 1);
+        upper.Children.Add(dueGroup);
+        upper.Children.Add(priorityGroup);
+        Grid.SetRow(upper, 0);
+        root.Children.Add(upper);
+
+        var detailsGroup = new GroupBox { Header = "ToDo詳細", Padding = new Thickness(18, 14, 18, 10), Margin = new Thickness(0, 0, 0, 10) };
+        var details = new Grid();
+        details.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        details.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        details.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(86) });
+        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
+        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(84) });
+        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        AddPositionedField(details, 0, 0, "予定の色", color, 1, 1);
+        AddPositionedField(details, 0, 2, "カレンダー", calendar, 3, 1);
+        AddPositionedField(details, 1, 0, "件名", title, 1, 3);
+        AddPositionedField(details, 2, 0, "内容", description, 1, 3);
+        detailsGroup.Content = details;
+        Grid.SetRow(detailsGroup, 1);
+        root.Children.Add(detailsGroup);
+
+        var buttons = DialogButtons(window, "設定", "キャンセル");
+        Grid.SetRow(buttons, 2);
+        root.Children.Add(buttons);
     }
 
     private static TextBlock SectionHeader(string text)

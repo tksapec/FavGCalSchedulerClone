@@ -81,6 +81,26 @@ public sealed class MainViewModelTodoTests
     }
 
     [Fact]
+    public async Task SaveCurrentEventAsync_PersistsAndUpdatesSelectedEventColor()
+    {
+        var viewModel = await CreateViewModelAsync();
+        viewModel.BeginNewEvent(DateTime.Today);
+        viewModel.Title = "Colored schedule";
+        viewModel.EditorColorId = "9";
+
+        await viewModel.SaveCurrentEventAsync();
+
+        Assert.NotNull(viewModel.SelectedEvent);
+        Assert.Equal("9", viewModel.SelectedEvent.ColorId);
+
+        viewModel.EditorColorId = "5";
+        await viewModel.SaveCurrentEventAsync();
+
+        Assert.NotNull(viewModel.SelectedEvent);
+        Assert.Equal("5", viewModel.SelectedEvent.ColorId);
+    }
+
+    [Fact]
     public async Task GoToTodayAsync_FromDifferentMonth_ReturnsToCurrentMonthAndSelectsToday()
     {
         var viewModel = await CreateViewModelAsync();
@@ -208,6 +228,52 @@ public sealed class MainViewModelTodoTests
 
         Assert.Single(viewModel.TodoEvents);
         Assert.Equal("team", viewModel.TodoEvents[0].CalendarId);
+    }
+
+    [Fact]
+    public async Task SaveTodoAsync_PersistsSelectedColorAndDoesNotCreateReminder()
+    {
+        var viewModel = await CreateViewModelAsync();
+        viewModel.EditorColorId = "5";
+        viewModel.ReminderMinutesBeforeStart = 10;
+
+        await viewModel.SaveTodoAsync(DateTime.Today, "A", 0, "Colored todo", "body");
+
+        var item = Assert.Single(viewModel.TodoEvents);
+        Assert.Equal("5", item.ColorId);
+        Assert.Null(item.ReminderMinutesBeforeStart);
+    }
+
+    [Fact]
+    public async Task SaveTodoAsync_EditPreservesExistingReminderWhileChangingProgressAndColor()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "Imported todo",
+            Description = "#todoF90% body",
+            CalendarId = "primary",
+            ColorId = "5",
+            ReminderMinutesBeforeStart = 30,
+            Start = new DateTimeOffset(DateTime.Today),
+            End = new DateTimeOffset(DateTime.Today.AddDays(1)),
+            IsAllDay = true
+        });
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        await viewModel.InitializeAsync();
+        var item = Assert.Single(viewModel.TodoEvents);
+        viewModel.SelectEvent(item);
+        viewModel.EditorColorId = "9";
+
+        await viewModel.SaveTodoAsync(item, DateTime.Today, "F", 56, item.Title, item.Description);
+
+        var updated = Assert.Single(viewModel.TodoEvents);
+        Assert.Equal("9", updated.ColorId);
+        Assert.Equal(30, updated.ReminderMinutesBeforeStart);
+        Assert.Equal("F", updated.TodoPriority);
+        Assert.Equal(56, updated.TodoProgress);
     }
 
     [Fact]
