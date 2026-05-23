@@ -68,6 +68,19 @@ public sealed class TagServiceTests
     }
 
     [Fact]
+    public void GetTodoMetadata_AcceptsLegacyMaximumPriorityAndIntermediateProgress()
+    {
+        var item = new CalendarEvent { Description = "#todoF90%" };
+
+        var metadata = TagService.GetTodoMetadata(item);
+
+        Assert.NotNull(metadata);
+        Assert.Equal("F", metadata.Priority);
+        Assert.Equal(90, metadata.Progress);
+        Assert.False(metadata.IsDone);
+    }
+
+    [Fact]
     public void UpdateTodoMarker_ReplacesExistingMarkerWithoutDuplicating()
     {
         var updated = TagService.UpdateTodoMarker("既存本文 #todoB10% 詳細", "A", 100);

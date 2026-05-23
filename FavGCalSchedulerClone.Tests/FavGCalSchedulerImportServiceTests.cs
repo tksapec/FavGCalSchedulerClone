@@ -87,6 +87,45 @@ public sealed class FavGCalSchedulerImportServiceTests
         Assert.Equal("5", item.ColorId);
     }
 
+    [Theory]
+    [InlineData(0, 0, "A", false)]
+    [InlineData(90, 5, "F", false)]
+    [InlineData(100, 2, "C", true)]
+    public async Task ImportAsync_RestoresNativeTodoMetadataFromRecordTail(
+        int progress,
+        short priorityOrdinal,
+        string expectedPriority,
+        bool expectedDone)
+    {
+        var sourceFolder = CreateLegacyFolder(
+            recordKind: 0x06,
+            title: "Legacy native todo",
+            todoProgress: progress,
+            todoPriorityOrdinal: priorityOrdinal);
+        var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
+        await repository.InitializeAsync();
+        var service = new FavGCalSchedulerImportService(repository);
+
+        var result = await service.ImportAsync(new FavGCalImportOptions(
+            sourceFolder,
+            new Dictionary<string, string> { ["user@example.com"] = "primary" }));
+
+        var events = await repository.LoadEventsAsync(
+            new DateTimeOffset(2026, 5, 16, 0, 0, 0, TimeZoneInfo.Local.BaseUtcOffset),
+            new DateTimeOffset(2026, 5, 17, 0, 0, 0, TimeZoneInfo.Local.BaseUtcOffset));
+
+        var item = Assert.Single(events);
+        Assert.Equal(1, result.ImportedCount);
+        Assert.Equal(0, result.UnrestoredTodoCount);
+        Assert.True(item.IsTodoLike);
+        Assert.Equal(expectedPriority, item.TodoPriority);
+        Assert.Equal(progress, item.TodoProgress);
+        Assert.Equal(expectedDone, item.IsTodoDone);
+        Assert.Contains($"#todo{expectedPriority}{progress}%", item.Description);
+        Assert.Equal("legacyevent123", item.GoogleEventId);
+        Assert.Equal("5", item.ColorId);
+    }
+
     [Fact]
     public async Task ImportAsync_ReportsLegacyTodoWithoutRecoverableMetadataInsteadOfGuessing()
     {
@@ -104,7 +143,31 @@ public sealed class FavGCalSchedulerImportServiceTests
         Assert.Equal(1, analysis.UnrestoredTodoCount);
         Assert.Equal(0, result.ImportedCount);
         Assert.Equal(1, result.UnrestoredTodoCount);
-        Assert.Contains(result.Warnings, warning => warning.Contains("ToDo 1", StringComparison.Ordinal));
+        Assert.Contains(result.Warnings, warning => warning.Contains("末尾の優先度/進捗値", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(-1, 0)]
+    [InlineData(101, 0)]
+    [InlineData(50, -1)]
+    [InlineData(50, 6)]
+    public async Task ImportAsync_RejectsNativeTodoMetadataOutsideLegacyRange(int progress, short priorityOrdinal)
+    {
+        var sourceFolder = CreateLegacyFolder(
+            recordKind: 0x06,
+            title: "Invalid native todo",
+            todoProgress: progress,
+            todoPriorityOrdinal: priorityOrdinal);
+        var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
+        await repository.InitializeAsync();
+        var service = new FavGCalSchedulerImportService(repository);
+
+        var result = await service.ImportAsync(new FavGCalImportOptions(
+            sourceFolder,
+            new Dictionary<string, string> { ["user@example.com"] = "primary" }));
+
+        Assert.Equal(0, result.ImportedCount);
+        Assert.Equal(1, result.UnrestoredTodoCount);
     }
 
     [Fact]
@@ -135,6 +198,45 @@ public sealed class FavGCalSchedulerImportServiceTests
         Assert.Equal(0, result.ImportedCount);
         Assert.Equal(1, result.LinkedExistingGoogleCount);
         Assert.Single(events);
+    }
+
+    [Fact]
+    public async Task ImportAsync_PromotesPreviouslyImportedGoogleEventWhenNativeTodoIsReimported()
+    {
+        var sourceFolder = CreateLegacyFolder(
+            recordKind: 0x06,
+            title: "Legacy native todo",
+            todoProgress: 90,
+            todoPriorityOrdinal: 5);
+        var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
+        await repository.InitializeAsync();
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "Legacy native todo",
+            Description = "Body #Holiday",
+            CalendarId = "primary",
+            GoogleEventId = "legacyevent123",
+            ColorId = "5",
+            Start = new DateTimeOffset(2026, 5, 16, 9, 0, 0, TimeZoneInfo.Local.BaseUtcOffset),
+            End = new DateTimeOffset(2026, 5, 16, 10, 0, 0, TimeZoneInfo.Local.BaseUtcOffset)
+        });
+        var service = new FavGCalSchedulerImportService(repository);
+
+        var result = await service.ImportAsync(new FavGCalImportOptions(
+            sourceFolder,
+            new Dictionary<string, string> { ["user@example.com"] = "primary" }));
+
+        var events = await repository.LoadEventsAsync(
+            new DateTimeOffset(2026, 5, 16, 0, 0, 0, TimeZoneInfo.Local.BaseUtcOffset),
+            new DateTimeOffset(2026, 5, 17, 0, 0, 0, TimeZoneInfo.Local.BaseUtcOffset));
+
+        var item = Assert.Single(events);
+        Assert.Equal(0, result.ImportedCount);
+        Assert.Equal(1, result.LinkedExistingGoogleCount);
+        Assert.True(item.IsTodoLike);
+        Assert.Equal("F", item.TodoPriority);
+        Assert.Equal(90, item.TodoProgress);
+        Assert.Contains("#todoF90%", item.Description);
     }
 
     [Fact]
@@ -221,7 +323,11 @@ public sealed class FavGCalSchedulerImportServiceTests
         Assert.Equal(0, summary.ExportOnlyCount);
     }
 
-    private static string CreateLegacyFolder(byte recordKind = 0x01, string title = "Legacy todo #todoA56%")
+    private static string CreateLegacyFolder(
+        byte recordKind = 0x01,
+        string title = "Legacy todo #todoA56%",
+        int? todoProgress = null,
+        short? todoPriorityOrdinal = null)
     {
         var folder = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(folder);
@@ -233,7 +339,9 @@ public sealed class FavGCalSchedulerImportServiceTests
             item0=.\FavSchedule1.favcal
             disp0=1
             """);
-        File.WriteAllBytes(Path.Combine(folder, "FavSchedule1.favcal"), CreateFavCalBytes(recordKind, title));
+        File.WriteAllBytes(
+            Path.Combine(folder, "FavSchedule1.favcal"),
+            CreateFavCalBytes(recordKind, title, todoProgress, todoPriorityOrdinal));
         return folder;
     }
 
@@ -265,7 +373,7 @@ public sealed class FavGCalSchedulerImportServiceTests
         return zipPath;
     }
 
-    private static byte[] CreateFavCalBytes(byte recordKind, string title)
+    private static byte[] CreateFavCalBytes(byte recordKind, string title, int? todoProgress = null, short? todoPriorityOrdinal = null)
     {
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.Unicode);
@@ -288,6 +396,12 @@ public sealed class FavGCalSchedulerImportServiceTests
         WriteFavString(writer, "Body #Holiday");
         writer.Write(0);
         WriteGoogleId(writer, "legacyevent123");
+        if (todoProgress.HasValue && todoPriorityOrdinal.HasValue)
+        {
+            writer.Write(todoProgress.Value);
+            writer.Write(todoPriorityOrdinal.Value);
+        }
+
         return stream.ToArray();
     }
 

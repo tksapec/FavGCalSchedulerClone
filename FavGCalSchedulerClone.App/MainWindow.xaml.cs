@@ -613,16 +613,16 @@ public partial class MainWindow : Window
 
         var editingTodo = _viewModel.SelectedEvent;
         var date = editingTodo.Start.Date;
-        var window = CreateOwnedDialog("ToDo edit", 560, 430);
+        var window = CreateOwnedDialog("ToDoの編集", 560, 430);
         var root = CreateDialogRoot();
         window.Content = root;
 
         var dueDate = new DatePicker { SelectedDate = date };
         var priority = new ComboBox { SelectedIndex = 0, ItemsSource = new[] { "A", "B", "C", "D", "E", "F" } };
         priority.SelectedItem = string.IsNullOrWhiteSpace(editingTodo.TodoPriority) ? "A" : editingTodo.TodoPriority;
-        var progress = new Slider { Minimum = 0, Maximum = 100, TickFrequency = 10, IsSnapToTickEnabled = true, Width = 210, Value = editingTodo.TodoProgress };
-        var progressLabel = new TextBlock { Text = $"Progress {editingTodo.TodoProgress}%", VerticalAlignment = VerticalAlignment.Center };
-        progress.ValueChanged += (_, _) => progressLabel.Text = $"Progress {(int)progress.Value}%";
+        var progress = new Slider { Minimum = 0, Maximum = 100, TickFrequency = 1, IsSnapToTickEnabled = true, Width = 210, Value = editingTodo.TodoProgress };
+        var progressLabel = new TextBlock { Text = $"進捗 {editingTodo.TodoProgress}%", VerticalAlignment = VerticalAlignment.Center };
+        progress.ValueChanged += (_, _) => progressLabel.Text = $"進捗 {(int)progress.Value}%";
         var reminder = new ComboBox
         {
             ItemsSource = _viewModel.ReminderOptions,
@@ -640,17 +640,17 @@ public partial class MainWindow : Window
         var title = new TextBox { Text = editingTodo.Title };
         var description = new TextBox { Text = editingTodo.Description ?? string.Empty, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 90, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
 
-        root.Children.Add(SectionHeader("ToDo"));
+        root.Children.Add(SectionHeader("期限と進捗"));
         root.Children.Add(FormGrid(
-            ("Due", dueDate, "Priority", priority),
-            ("Progress", progress, "", progressLabel),
-            ("Reminder", reminder, "", new TextBlock())));
-        root.Children.Add(SectionHeader("Details"));
-        root.Children.Add(WideField("Title", title));
-        root.Children.Add(WideField("Description", description));
-        root.Children.Add(SectionHeader("Save"));
-        root.Children.Add(FormGrid(("Calendar", calendar, "", new TextBlock())));
-        root.Children.Add(DialogButtons(window, "Save", "Cancel"));
+            ("期限", dueDate, "優先度", priority),
+            ("進捗", progress, "", progressLabel),
+            ("通知", reminder, "", new TextBlock())));
+        root.Children.Add(SectionHeader("詳細"));
+        root.Children.Add(WideField("件名", title));
+        root.Children.Add(WideField("内容", description));
+        root.Children.Add(SectionHeader("保存先"));
+        root.Children.Add(FormGrid(("カレンダー", calendar, "", new TextBlock())));
+        root.Children.Add(DialogButtons(window, "保存", "キャンセル"));
 
         if (window.ShowDialog() != true)
         {
@@ -677,7 +677,7 @@ public partial class MainWindow : Window
 
         var dueDate = new DatePicker { SelectedDate = date };
         var priority = new ComboBox { SelectedIndex = 0, ItemsSource = new[] { "A", "B", "C", "D", "E", "F" } };
-        var progress = new Slider { Minimum = 0, Maximum = 100, TickFrequency = 10, IsSnapToTickEnabled = true, Width = 210 };
+        var progress = new Slider { Minimum = 0, Maximum = 100, TickFrequency = 1, IsSnapToTickEnabled = true, Width = 210 };
         var progressLabel = new TextBlock { Text = "進捗 0%", VerticalAlignment = VerticalAlignment.Center };
         progress.ValueChanged += (_, _) => progressLabel.Text = $"進捗 {(int)progress.Value}%";
         var reminder = new ComboBox

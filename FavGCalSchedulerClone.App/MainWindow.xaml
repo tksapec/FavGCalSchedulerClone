@@ -409,31 +409,39 @@
                             </Grid>
                         </Border>
 
-                        <Border Grid.Row="2" Background="#FFFFFF" Padding="10">
-                            <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="*" />
-                                </Grid.RowDefinitions>
-                                <TextBlock Text="未完了タスク" FontSize="13" FontWeight="SemiBold" Foreground="#1E293B" Margin="0,0,0,8" />
-                                <DataGrid Grid.Row="1" ItemsSource="{Binding TodoEvents}" SelectedItem="{Binding SelectedEvent}"
-                                          MouseDoubleClick="TodoEventsGrid_MouseDoubleClick">
-                                    <DataGrid.Columns>
-                                        <DataGridTemplateColumn Header="" Width="34">
-                                            <DataGridTemplateColumn.CellTemplate>
-                                                <DataTemplate>
-                                                    <Button Content="{Binding TodoDoneGlyph}" Padding="0" MinWidth="24" Height="20"
-                                                            Click="TodoDoneButton_Click" />
-                                                </DataTemplate>
-                                            </DataGridTemplateColumn.CellTemplate>
-                                        </DataGridTemplateColumn>
-                                        <DataGridTextColumn Header="P" Binding="{Binding TodoPriorityDisplayText}" Width="34" />
-                                        <DataGridTextColumn Header="%" Binding="{Binding TodoProgressText}" Width="48" />
-                                        <DataGridTextColumn Header="期限" Binding="{Binding DateDisplayText}" Width="120" />
-                                        <DataGridTextColumn Header="件名" Binding="{Binding Title}" Width="*" />
-                                    </DataGrid.Columns>
-                                </DataGrid>
-                            </Grid>
+                        <Border Grid.Row="2" Background="#FFFFFF" Padding="8">
+                            <TabControl>
+                                <TabItem Header="未完了タスク">
+                                    <DataGrid ItemsSource="{Binding TodoEvents}" SelectedItem="{Binding SelectedEvent}"
+                                              MouseDoubleClick="TodoEventsGrid_MouseDoubleClick">
+                                        <DataGrid.Columns>
+                                            <DataGridTemplateColumn Header="" Width="34">
+                                                <DataGridTemplateColumn.CellTemplate>
+                                                    <DataTemplate>
+                                                        <Button Content="{Binding TodoDoneGlyph}" Padding="0" MinWidth="24" Height="20"
+                                                                Click="TodoDoneButton_Click" />
+                                                    </DataTemplate>
+                                                </DataGridTemplateColumn.CellTemplate>
+                                            </DataGridTemplateColumn>
+                                            <DataGridTextColumn Header="P" Binding="{Binding TodoPriorityDisplayText}" Width="34" />
+                                            <DataGridTextColumn Header="%" Binding="{Binding TodoProgressText}" Width="48" />
+                                            <DataGridTextColumn Header="期限" Binding="{Binding DateDisplayText}" Width="120" />
+                                            <DataGridTextColumn Header="件名" Binding="{Binding Title}" Width="*" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </TabItem>
+                                <TabItem Header="処理済みタスク">
+                                    <DataGrid ItemsSource="{Binding CompletedTodoEvents}" SelectedItem="{Binding SelectedEvent}"
+                                              MouseDoubleClick="TodoEventsGrid_MouseDoubleClick">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="P" Binding="{Binding TodoPriorityDisplayText}" Width="34" />
+                                            <DataGridTextColumn Header="%" Binding="{Binding TodoProgressText}" Width="48" />
+                                            <DataGridTextColumn Header="期限" Binding="{Binding DateDisplayText}" Width="120" />
+                                            <DataGridTextColumn Header="件名" Binding="{Binding Title}" Width="*" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </TabItem>
+                            </TabControl>
                         </Border>
                     </Grid>
                 </Border>

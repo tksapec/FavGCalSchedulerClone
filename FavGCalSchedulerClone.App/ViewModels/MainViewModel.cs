@@ -406,7 +406,7 @@ public sealed class MainViewModel : ObservableObject
     {
         if (string.IsNullOrWhiteSpace(title))
         {
-            Status = "Title is required.";
+            Status = "件名を入力してください。";
             return;
         }
 
@@ -424,7 +424,7 @@ public sealed class MainViewModel : ObservableObject
         await _repository.SaveEventAsync(editingTodo);
         await RefreshCalendarAsync();
         SelectedEvent = _visibleEvents.FirstOrDefault(item => item.Id == editingTodo.Id) ?? editingTodo;
-        Status = "ToDo saved.";
+        Status = "ToDoを保存しました。同期するとGoogleカレンダーへ反映されます。";
     }
 
     public async Task SaveTodoAsync(string eventId, DateTime dueDate, string priority, int progress, string title, string? description)

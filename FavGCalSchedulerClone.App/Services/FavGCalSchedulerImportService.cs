@@ -37,7 +37,7 @@ public sealed class FavGCalSchedulerImportService
                 unrestoredTodos += calendar.UnrestoredTodoCount;
                 if (calendar.UnrestoredTodoCount > 0)
                 {
-                    warnings.Add($"{Path.GetFileName(calendar.SourcePath)}: ToDo {calendar.UnrestoredTodoCount} 件は優先度/進捗情報を復元できないため取り込み対象外です。");
+                    warnings.Add($"{Path.GetFileName(calendar.SourcePath)}: ToDo {calendar.UnrestoredTodoCount} 件は末尾の優先度/進捗値が不足または範囲外のため取り込み対象外です。");
                 }
             }
             catch (Exception ex) when (ex is IOException or InvalidDataException or ArgumentException)
@@ -95,15 +95,31 @@ public sealed class FavGCalSchedulerImportService
                     var existingGoogleEvent = await _repository.FindEventByGoogleEventIdAsync(targetCalendarId, calendarEvent.GoogleEventId);
                     if (existingGoogleEvent is not null)
                     {
+                        if (parsedEvent.IsNativeTodo
+                            && PromoteExistingEventToTodo(existingGoogleEvent, calendarEvent, options.MarkImportedEventsDirty))
+                        {
+                            await _repository.SaveEventAsync(existingGoogleEvent);
+                        }
+
                         linked++;
                         continue;
                     }
                 }
 
-                if (options.SkipDuplicates && await _repository.FindDuplicateEventAsync(calendarEvent) is not null)
+                if (options.SkipDuplicates)
                 {
-                    skipped++;
-                    continue;
+                    var existingDuplicate = await _repository.FindDuplicateEventAsync(calendarEvent);
+                    if (existingDuplicate is not null)
+                    {
+                        if (parsedEvent.IsNativeTodo
+                            && PromoteExistingEventToTodo(existingDuplicate, calendarEvent, options.MarkImportedEventsDirty))
+                        {
+                            await _repository.SaveEventAsync(existingDuplicate);
+                        }
+
+                        skipped++;
+                        continue;
+                    }
                 }
 
                 await _repository.SaveEventAsync(calendarEvent);
@@ -205,11 +221,14 @@ public sealed class FavGCalSchedulerImportService
             throw new InvalidDataException("The file is not a FavGCalScheduler FavSchedule file.");
         }
 
+        var records = FindEventPositions(bytes).ToArray();
         var events = new List<FavGCalParsedEvent>();
-        foreach (var record in FindEventPositions(bytes))
+        for (var index = 0; index < records.Length; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (TryParseEvent(bytes, record, sourceCalendar, out var parsed))
+            var record = records[index];
+            var recordEnd = index + 1 < records.Length ? records[index + 1].Position : bytes.Length;
+            if (TryParseEvent(bytes, record, recordEnd, sourceCalendar, out var parsed))
             {
                 events.Add(parsed);
             }
@@ -245,7 +264,7 @@ public sealed class FavGCalSchedulerImportService
         }
     }
 
-    private static bool TryParseEvent(byte[] bytes, FavGCalRecordPosition record, FavGCalSourceCalendar sourceCalendar, out FavGCalParsedEvent parsed)
+    private static bool TryParseEvent(byte[] bytes, FavGCalRecordPosition record, int recordEnd, FavGCalSourceCalendar sourceCalendar, out FavGCalParsedEvent parsed)
     {
         parsed = default!;
         try
@@ -285,18 +304,55 @@ public sealed class FavGCalSchedulerImportService
                 IsDeleted = false,
                 IsDirty = true
             };
+
+            if (record.Kind == TodoEventRecordKind
+                && !TagService.IsTodoLike(calendarEvent)
+                && TryReadLegacyTodoMetadata(bytes, offset, recordEnd, out var priority, out var progress))
+            {
+                calendarEvent.Description = TagService.UpdateTodoMarker(calendarEvent.Description, priority, progress);
+            }
+
             calendarEvent.IsTodoLike = TagService.IsTodoLike(calendarEvent);
 
             parsed = new FavGCalParsedEvent(
                 sourceCalendar,
                 calendarEvent,
-                MissingTodoMetadata: record.Kind == TodoEventRecordKind && !calendarEvent.IsTodoLike);
+                MissingTodoMetadata: record.Kind == TodoEventRecordKind && !calendarEvent.IsTodoLike,
+                IsNativeTodo: record.Kind == TodoEventRecordKind);
             return true;
         }
         catch (Exception ex) when (ex is ArgumentOutOfRangeException or ArgumentException or InvalidDataException)
         {
             return false;
         }
+    }
+
+    private static bool TryReadLegacyTodoMetadata(
+        byte[] bytes,
+        int parsedPayloadEnd,
+        int recordEnd,
+        out string priority,
+        out int progress)
+    {
+        priority = "";
+        progress = 0;
+
+        const int metadataLength = sizeof(int) + sizeof(short);
+        var metadataOffset = recordEnd - metadataLength;
+        if (metadataOffset < parsedPayloadEnd || metadataOffset < 0 || recordEnd > bytes.Length)
+        {
+            return false;
+        }
+
+        progress = BitConverter.ToInt32(bytes, metadataOffset);
+        var priorityOrdinal = BitConverter.ToInt16(bytes, metadataOffset + sizeof(int));
+        if (progress is < 0 or > 100 || priorityOrdinal is < 0 or > 5)
+        {
+            return false;
+        }
+
+        priority = ((char)('A' + priorityOrdinal)).ToString();
+        return true;
     }
 
     private static string ReadFavString(byte[] bytes, ref int offset)
@@ -394,6 +450,23 @@ public sealed class FavGCalSchedulerImportService
             IsTodoLike = calendarEvent.IsTodoLike
         };
     }
+
+    private static bool PromoteExistingEventToTodo(CalendarEvent existingEvent, CalendarEvent importedTodo, bool markDirty)
+    {
+        if (!importedTodo.IsTodoLike || existingEvent.IsTodoLike)
+        {
+            return false;
+        }
+
+        existingEvent.Description = TagService.UpdateTodoMarker(
+            existingEvent.Description ?? importedTodo.Description,
+            importedTodo.TodoPriority,
+            importedTodo.TodoProgress);
+        existingEvent.IsTodoLike = true;
+        existingEvent.IsDirty |= markDirty;
+        existingEvent.ColorId ??= importedTodo.ColorId;
+        return true;
+    }
 }
 
 public sealed record FavGCalImportAnalysis(
@@ -410,7 +483,11 @@ public sealed record FavGCalSourceCalendar(string SourcePath, string CalendarKey
     public int UnrestoredTodoCount { get; set; }
 }
 
-public sealed record FavGCalParsedEvent(FavGCalSourceCalendar SourceCalendar, CalendarEvent Event, bool MissingTodoMetadata = false);
+public sealed record FavGCalParsedEvent(
+    FavGCalSourceCalendar SourceCalendar,
+    CalendarEvent Event,
+    bool MissingTodoMetadata = false,
+    bool IsNativeTodo = false);
 internal readonly record struct FavGCalRecordPosition(int Position, byte Kind);
 
 public sealed record FavGCalImportOptions(
