@@ -327,12 +327,22 @@ public partial class MainWindow : Window
 
     private async void SelectedDayEventsGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
+        if (!DataGridDoubleClickHelper.IsEditableRowDoubleClickTarget(e.OriginalSource))
+        {
+            return;
+        }
+
         await OpenSelectedEventEditorAsync();
     }
 
     private async void TodoEventsGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        await OpenSelectedEventEditorAsync();
+        if (!DataGridDoubleClickHelper.IsEditableRowDoubleClickTarget(e.OriginalSource))
+        {
+            return;
+        }
+
+        await ShowSelectedTodoDialogAsync();
     }
 
     private async Task OpenSelectedEventEditorAsync()
@@ -501,6 +511,70 @@ public partial class MainWindow : Window
         }
 
         await _viewModel.SaveCurrentEventAsync(recurrenceScope);
+    }
+
+    private async Task ShowSelectedTodoDialogAsync()
+    {
+        if (_viewModel.SelectedEvent?.IsTodoLike != true)
+        {
+            return;
+        }
+
+        var editingTodo = _viewModel.SelectedEvent;
+        var date = editingTodo.Start.Date;
+        var window = CreateOwnedDialog("ToDo edit", 560, 430);
+        var root = CreateDialogRoot();
+        window.Content = root;
+
+        var dueDate = new DatePicker { SelectedDate = date };
+        var priority = new ComboBox { SelectedIndex = 0, ItemsSource = new[] { "A", "B", "C", "D", "E", "F" } };
+        priority.SelectedItem = string.IsNullOrWhiteSpace(editingTodo.TodoPriority) ? "A" : editingTodo.TodoPriority;
+        var progress = new Slider { Minimum = 0, Maximum = 100, TickFrequency = 10, IsSnapToTickEnabled = true, Width = 210, Value = editingTodo.TodoProgress };
+        var progressLabel = new TextBlock { Text = $"Progress {editingTodo.TodoProgress}%", VerticalAlignment = VerticalAlignment.Center };
+        progress.ValueChanged += (_, _) => progressLabel.Text = $"Progress {(int)progress.Value}%";
+        var reminder = new ComboBox
+        {
+            ItemsSource = _viewModel.ReminderOptions,
+            DisplayMemberPath = nameof(ReminderOption.Label),
+            SelectedValuePath = nameof(ReminderOption.MinutesBeforeStart),
+            SelectedValue = editingTodo.ReminderMinutesBeforeStart
+        };
+        var calendar = new ComboBox
+        {
+            ItemsSource = _viewModel.AvailableCalendars,
+            DisplayMemberPath = nameof(GoogleCalendarSelectionItem.Summary),
+            SelectedValuePath = nameof(GoogleCalendarSelectionItem.Id),
+            SelectedValue = editingTodo.CalendarId
+        };
+        var title = new TextBox { Text = editingTodo.Title };
+        var description = new TextBox { Text = editingTodo.Description ?? string.Empty, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 90, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+
+        root.Children.Add(SectionHeader("ToDo"));
+        root.Children.Add(FormGrid(
+            ("Due", dueDate, "Priority", priority),
+            ("Progress", progress, "", progressLabel),
+            ("Reminder", reminder, "", new TextBlock())));
+        root.Children.Add(SectionHeader("Details"));
+        root.Children.Add(WideField("Title", title));
+        root.Children.Add(WideField("Description", description));
+        root.Children.Add(SectionHeader("Save"));
+        root.Children.Add(FormGrid(("Calendar", calendar, "", new TextBlock())));
+        root.Children.Add(DialogButtons(window, "Save", "Cancel"));
+
+        if (window.ShowDialog() != true)
+        {
+            return;
+        }
+
+        _viewModel.EditorCalendarId = calendar.SelectedValue?.ToString() ?? _viewModel.EditorCalendarId;
+        _viewModel.ReminderMinutesBeforeStart = reminder.SelectedValue as int?;
+        await _viewModel.SaveTodoAsync(
+            editingTodo,
+            dueDate.SelectedDate ?? date,
+            priority.SelectedItem?.ToString() ?? "A",
+            (int)progress.Value,
+            title.Text,
+            description.Text);
     }
 
     private async Task ShowTodoDialogAsync()

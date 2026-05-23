@@ -28,11 +28,27 @@ public sealed class CalendarEvent
 
     public string SearchText => $"{Title} {Description} {Location}".Trim();
     public string CalendarDisplayText => IsAllDay ? Title : $"{Start:HH:mm} {Title}";
+    public string CalendarCellDisplayText
+    {
+        get
+        {
+            if (!IsTodoLike)
+            {
+                return CalendarDisplayText;
+            }
+
+            var priority = string.IsNullOrWhiteSpace(TodoPriority) ? "" : $"[{TodoPriority}] ";
+            return $"{TodoDoneGlyph} {priority}{TodoProgress}% {Title}".Trim();
+        }
+    }
+
     public string DateDisplayText => IsAllDay ? Start.ToString("yyyy/MM/dd") : Start.ToString("yyyy/MM/dd HH:mm");
     public TodoMetadata? TodoMetadata => FavGCalSchedulerClone.App.Services.TagService.GetTodoMetadata(this);
     public string TodoPriority => TodoMetadata?.Priority ?? "";
     public int TodoProgress => TodoMetadata?.Progress ?? 0;
     public string TodoProgressText => TodoMetadata?.ProgressText ?? "";
+    public string TodoDoneGlyph => IsTodoDone ? "[x]" : "[ ]";
+    public string TodoPriorityDisplayText => string.IsNullOrWhiteSpace(TodoPriority) ? "-" : TodoPriority;
     public bool IsTodoDone => TodoMetadata?.IsDone == true;
     public bool IsRecurringMaster => !string.IsNullOrWhiteSpace(RecurrenceJson) && !IsRecurrenceException;
     public bool IsRecurringSeriesItem => IsRecurringMaster || IsRecurrenceException || IsGeneratedOccurrence || !string.IsNullOrWhiteSpace(RecurringEventId) || !string.IsNullOrWhiteSpace(RecurringParentId);

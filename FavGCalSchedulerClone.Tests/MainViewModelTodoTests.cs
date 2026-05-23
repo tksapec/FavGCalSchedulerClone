@@ -210,6 +210,23 @@ public sealed class MainViewModelTodoTests
         Assert.Equal("team", viewModel.TodoEvents[0].CalendarId);
     }
 
+    [Fact]
+    public async Task SaveTodoAsync_WithExistingEventId_UpdatesTodoWithoutDuplicatingMarker()
+    {
+        var viewModel = await CreateViewModelAsync();
+        await viewModel.SaveTodoAsync(DateTime.Today, "B", 10, "Existing todo", "body #todoC20%");
+        var existing = viewModel.TodoEvents.Single();
+
+        await viewModel.SaveTodoAsync(existing.Id, DateTime.Today.AddDays(1), "A", 100, "Updated todo", "updated #todoB10%");
+
+        Assert.Empty(viewModel.TodoEvents);
+        Assert.Single(viewModel.CompletedTodoEvents);
+        Assert.Equal(existing.Id, viewModel.CompletedTodoEvents[0].Id);
+        Assert.Equal("Updated todo", viewModel.CompletedTodoEvents[0].Title);
+        Assert.Contains("#todoA100%", viewModel.CompletedTodoEvents[0].Description);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(viewModel.CompletedTodoEvents[0].Description ?? "", "#todo", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+    }
+
     private static async Task<MainViewModel> CreateViewModelAsync()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");

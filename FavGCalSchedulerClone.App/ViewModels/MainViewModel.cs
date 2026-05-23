@@ -400,6 +400,44 @@ public sealed class MainViewModel : ObservableObject
         Status = "ToDoを保存しました。同期するとGoogleカレンダーへ反映されます。";
     }
 
+    public async Task SaveTodoAsync(CalendarEvent editingTodo, DateTime dueDate, string priority, int progress, string title, string? description)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            Status = "Title is required.";
+            return;
+        }
+
+        editingTodo.Title = title.Trim();
+        editingTodo.Description = TagService.UpdateTodoMarker(description, priority, progress);
+        editingTodo.CalendarId = ResolveEditorCalendarId();
+        editingTodo.Start = new DateTimeOffset(dueDate.Date);
+        editingTodo.End = new DateTimeOffset(dueDate.Date.AddDays(1));
+        editingTodo.IsAllDay = true;
+        editingTodo.IsDirty = true;
+        editingTodo.IsDeleted = false;
+        editingTodo.IsTodoLike = true;
+        editingTodo.ReminderMinutesBeforeStart = ReminderMinutesBeforeStart;
+
+        await _repository.SaveEventAsync(editingTodo);
+        await RefreshCalendarAsync();
+        SelectedEvent = _visibleEvents.FirstOrDefault(item => item.Id == editingTodo.Id) ?? editingTodo;
+        Status = "ToDo saved.";
+    }
+
+    public async Task SaveTodoAsync(string eventId, DateTime dueDate, string priority, int progress, string title, string? description)
+    {
+        var editingTodo = _storedEvents.FirstOrDefault(item => item.Id == eventId)
+            ?? _visibleEvents.FirstOrDefault(item => item.Id == eventId);
+        if (editingTodo is null)
+        {
+            await SaveTodoAsync(dueDate, priority, progress, title, description);
+            return;
+        }
+
+        await SaveTodoAsync(editingTodo, dueDate, priority, progress, title, description);
+    }
+
     public async Task MarkSelectedTodoDoneAsync()
     {
         if (SelectedEvent is null || !SelectedEvent.IsTodoLike)

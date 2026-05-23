@@ -101,12 +101,12 @@
         </Style>
 
         <Style x:Key="EventBar" TargetType="Border">
-            <Setter Property="BorderBrush" Value="#94A3B8" />
+            <Setter Property="BorderBrush" Value="#64748B" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="3" />
-            <Setter Property="Height" Value="20" />
-            <Setter Property="Margin" Value="0,2,0,0" />
-            <Setter Property="Padding" Value="5,0" />
+            <Setter Property="CornerRadius" Value="2" />
+            <Setter Property="Height" Value="19" />
+            <Setter Property="Margin" Value="0,1,0,0" />
+            <Setter Property="Padding" Value="4,0" />
         </Style>
 
         <Style TargetType="DataGrid">
@@ -278,7 +278,7 @@
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate>
                                                             <Border Style="{StaticResource EventBar}" Background="{Binding DisplayColor}" MouseLeftButtonDown="EventBar_MouseLeftButtonDown">
-                                                                <TextBlock Text="{Binding CalendarDisplayText}" FontSize="11" Foreground="#111827"
+                                                                <TextBlock Text="{Binding CalendarCellDisplayText}" FontSize="11" Foreground="#111827"
                                                                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                                             </Border>
                                                         </DataTemplate>
@@ -345,7 +345,7 @@
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate>
                                                             <Border Style="{StaticResource EventBar}" Background="{Binding DisplayColor}" MouseLeftButtonDown="EventBar_MouseLeftButtonDown">
-                                                                <TextBlock Text="{Binding CalendarDisplayText}" FontSize="11" Foreground="#111827"
+                                                                <TextBlock Text="{Binding CalendarCellDisplayText}" FontSize="11" Foreground="#111827"
                                                                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                                             </Border>
                                                         </DataTemplate>
@@ -416,6 +416,9 @@
                                 <DataGrid Grid.Row="1" ItemsSource="{Binding TodoEvents}" SelectedItem="{Binding SelectedEvent}"
                                           MouseDoubleClick="TodoEventsGrid_MouseDoubleClick">
                                     <DataGrid.Columns>
+                                        <DataGridTextColumn Header="" Binding="{Binding TodoDoneGlyph}" Width="34" />
+                                        <DataGridTextColumn Header="P" Binding="{Binding TodoPriorityDisplayText}" Width="34" />
+                                        <DataGridTextColumn Header="%" Binding="{Binding TodoProgressText}" Width="48" />
                                         <DataGridTextColumn Header="期限" Binding="{Binding DateDisplayText}" Width="120" />
                                         <DataGridTextColumn Header="件名" Binding="{Binding Title}" Width="*" />
                                     </DataGrid.Columns>
