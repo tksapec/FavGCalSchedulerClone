@@ -123,6 +123,66 @@ public sealed class TagServiceTests
         Assert.True(TagService.HasWorkdayOverride([item], saturday));
     }
 
+    [Fact]
+    public void ResolveDisplayColor_UsesImportedEventColorWhenNoDisplayTagExists()
+    {
+        var item = new CalendarEvent { Title = "Imported", ColorId = "9" };
+
+        var color = TagService.ResolveDisplayColors(item);
+
+        Assert.Equal("#5484ED", color.Background);
+        Assert.Equal("#FFFFFF", color.Foreground);
+    }
+
+    [Fact]
+    public void ResolveDisplayColor_PrefersEventColorOverConfiguredTagColor()
+    {
+        var item = new CalendarEvent { Title = "Important #important", ColorId = "9" };
+
+        var color = TagService.ResolveDisplayColors(item);
+
+        Assert.Equal("#5484ED", color.Background);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("99")]
+    public void ResolveDisplayColor_UsesNeutralFallbackForMissingOrUnknownEventColor(string? colorId)
+    {
+        var item = new CalendarEvent { Title = "No color", ColorId = colorId };
+
+        var color = TagService.ResolveDisplayColors(item);
+
+        Assert.Equal(TagService.DefaultDisplayColor, color.Background);
+        Assert.Equal(TagService.DefaultDisplayForegroundColor, color.Foreground);
+    }
+
+    [Fact]
+    public void ResolveDisplayColor_DoesNotUseHolidayOrWorkdayTagsForEventLabels()
+    {
+        var item = new CalendarEvent { Title = "Special #holiday #workday", ColorId = "9" };
+
+        var color = TagService.ResolveDisplayColors(item);
+
+        Assert.Equal("#5484ED", color.Background);
+    }
+
+    [Fact]
+    public void ResolveDisplayColor_UsesCachedGooglePaletteBeforeBuiltInFallback()
+    {
+        var item = new CalendarEvent { Title = "Remote", ColorId = "5" };
+        var cached = new Dictionary<string, EventDisplayColors>
+        {
+            ["5"] = new("#123456", "#FEDCBA")
+        };
+
+        var color = TagService.ResolveDisplayColors(item, cached);
+
+        Assert.Equal("#123456", color.Background);
+        Assert.Equal("#FEDCBA", color.Foreground);
+    }
+
     private static CalendarEvent AllDayEvent(DateTime date, string title)
     {
         return new CalendarEvent

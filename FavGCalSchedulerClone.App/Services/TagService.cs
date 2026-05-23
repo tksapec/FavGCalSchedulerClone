@@ -5,6 +5,24 @@ namespace FavGCalSchedulerClone.App.Services;
 
 public static partial class TagService
 {
+    public const string DefaultDisplayColor = "#E5E7EB";
+    public const string DefaultDisplayForegroundColor = "#111827";
+
+    public static IReadOnlyDictionary<string, EventDisplayColors> DefaultEventColorPalette { get; } = new Dictionary<string, EventDisplayColors>(StringComparer.Ordinal)
+    {
+        ["1"] = new("#A4BDFC", "#1D1D1D"),
+        ["2"] = new("#7AE7BF", "#1D1D1D"),
+        ["3"] = new("#DBADFF", "#1D1D1D"),
+        ["4"] = new("#FF887C", "#1D1D1D"),
+        ["5"] = new("#FBD75B", "#1D1D1D"),
+        ["6"] = new("#FFB878", "#1D1D1D"),
+        ["7"] = new("#46D6DB", "#1D1D1D"),
+        ["8"] = new("#E1E1E1", "#1D1D1D"),
+        ["9"] = new("#5484ED", "#FFFFFF"),
+        ["10"] = new("#51B749", "#FFFFFF"),
+        ["11"] = new("#DC2127", "#FFFFFF")
+    };
+
     public static IReadOnlyList<CalendarTag> DefaultTags { get; } =
     [
         new() { Name = "#holiday", Color = "#FCA5A5", Priority = 100 },
@@ -88,6 +106,26 @@ public static partial class TagService
             .Where(t => eventTags.Any(et => string.Equals(et, t.Name, StringComparison.OrdinalIgnoreCase)))
             .OrderByDescending(t => t.Priority)
             .FirstOrDefault();
+    }
+
+    public static EventDisplayColors ResolveDisplayColors(
+        CalendarEvent calendarEvent,
+        IReadOnlyDictionary<string, EventDisplayColors>? eventColorPalette = null)
+    {
+        if (!string.IsNullOrWhiteSpace(calendarEvent.ColorId))
+        {
+            if (eventColorPalette is not null && eventColorPalette.TryGetValue(calendarEvent.ColorId, out var cachedColor))
+            {
+                return cachedColor;
+            }
+
+            if (DefaultEventColorPalette.TryGetValue(calendarEvent.ColorId, out var fallbackColor))
+            {
+                return fallbackColor;
+            }
+        }
+
+        return new EventDisplayColors(DefaultDisplayColor, DefaultDisplayForegroundColor);
     }
 
     [GeneratedRegex(@"#[\p{L}\p{N}_%-]+", RegexOptions.Compiled)]

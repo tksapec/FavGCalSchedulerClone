@@ -114,6 +114,7 @@ public static class RecurrenceExpansionService
             IsTodoLike = source.IsTodoLike,
             ReminderMinutesBeforeStart = source.ReminderMinutesBeforeStart,
             DisplayColor = source.DisplayColor,
+            DisplayForegroundColor = source.DisplayForegroundColor,
             IsGeneratedOccurrence = source.IsGeneratedOccurrence
         };
     }

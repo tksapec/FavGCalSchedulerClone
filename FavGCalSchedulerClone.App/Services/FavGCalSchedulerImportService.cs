@@ -7,7 +7,8 @@ namespace FavGCalSchedulerClone.App.Services;
 
 public sealed class FavGCalSchedulerImportService
 {
-    private static readonly byte[] EventMarker = [0x08, 0x00, 0x01, 0x00];
+    private const byte NormalEventRecordKind = 0x01;
+    private const byte TodoEventRecordKind = 0x06;
     private readonly CalendarRepository _repository;
     private readonly GoogleCalendarExportCompareService _compareService = new();
 
@@ -22,6 +23,7 @@ public sealed class FavGCalSchedulerImportService
         var warnings = new List<string>();
         var totalEvents = 0;
         var parseErrors = 0;
+        var unrestoredTodos = 0;
 
         foreach (var calendar in calendars)
         {
@@ -29,8 +31,14 @@ public sealed class FavGCalSchedulerImportService
             try
             {
                 var parsed = await ParseFavCalAsync(calendar, cancellationToken);
-                calendar.EventCount = parsed.Count;
-                totalEvents += parsed.Count;
+                calendar.EventCount = parsed.Count(item => !item.MissingTodoMetadata);
+                calendar.UnrestoredTodoCount = parsed.Count(item => item.MissingTodoMetadata);
+                totalEvents += calendar.EventCount;
+                unrestoredTodos += calendar.UnrestoredTodoCount;
+                if (calendar.UnrestoredTodoCount > 0)
+                {
+                    warnings.Add($"{Path.GetFileName(calendar.SourcePath)}: ToDo {calendar.UnrestoredTodoCount} 件は優先度/進捗情報を復元できないため取り込み対象外です。");
+                }
             }
             catch (Exception ex) when (ex is IOException or InvalidDataException or ArgumentException)
             {
@@ -39,7 +47,7 @@ public sealed class FavGCalSchedulerImportService
             }
         }
 
-        return new FavGCalImportAnalysis(sourceFolder, calendars, totalEvents, parseErrors, warnings);
+        return new FavGCalImportAnalysis(sourceFolder, calendars, totalEvents, unrestoredTodos, parseErrors, warnings);
     }
 
     public async Task<FavGCalImportResult> ImportAsync(FavGCalImportOptions options, CancellationToken cancellationToken = default)
@@ -71,6 +79,11 @@ public sealed class FavGCalSchedulerImportService
             foreach (var parsedEvent in parsedEvents)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (parsedEvent.MissingTodoMetadata)
+                {
+                    continue;
+                }
+
                 var calendarEvent = parsedEvent.Event;
                 calendarEvent.CalendarId = targetCalendarId;
                 calendarEvent.IsDirty = options.MarkImportedEventsDirty;
@@ -105,7 +118,7 @@ public sealed class FavGCalSchedulerImportService
             comparisonSummary = _compareService.Compare(normalizedImportedEvents, exportData.Events);
         }
 
-        return new FavGCalImportResult(imported, linked, skipped, parseErrors, warnings, comparisonSummary);
+        return new FavGCalImportResult(imported, linked, skipped, analysis.UnrestoredTodoCount, parseErrors, warnings, comparisonSummary);
     }
 
     public static string? ExtractCalendarIdFromFeedUrl(string? feedUrl)
@@ -180,7 +193,7 @@ public sealed class FavGCalSchedulerImportService
     {
         var bytes = File.ReadAllBytes(sourcePath);
         var firstEvent = FindEventPositions(bytes).FirstOrDefault();
-        var headerLength = firstEvent > 0 ? firstEvent : Math.Min(bytes.Length, 2048);
+        var headerLength = firstEvent.Position > 0 ? firstEvent.Position : Math.Min(bytes.Length, 2048);
         return ExtractReadableStrings(bytes.Take(headerLength).ToArray()).ToArray();
     }
 
@@ -193,10 +206,10 @@ public sealed class FavGCalSchedulerImportService
         }
 
         var events = new List<FavGCalParsedEvent>();
-        foreach (var position in FindEventPositions(bytes))
+        foreach (var record in FindEventPositions(bytes))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (TryParseEvent(bytes, position, sourceCalendar, out var parsed))
+            if (TryParseEvent(bytes, record, sourceCalendar, out var parsed))
             {
                 events.Add(parsed);
             }
@@ -205,11 +218,12 @@ public sealed class FavGCalSchedulerImportService
         return events;
     }
 
-    private static IEnumerable<int> FindEventPositions(byte[] bytes)
+    private static IEnumerable<FavGCalRecordPosition> FindEventPositions(byte[] bytes)
     {
-        for (var index = 0; index <= bytes.Length - EventMarker.Length - 42; index += 2)
+        for (var index = 0; index <= bytes.Length - 46; index += 2)
         {
-            if (!Matches(bytes, index, EventMarker))
+            if (bytes[index] != 0x08 || bytes[index + 1] != 0x00 || bytes[index + 3] != 0x00
+                || bytes[index + 2] is not (NormalEventRecordKind or TodoEventRecordKind))
             {
                 continue;
             }
@@ -227,15 +241,16 @@ public sealed class FavGCalSchedulerImportService
                 continue;
             }
 
-            yield return index;
+            yield return new FavGCalRecordPosition(index, bytes[index + 2]);
         }
     }
 
-    private static bool TryParseEvent(byte[] bytes, int position, FavGCalSourceCalendar sourceCalendar, out FavGCalParsedEvent parsed)
+    private static bool TryParseEvent(byte[] bytes, FavGCalRecordPosition record, FavGCalSourceCalendar sourceCalendar, out FavGCalParsedEvent parsed)
     {
         parsed = default!;
         try
         {
+            var position = record.Position;
             var colorIndex = BitConverter.ToInt32(bytes, position + 8);
             var start = DateTimeOffset.FromUnixTimeSeconds(BitConverter.ToInt64(bytes, position + 12)).ToLocalTime();
             var end = DateTimeOffset.FromUnixTimeSeconds(BitConverter.ToInt64(bytes, position + 20)).ToLocalTime();
@@ -272,7 +287,10 @@ public sealed class FavGCalSchedulerImportService
             };
             calendarEvent.IsTodoLike = TagService.IsTodoLike(calendarEvent);
 
-            parsed = new FavGCalParsedEvent(sourceCalendar, calendarEvent);
+            parsed = new FavGCalParsedEvent(
+                sourceCalendar,
+                calendarEvent,
+                MissingTodoMetadata: record.Kind == TodoEventRecordKind && !calendarEvent.IsTodoLike);
             return true;
         }
         catch (Exception ex) when (ex is ArgumentOutOfRangeException or ArgumentException or InvalidDataException)
@@ -337,19 +355,6 @@ public sealed class FavGCalSchedulerImportService
         }
     }
 
-    private static bool Matches(byte[] bytes, int index, byte[] marker)
-    {
-        for (var i = 0; i < marker.Length; i++)
-        {
-            if (bytes[index + i] != marker[i])
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
     private static bool IsPlausibleUnixSeconds(long seconds)
     {
         return seconds is >= 631152000 and <= 4102444800;
@@ -395,15 +400,18 @@ public sealed record FavGCalImportAnalysis(
     string SourceFolder,
     IReadOnlyList<FavGCalSourceCalendar> Calendars,
     int TotalEventCount,
+    int UnrestoredTodoCount,
     int ParseErrorCount,
     IReadOnlyList<string> Warnings);
 
 public sealed record FavGCalSourceCalendar(string SourcePath, string CalendarKey, string DisplayName, string? FeedUrl)
 {
     public int EventCount { get; set; }
+    public int UnrestoredTodoCount { get; set; }
 }
 
-public sealed record FavGCalParsedEvent(FavGCalSourceCalendar SourceCalendar, CalendarEvent Event);
+public sealed record FavGCalParsedEvent(FavGCalSourceCalendar SourceCalendar, CalendarEvent Event, bool MissingTodoMetadata = false);
+internal readonly record struct FavGCalRecordPosition(int Position, byte Kind);
 
 public sealed record FavGCalImportOptions(
     string SourceFolder,
@@ -419,6 +427,7 @@ public sealed record FavGCalImportResult(
     int ImportedCount,
     int LinkedExistingGoogleCount,
     int SkippedDuplicateCount,
+    int UnrestoredTodoCount,
     int ParseErrorCount,
     IReadOnlyList<string> Warnings,
     GoogleCalendarComparisonSummary? ComparisonSummary);

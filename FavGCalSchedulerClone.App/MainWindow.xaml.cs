@@ -753,6 +753,13 @@ public partial class MainWindow : Window
         };
         FavGCalImportAnalysis? analysis = null;
 
+        void ShowImportError(string operation, Exception ex)
+        {
+            var message = $"{operation}に失敗しました。\n\n{ex.Message}";
+            analysisText.Text = message;
+            MessageBox.Show(this, message, "FavGCalScheduler データ移行エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+
         var oauthButtons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         var browseOAuth = new Button { Content = "OAuth JSON選択", MinWidth = 120 };
         var authorize = new Button { Content = "Google認証", MinWidth = 110 };
@@ -768,23 +775,46 @@ public partial class MainWindow : Window
             };
             if (dialog.ShowDialog(this) == true)
             {
-                oauthPath.Text = dialog.FileName;
-                await _viewModel.SetOAuthClientJsonPathAsync(dialog.FileName);
+                try
+                {
+                    oauthPath.Text = dialog.FileName;
+                    await _viewModel.SetOAuthClientJsonPathAsync(dialog.FileName);
+                }
+                catch (Exception ex)
+                {
+                    ShowImportError("OAuth JSON の設定", ex);
+                }
             }
         };
         authorize.Click += async (_, _) =>
         {
-            await _viewModel.SetOAuthClientJsonPathAsync(oauthPath.Text);
-            await _viewModel.AuthorizeGoogleAsync();
-            targetCalendar.ItemsSource = _viewModel.AvailableCalendars;
+            try
+            {
+                await _viewModel.SetOAuthClientJsonPathAsync(oauthPath.Text);
+                await _viewModel.AuthorizeGoogleAsync();
+                targetCalendar.ItemsSource = _viewModel.AvailableCalendars;
+            }
+            catch (Exception ex)
+            {
+                ShowImportError("Google 認証", ex);
+                return;
+            }
             analysisText.Text = "Google認証とカレンダー一覧取得が完了しました。";
         };
 
         var analyze = new Button { Content = "解析", MinWidth = 96 };
         analyze.Click += async (_, _) =>
         {
-            analysis = await _viewModel.AnalyzeFavGCalSchedulerImportAsync(sourceFolder.Text);
-            analysisText.Text = FormatFavGCalAnalysis(analysis);
+            try
+            {
+                analysis = await _viewModel.AnalyzeFavGCalSchedulerImportAsync(sourceFolder.Text);
+                analysisText.Text = FormatFavGCalAnalysis(analysis);
+            }
+            catch (Exception ex)
+            {
+                analysis = null;
+                ShowImportError("解析", ex);
+            }
         };
 
         root.Children.Add(SectionHeader("移行元"));
@@ -807,30 +837,37 @@ public partial class MainWindow : Window
             return;
         }
 
-        await _viewModel.SetOAuthClientJsonPathAsync(oauthPath.Text);
-        analysis ??= await _viewModel.AnalyzeFavGCalSchedulerImportAsync(sourceFolder.Text);
-        var defaultTarget = targetCalendar.SelectedValue?.ToString() ?? _viewModel.EditorCalendarId;
-        var mappings = analysis.Calendars.ToDictionary(calendar => calendar.CalendarKey, _ => defaultTarget);
-        var result = await _viewModel.ImportFavGCalSchedulerAsync(new FavGCalImportOptions(
-            sourceFolder.Text,
-            mappings,
-            ImportSettings: importSettings.IsChecked == true,
-            SkipDuplicates: skipDuplicates.IsChecked == true,
-            VerifyGoogleEventsBeforeImport: verifyGoogle.IsChecked == true,
-            MarkImportedEventsDirty: true,
-            DefaultTargetCalendarId: defaultTarget,
-            ComparisonZipPath: string.IsNullOrWhiteSpace(comparisonZip.Text) ? null : comparisonZip.Text));
+        try
+        {
+            await _viewModel.SetOAuthClientJsonPathAsync(oauthPath.Text);
+            analysis ??= await _viewModel.AnalyzeFavGCalSchedulerImportAsync(sourceFolder.Text);
+            var defaultTarget = targetCalendar.SelectedValue?.ToString() ?? _viewModel.EditorCalendarId;
+            var mappings = analysis.Calendars.ToDictionary(calendar => calendar.CalendarKey, _ => defaultTarget);
+            var result = await _viewModel.ImportFavGCalSchedulerAsync(new FavGCalImportOptions(
+                sourceFolder.Text,
+                mappings,
+                ImportSettings: importSettings.IsChecked == true,
+                SkipDuplicates: skipDuplicates.IsChecked == true,
+                VerifyGoogleEventsBeforeImport: verifyGoogle.IsChecked == true,
+                MarkImportedEventsDirty: true,
+                DefaultTargetCalendarId: defaultTarget,
+                ComparisonZipPath: string.IsNullOrWhiteSpace(comparisonZip.Text) ? null : comparisonZip.Text));
 
-        var comparisonText = result.ComparisonSummary is null
-            ? ""
-            : $"\n\n照合結果\n一致: {result.ComparisonSummary.MatchedCount} 件\n本アプリのみ: {result.ComparisonSummary.LocalOnlyCount} 件\nGoogleエクスポートのみ: {result.ComparisonSummary.ExportOnlyCount} 件";
+            var comparisonText = result.ComparisonSummary is null
+                ? ""
+                : $"\n\n照合結果\n一致: {result.ComparisonSummary.MatchedCount} 件\n本アプリのみ: {result.ComparisonSummary.LocalOnlyCount} 件\nGoogleエクスポートのみ: {result.ComparisonSummary.ExportOnlyCount} 件";
 
-        MessageBox.Show(
-            this,
-            $"取り込みが完了しました。\n\n追加: {result.ImportedCount} 件\n既存紐付け: {result.LinkedExistingGoogleCount} 件\n重複スキップ: {result.SkippedDuplicateCount} 件\n解析エラー: {result.ParseErrorCount} 件{comparisonText}",
-            "FavGCalSchedulerデータ移行",
-            MessageBoxButton.OK,
-            result.ParseErrorCount == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            MessageBox.Show(
+                this,
+                $"取り込みが完了しました。\n\n追加: {result.ImportedCount} 件\n既存紐付け: {result.LinkedExistingGoogleCount} 件\n重複スキップ: {result.SkippedDuplicateCount} 件\n復元不能ToDo: {result.UnrestoredTodoCount} 件\n解析エラー: {result.ParseErrorCount} 件{comparisonText}",
+                "FavGCalSchedulerデータ移行",
+                MessageBoxButton.OK,
+                result.ParseErrorCount == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
+        }
+        catch (Exception ex)
+        {
+            ShowImportError("取り込み", ex);
+        }
     }
 
     private async Task ShowSearchDialogAsync()
@@ -1114,6 +1151,7 @@ public partial class MainWindow : Window
             $"対象カレンダー: {analysis.Calendars.Count} 件",
             $"検出予定: {analysis.TotalEventCount} 件",
             $"解析エラー: {analysis.ParseErrorCount} 件",
+            $"復元不能ToDo: {analysis.UnrestoredTodoCount} 件",
             ""
         };
         lines.AddRange(analysis.Calendars.Select(calendar =>

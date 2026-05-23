@@ -5,11 +5,13 @@ using Google.Apis.Auth.OAuth2;
 using Google.Apis.Calendar.v3;
 using Google.Apis.Calendar.v3.Data;
 using Google.Apis.Services;
+using System.Text.Json;
 
 namespace FavGCalSchedulerClone.App.Services;
 
 public sealed class GoogleCalendarSyncService
 {
+    private const string EventColorPaletteSettingKey = "google-event-color-palette";
     private readonly CalendarRepository _repository;
 
     public GoogleCalendarSyncService(CalendarRepository repository)
@@ -32,6 +34,60 @@ public sealed class GoogleCalendarSyncService
             .Select(item => new GoogleCalendarInfo(item.Id!, item.SummaryOverride ?? item.Summary ?? item.Id!))
             .OrderBy(item => item.Summary, StringComparer.CurrentCultureIgnoreCase)
             .ToArray();
+    }
+
+    public async Task<IReadOnlyDictionary<string, EventDisplayColors>> LoadCachedEventColorPaletteAsync()
+    {
+        var serialized = await _repository.LoadSettingValueAsync(EventColorPaletteSettingKey);
+        if (string.IsNullOrWhiteSpace(serialized))
+        {
+            return TagService.DefaultEventColorPalette;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, EventDisplayColors>>(serialized)
+                ?? TagService.DefaultEventColorPalette;
+        }
+        catch (JsonException)
+        {
+            return TagService.DefaultEventColorPalette;
+        }
+    }
+
+    public async Task<IReadOnlyDictionary<string, EventDisplayColors>> RefreshEventColorPaletteAsync(
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var service = new CalendarService(new BaseClientService.Initializer
+            {
+                ApplicationName = "FavGCalSchedulerClone"
+            });
+            var colors = await service.Colors.Get().ExecuteAsync(cancellationToken);
+            var palette = (colors.Event__ ?? new Dictionary<string, ColorDefinition>())
+                .Where(item => !string.IsNullOrWhiteSpace(item.Value.Background)
+                               && !string.IsNullOrWhiteSpace(item.Value.Foreground))
+                .ToDictionary(
+                    item => item.Key,
+                    item => new EventDisplayColors(item.Value.Background!, item.Value.Foreground!),
+                    StringComparer.Ordinal);
+            if (palette.Count > 0)
+            {
+                await _repository.SaveSettingValueAsync(EventColorPaletteSettingKey, JsonSerializer.Serialize(palette));
+                return palette;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // A palette lookup failure must not prevent local display or synchronization.
+        }
+
+        return await LoadCachedEventColorPaletteAsync();
     }
 
     public Task ClearTokensAsync()

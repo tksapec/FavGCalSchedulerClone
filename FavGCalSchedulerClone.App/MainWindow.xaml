@@ -72,6 +72,7 @@
             <Setter Property="BorderBrush" Value="{StaticResource GridLineBrush}" />
             <Setter Property="BorderThickness" Value="0,0,1,1" />
             <Setter Property="Padding" Value="5" />
+            <Setter Property="ClipToBounds" Value="True" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding IsSunday}" Value="True">
                     <Setter Property="Background" Value="{StaticResource SundayBrush}" />
@@ -107,6 +108,8 @@
             <Setter Property="Height" Value="19" />
             <Setter Property="Margin" Value="0,1,0,0" />
             <Setter Property="Padding" Value="4,0" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="ClipToBounds" Value="True" />
         </Style>
 
         <Style TargetType="DataGrid">
@@ -243,7 +246,7 @@
                             </UniformGrid>
 
                             <ListBox x:Name="DayList" Grid.Row="1" ItemsSource="{Binding VisibleCalendarDays}" SelectedItem="{Binding SelectedDay, Mode=TwoWay}"
-                                     BorderThickness="0" Background="Transparent" ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                     BorderThickness="0" Background="Transparent" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled"
                                      MouseDoubleClick="DayList_MouseDoubleClick">
                                 <ListBox.ItemsPanel>
                                     <ItemsPanelTemplate>
@@ -274,11 +277,11 @@
                                             <DockPanel LastChildFill="True">
                                                 <TextBlock DockPanel.Dock="Top" Text="{Binding Date.Day}" Foreground="#334155"
                                                            FontSize="15" FontWeight="SemiBold" />
-                                                <ItemsControl ItemsSource="{Binding Events}" Margin="0,4,0,0">
+                                                <ItemsControl ItemsSource="{Binding Events}" Margin="0,4,0,0" HorizontalAlignment="Stretch" ClipToBounds="True">
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate>
                                                             <Border Style="{StaticResource EventBar}" Background="{Binding DisplayColor}" MouseLeftButtonDown="EventBar_MouseLeftButtonDown" MouseRightButtonDown="EventBar_MouseRightButtonDown">
-                                                                <TextBlock Text="{Binding CalendarCellDisplayText}" FontSize="11" Foreground="#111827"
+                                                                <TextBlock Text="{Binding CalendarCellDisplayText}" FontSize="11" Foreground="{Binding DisplayForegroundColor}"
                                                                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                                             </Border>
                                                         </DataTemplate>
@@ -310,7 +313,7 @@
                             </UniformGrid>
 
                             <ListBox Grid.Row="1" ItemsSource="{Binding VisibleCalendarDays}" SelectedItem="{Binding SelectedDay, Mode=TwoWay}"
-                                     BorderThickness="0" Background="Transparent" ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                     BorderThickness="0" Background="Transparent" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled"
                                      MouseDoubleClick="DayList_MouseDoubleClick">
                                 <ListBox.ItemsPanel>
                                     <ItemsPanelTemplate>
@@ -341,11 +344,11 @@
                                             <DockPanel LastChildFill="True">
                                                 <TextBlock DockPanel.Dock="Top" Text="{Binding Date.Day}" Foreground="#334155"
                                                            FontSize="16" FontWeight="SemiBold" />
-                                                <ItemsControl ItemsSource="{Binding Events}" Margin="0,4,0,0">
+                                                <ItemsControl ItemsSource="{Binding Events}" Margin="0,4,0,0" HorizontalAlignment="Stretch" ClipToBounds="True">
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate>
                                                             <Border Style="{StaticResource EventBar}" Background="{Binding DisplayColor}" MouseLeftButtonDown="EventBar_MouseLeftButtonDown" MouseRightButtonDown="EventBar_MouseRightButtonDown">
-                                                                <TextBlock Text="{Binding CalendarCellDisplayText}" FontSize="11" Foreground="#111827"
+                                                                <TextBlock Text="{Binding CalendarCellDisplayText}" FontSize="11" Foreground="{Binding DisplayForegroundColor}"
                                                                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                                             </Border>
                                                         </DataTemplate>

@@ -36,6 +36,7 @@ public sealed class MainViewModel : ObservableObject
     private CalendarViewMode _currentViewMode = CalendarViewMode.Month;
     private string _editorCalendarId = GoogleCalendarDefaults.PrimaryCalendarId;
     private int _refreshGeneration;
+    private IReadOnlyDictionary<string, EventDisplayColors> _eventColorPalette = TagService.DefaultEventColorPalette;
 
     public MainViewModel(CalendarRepository repository, GoogleCalendarSyncService syncService)
     {
@@ -301,6 +302,7 @@ public sealed class MainViewModel : ObservableObject
         SelectedTabIndex = _settings.StartupTabIndex;
         SelectedDay = null;
         await ReloadTagsAsync();
+        _eventColorPalette = await _syncService.LoadCachedEventColorPaletteAsync();
         await ReloadAvailableCalendarsAsync();
         SetCurrentMonthWithoutRefreshing(_settings.DisplayMonth);
         await RefreshCalendarAsync();
@@ -821,7 +823,9 @@ public sealed class MainViewModel : ObservableObject
     {
         foreach (var calendarEvent in events)
         {
-            calendarEvent.DisplayColor = TagService.FindDisplayTag(calendarEvent, Tags)?.Color ?? "#FFFFFF";
+            var colors = TagService.ResolveDisplayColors(calendarEvent, _eventColorPalette);
+            calendarEvent.DisplayColor = colors.Background;
+            calendarEvent.DisplayForegroundColor = colors.Foreground;
         }
     }
 
@@ -1385,6 +1389,7 @@ public sealed class MainViewModel : ObservableObject
             IsDirty = source.IsDirty,
             IsTodoLike = source.IsTodoLike,
             DisplayColor = source.DisplayColor,
+            DisplayForegroundColor = source.DisplayForegroundColor,
             IsGeneratedOccurrence = source.IsGeneratedOccurrence
         };
     }
@@ -1418,7 +1423,9 @@ public sealed class MainViewModel : ObservableObject
 
         Status = "ブラウザーでGoogle認証を続行してください。";
         await _syncService.AuthorizeAsync(_settings.OAuthClientJsonPath);
+        _eventColorPalette = await _syncService.RefreshEventColorPaletteAsync();
         await ReloadAvailableCalendarsAsync();
+        await RefreshCalendarAsync();
         Status = "Google認証が完了しました。";
     }
 
@@ -1427,6 +1434,7 @@ public sealed class MainViewModel : ObservableObject
         await SaveOAuthPathAsync();
         Status = "Googleカレンダーと同期中...";
         var result = await _syncService.SyncAsync(_settings);
+        _eventColorPalette = await _syncService.RefreshEventColorPaletteAsync();
         await ReloadAvailableCalendarsAsync();
         await RefreshCalendarAsync();
         Status = $"同期が完了しました: 送信 {result.Pushed} 件、取得 {result.Pulled} 件。";
@@ -1454,10 +1462,37 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        var values = File.ReadLines(iniPath)
-            .Select(line => line.Split('=', 2))
-            .Where(parts => parts.Length == 2)
-            .ToDictionary(parts => parts[0].Trim(), parts => parts[1].Trim(), StringComparer.OrdinalIgnoreCase);
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var section = string.Empty;
+        foreach (var line in File.ReadLines(iniPath))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.StartsWith('[') && trimmed.EndsWith(']'))
+            {
+                section = trimmed[1..^1].Trim();
+                continue;
+            }
+
+            var separator = trimmed.IndexOf('=');
+            if (separator < 0)
+            {
+                continue;
+            }
+
+            var key = trimmed[..separator].Trim();
+            var value = trimmed[(separator + 1)..].Trim();
+            if (section.Equals("DISP_INFO", StringComparison.OrdinalIgnoreCase)
+                && (key.Equals("DeletePopup", StringComparison.OrdinalIgnoreCase)
+                    || key.Equals("AppClose", StringComparison.OrdinalIgnoreCase)))
+            {
+                values[key] = value;
+            }
+            else if (section.Equals("APP_INFO", StringComparison.OrdinalIgnoreCase)
+                     && key.Equals("ScheduleDeaultAllDay", StringComparison.OrdinalIgnoreCase))
+            {
+                values[key] = value;
+            }
+        }
 
         if (values.TryGetValue("DeletePopup", out var deletePopup))
         {

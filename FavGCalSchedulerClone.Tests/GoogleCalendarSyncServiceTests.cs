@@ -20,4 +20,20 @@ public sealed class GoogleCalendarSyncServiceTests
 
         Assert.Equal(GoogleNotFoundSyncAction.RecreateRemote, action);
     }
+
+    [Fact]
+    public async Task LoadCachedEventColorPaletteAsync_ReturnsSavedGoogleColors()
+    {
+        var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
+        await repository.InitializeAsync();
+        await repository.SaveSettingValueAsync(
+            "google-event-color-palette",
+            """{"5":{"Background":"#123456","Foreground":"#FEDCBA"}}""");
+        var service = new GoogleCalendarSyncService(repository);
+
+        var palette = await service.LoadCachedEventColorPaletteAsync();
+
+        Assert.Equal("#123456", palette["5"].Background);
+        Assert.Equal("#FEDCBA", palette["5"].Foreground);
+    }
 }
