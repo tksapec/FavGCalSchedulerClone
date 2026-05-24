@@ -90,6 +90,9 @@
                 <DataTrigger Binding="{Binding IsWorkdayOverride}" Value="True">
                     <Setter Property="Background" Value="{StaticResource WeekdayBrush}" />
                 </DataTrigger>
+                <DataTrigger Binding="{Binding HasTagBackgroundColor}" Value="True">
+                    <Setter Property="Background" Value="{Binding TagBackgroundColor}" />
+                </DataTrigger>
                 <DataTrigger Binding="{Binding IsToday}" Value="True">
                     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
                     <Setter Property="BorderThickness" Value="2" />

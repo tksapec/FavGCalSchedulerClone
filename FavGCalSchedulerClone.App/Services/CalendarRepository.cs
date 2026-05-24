@@ -367,18 +367,10 @@ public sealed class CalendarRepository
 
     private async Task SeedTagsAsync(SqliteConnection connection)
     {
-        await using var countCommand = connection.CreateCommand();
-        countCommand.CommandText = "SELECT COUNT(*) FROM tags";
-        var count = (long)(await countCommand.ExecuteScalarAsync() ?? 0L);
-        if (count > 0)
-        {
-            return;
-        }
-
         foreach (var tag in TagService.DefaultTags)
         {
             await using var command = connection.CreateCommand();
-            command.CommandText = "INSERT INTO tags(name, color, is_visible, priority) VALUES($name, $color, $visible, $priority)";
+            command.CommandText = "INSERT OR IGNORE INTO tags(name, color, is_visible, priority) VALUES($name, $color, $visible, $priority)";
             command.Parameters.AddWithValue("$name", tag.Name);
             command.Parameters.AddWithValue("$color", tag.Color);
             command.Parameters.AddWithValue("$visible", tag.IsVisible ? 1 : 0);

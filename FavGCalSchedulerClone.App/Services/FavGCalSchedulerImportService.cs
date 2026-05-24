@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -31,6 +33,12 @@ public sealed class FavGCalSchedulerImportService
             try
             {
                 var parsed = await ParseFavCalAsync(calendar, cancellationToken);
+                foreach (var item in parsed)
+                {
+                    Debug.WriteLine(
+                        $"FavGCal label color: rawColorIndex={item.RawColorIndex}, ColorId={item.Event.ColorId ?? "null"}, Title={item.Event.Title}, Start={item.Event.Start:O}");
+                }
+
                 calendar.EventCount = parsed.Count(item => !item.MissingTodoMetadata);
                 calendar.UnrestoredTodoCount = parsed.Count(item => item.MissingTodoMetadata);
                 totalEvents += calendar.EventCount;
@@ -56,6 +64,7 @@ public sealed class FavGCalSchedulerImportService
         var imported = 0;
         var linked = 0;
         var skipped = 0;
+        var correctedColors = 0;
         var parseErrors = analysis.ParseErrorCount;
         var warnings = new List<string>(analysis.Warnings);
         var normalizedImportedEvents = new List<CalendarEvent>();
@@ -95,10 +104,21 @@ public sealed class FavGCalSchedulerImportService
                     var existingGoogleEvent = await _repository.FindEventByGoogleEventIdAsync(targetCalendarId, calendarEvent.GoogleEventId);
                     if (existingGoogleEvent is not null)
                     {
-                        if (parsedEvent.IsNativeTodo
-                            && PromoteExistingEventToTodo(existingGoogleEvent, calendarEvent, options.MarkImportedEventsDirty))
+                        var colorChanged = ApplyImportedColor(
+                            existingGoogleEvent,
+                            calendarEvent,
+                            options.RepairExistingColors,
+                            options.MarkImportedEventsDirty);
+                        var todoChanged = parsedEvent.IsNativeTodo
+                            && PromoteExistingEventToTodo(existingGoogleEvent, calendarEvent, options.MarkImportedEventsDirty);
+                        if (colorChanged || todoChanged)
                         {
                             await _repository.SaveEventAsync(existingGoogleEvent);
+                        }
+
+                        if (colorChanged)
+                        {
+                            correctedColors++;
                         }
 
                         linked++;
@@ -111,10 +131,21 @@ public sealed class FavGCalSchedulerImportService
                     var existingDuplicate = await _repository.FindDuplicateEventAsync(calendarEvent);
                     if (existingDuplicate is not null)
                     {
-                        if (parsedEvent.IsNativeTodo
-                            && PromoteExistingEventToTodo(existingDuplicate, calendarEvent, options.MarkImportedEventsDirty))
+                        var colorChanged = ApplyImportedColor(
+                            existingDuplicate,
+                            calendarEvent,
+                            options.RepairExistingColors,
+                            options.MarkImportedEventsDirty);
+                        var todoChanged = parsedEvent.IsNativeTodo
+                            && PromoteExistingEventToTodo(existingDuplicate, calendarEvent, options.MarkImportedEventsDirty);
+                        if (colorChanged || todoChanged)
                         {
                             await _repository.SaveEventAsync(existingDuplicate);
+                        }
+
+                        if (colorChanged)
+                        {
+                            correctedColors++;
                         }
 
                         skipped++;
@@ -134,7 +165,7 @@ public sealed class FavGCalSchedulerImportService
             comparisonSummary = _compareService.Compare(normalizedImportedEvents, exportData.Events);
         }
 
-        return new FavGCalImportResult(imported, linked, skipped, analysis.UnrestoredTodoCount, parseErrors, warnings, comparisonSummary);
+        return new FavGCalImportResult(imported, linked, skipped, correctedColors, analysis.UnrestoredTodoCount, parseErrors, warnings, comparisonSummary);
     }
 
     public static string? ExtractCalendarIdFromFeedUrl(string? feedUrl)
@@ -270,7 +301,7 @@ public sealed class FavGCalSchedulerImportService
         try
         {
             var position = record.Position;
-            var colorIndex = BitConverter.ToInt32(bytes, position + 8);
+            var rawColorIndex = BitConverter.ToUInt16(bytes, position + 32) >> 8;
             var start = DateTimeOffset.FromUnixTimeSeconds(BitConverter.ToInt64(bytes, position + 12)).ToLocalTime();
             var end = DateTimeOffset.FromUnixTimeSeconds(BitConverter.ToInt64(bytes, position + 20)).ToLocalTime();
             var offset = position + 34;
@@ -300,7 +331,7 @@ public sealed class FavGCalSchedulerImportService
                 Start = start,
                 End = end,
                 IsAllDay = isAllDay,
-                ColorId = colorIndex is >= 1 and <= 11 ? colorIndex.ToString() : null,
+                ColorId = MapLegacyColorToGoogleColorId(rawColorIndex),
                 IsDeleted = false,
                 IsDirty = true
             };
@@ -317,6 +348,7 @@ public sealed class FavGCalSchedulerImportService
             parsed = new FavGCalParsedEvent(
                 sourceCalendar,
                 calendarEvent,
+                RawColorIndex: rawColorIndex,
                 MissingTodoMetadata: record.Kind == TodoEventRecordKind && !calendarEvent.IsTodoLike,
                 IsNativeTodo: record.Kind == TodoEventRecordKind);
             return true;
@@ -398,6 +430,13 @@ public sealed class FavGCalSchedulerImportService
         return Regex.IsMatch(value, "^[A-Za-z0-9_-]{8,}$") ? value : null;
     }
 
+    internal static string? MapLegacyColorToGoogleColorId(int rawColorIndex)
+    {
+        return rawColorIndex is >= 1 and <= 11
+            ? rawColorIndex.ToString(CultureInfo.InvariantCulture)
+            : null;
+    }
+
     private static IEnumerable<string> ExtractReadableStrings(byte[] bytes)
     {
         var text = Encoding.Unicode.GetString(bytes);
@@ -464,7 +503,27 @@ public sealed class FavGCalSchedulerImportService
             importedTodo.TodoProgress);
         existingEvent.IsTodoLike = true;
         existingEvent.IsDirty |= markDirty;
-        existingEvent.ColorId ??= importedTodo.ColorId;
+        return true;
+    }
+
+    private static bool ApplyImportedColor(
+        CalendarEvent existingEvent,
+        CalendarEvent importedEvent,
+        bool repairExistingColors,
+        bool markDirty)
+    {
+        if (!repairExistingColors && (existingEvent.ColorId is not null || importedEvent.ColorId is null))
+        {
+            return false;
+        }
+
+        if (string.Equals(existingEvent.ColorId, importedEvent.ColorId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        existingEvent.ColorId = importedEvent.ColorId;
+        existingEvent.IsDirty |= markDirty;
         return true;
     }
 }
@@ -486,6 +545,7 @@ public sealed record FavGCalSourceCalendar(string SourcePath, string CalendarKey
 public sealed record FavGCalParsedEvent(
     FavGCalSourceCalendar SourceCalendar,
     CalendarEvent Event,
+    int RawColorIndex = 0,
     bool MissingTodoMetadata = false,
     bool IsNativeTodo = false);
 internal readonly record struct FavGCalRecordPosition(int Position, byte Kind);
@@ -498,12 +558,14 @@ public sealed record FavGCalImportOptions(
     bool VerifyGoogleEventsBeforeImport = true,
     bool MarkImportedEventsDirty = true,
     string? DefaultTargetCalendarId = null,
-    string? ComparisonZipPath = null);
+    string? ComparisonZipPath = null,
+    bool RepairExistingColors = false);
 
 public sealed record FavGCalImportResult(
     int ImportedCount,
     int LinkedExistingGoogleCount,
     int SkippedDuplicateCount,
+    int CorrectedColorCount,
     int UnrestoredTodoCount,
     int ParseErrorCount,
     IReadOnlyList<string> Warnings,

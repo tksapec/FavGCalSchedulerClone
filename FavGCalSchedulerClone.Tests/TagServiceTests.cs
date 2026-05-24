@@ -161,13 +161,13 @@ public sealed class TagServiceTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData("99")]
-    public void ResolveDisplayColor_UsesNeutralFallbackForMissingOrUnknownEventColor(string? colorId)
+    public void ResolveDisplayColor_UsesWhiteLabelForMissingOrUnknownEventColor(string? colorId)
     {
         var item = new CalendarEvent { Title = "No color", ColorId = colorId };
 
         var color = TagService.ResolveDisplayColors(item);
 
-        Assert.Equal(TagService.DefaultDisplayColor, color.Background);
+        Assert.Equal("#FFFFFF", color.Background);
         Assert.Equal(TagService.DefaultDisplayForegroundColor, color.Foreground);
     }
 
@@ -179,6 +179,40 @@ public sealed class TagServiceTests
         var color = TagService.ResolveDisplayColors(item);
 
         Assert.Equal("#5484ED", color.Background);
+    }
+
+    [Fact]
+    public void ResolveDisplayColor_DoesNotUseDayBackgroundTagsForWhiteLabel()
+    {
+        var item = new CalendarEvent { Title = "Tagged #important #work #private #holiday" };
+
+        var color = TagService.ResolveDisplayColors(item);
+
+        Assert.Equal("#FFFFFF", color.Background);
+    }
+
+    [Fact]
+    public void ResolveDayBackgroundColor_UsesHighestPriorityMatchingTag()
+    {
+        var date = new DateTime(2026, 5, 18);
+        var work = AllDayEvent(date, "Work #work");
+        var important = AllDayEvent(date, "Important #important");
+
+        var color = TagService.ResolveDayBackgroundColor([work, important], date, TagService.DefaultTags);
+
+        Assert.Equal("#FDE68A", color);
+    }
+
+    [Fact]
+    public void ResolveDayBackgroundColor_WorkdayClearsHolidayOrDisplayTagBackground()
+    {
+        var date = new DateTime(2026, 5, 16);
+        var special = AllDayEvent(date, "Saturday #holiday #important");
+        var workday = AllDayEvent(date, "Workday override #workday");
+
+        var color = TagService.ResolveDayBackgroundColor([special, workday], date, TagService.DefaultTags);
+
+        Assert.Null(color);
     }
 
     [Fact]

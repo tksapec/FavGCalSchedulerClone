@@ -5,7 +5,7 @@ namespace FavGCalSchedulerClone.App.Services;
 
 public static partial class TagService
 {
-    public const string DefaultDisplayColor = "#E5E7EB";
+    public const string DefaultDisplayColor = "#FFFFFF";
     public const string DefaultDisplayForegroundColor = "#111827";
 
     public static IReadOnlyDictionary<string, EventDisplayColors> DefaultEventColorPalette { get; } = new Dictionary<string, EventDisplayColors>(StringComparer.Ordinal)
@@ -58,6 +58,28 @@ public static partial class TagService
     {
         var eventsOnDate = events.Where(e => DateRangeHelper.OccursOn(e, date)).ToArray();
         return eventsOnDate.Any(IsHoliday) && !eventsOnDate.Any(IsWorkday);
+    }
+
+    public static string? ResolveDayBackgroundColor(
+        IEnumerable<CalendarEvent> events,
+        DateTime date,
+        IEnumerable<CalendarTag> tags)
+    {
+        var eventsOnDate = events.Where(e => DateRangeHelper.OccursOn(e, date)).ToArray();
+        if (eventsOnDate.Any(IsWorkday))
+        {
+            return null;
+        }
+
+        var eventTags = eventsOnDate
+            .SelectMany(e => ExtractTags(e.Title, e.Description))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return tags
+            .Where(t => IsDayBackgroundTag(t.Name) && eventTags.Contains(t.Name))
+            .OrderByDescending(t => t.Priority)
+            .Select(t => t.Color)
+            .FirstOrDefault();
     }
 
     public static bool IsTodoLike(CalendarEvent calendarEvent) =>
@@ -126,6 +148,14 @@ public static partial class TagService
         }
 
         return new EventDisplayColors(DefaultDisplayColor, DefaultDisplayForegroundColor);
+    }
+
+    private static bool IsDayBackgroundTag(string tagName)
+    {
+        return tagName.Equals("#holiday", StringComparison.OrdinalIgnoreCase)
+            || tagName.Equals("#important", StringComparison.OrdinalIgnoreCase)
+            || tagName.Equals("#work", StringComparison.OrdinalIgnoreCase)
+            || tagName.Equals("#private", StringComparison.OrdinalIgnoreCase);
     }
 
     [GeneratedRegex(@"#[\p{L}\p{N}_%-]+", RegexOptions.Compiled)]

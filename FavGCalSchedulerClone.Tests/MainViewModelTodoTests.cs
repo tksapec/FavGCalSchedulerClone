@@ -101,6 +101,23 @@ public sealed class MainViewModelTodoTests
     }
 
     [Fact]
+    public async Task WhiteEventColorOption_RoundTripsAsNullAndWhiteLabel()
+    {
+        var viewModel = await CreateViewModelAsync();
+        var white = Assert.Single(viewModel.EventColorOptions, option => option.Id is null);
+        Assert.Equal("#FFFFFF", white.Background);
+
+        viewModel.BeginNewEvent(DateTime.Today);
+        viewModel.Title = "White schedule";
+        viewModel.EditorColorId = null;
+
+        await viewModel.SaveCurrentEventAsync();
+
+        Assert.Null(viewModel.SelectedEvent!.ColorId);
+        Assert.Equal("#FFFFFF", viewModel.SelectedEvent.DisplayColor);
+    }
+
+    [Fact]
     public async Task GoToTodayAsync_FromDifferentMonth_ReturnsToCurrentMonthAndSelectsToday()
     {
         var viewModel = await CreateViewModelAsync();

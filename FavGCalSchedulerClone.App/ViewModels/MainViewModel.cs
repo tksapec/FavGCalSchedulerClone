@@ -289,7 +289,7 @@ public sealed class MainViewModel : ObservableObject
     }
 
     public IReadOnlyList<EventColorSelectionItem> EventColorOptions =>
-        new[] { new EventColorSelectionItem(null, "未指定", TagService.DefaultDisplayColor, TagService.DefaultDisplayForegroundColor) }
+        new[] { new EventColorSelectionItem(null, "標準（白）", TagService.DefaultDisplayColor, TagService.DefaultDisplayForegroundColor) }
             .Concat(Enumerable.Range(1, 11).Select(index =>
             {
                 var id = index.ToString(CultureInfo.InvariantCulture);
@@ -771,7 +771,8 @@ public sealed class MainViewModel : ObservableObject
                 Date = date,
                 IsCurrentMonth = date.Month == CurrentMonth.Month,
                 IsWorkdayOverride = TagService.HasWorkdayOverride(_visibleEvents, date),
-                IsHoliday = TagService.HasHolidayWithoutWorkdayOverride(_visibleEvents, date)
+                IsHoliday = TagService.HasHolidayWithoutWorkdayOverride(_visibleEvents, date),
+                TagBackgroundColor = TagService.ResolveDayBackgroundColor(_visibleEvents, date, Tags)
             };
 
             foreach (var calendarEvent in _visibleEvents.Where(e => DateRangeHelper.OccursOn(e, date)).Take(5))
@@ -944,7 +945,8 @@ public sealed class MainViewModel : ObservableObject
             Date = date,
             IsCurrentMonth = date.Month == CurrentMonth.Month,
             IsWorkdayOverride = TagService.HasWorkdayOverride(events, date),
-            IsHoliday = TagService.HasHolidayWithoutWorkdayOverride(events, date)
+            IsHoliday = TagService.HasHolidayWithoutWorkdayOverride(events, date),
+            TagBackgroundColor = TagService.ResolveDayBackgroundColor(events, date, Tags)
         };
 
         foreach (var calendarEvent in _visibleEvents.Where(e => DateRangeHelper.OccursOn(e, date)).Take(5))

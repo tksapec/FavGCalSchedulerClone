@@ -17,6 +17,18 @@ public sealed class FavGCalSchedulerImportServiceTests
         Assert.Equal("user@example.com", id);
     }
 
+    [Theory]
+    [InlineData(0, null)]
+    [InlineData(1, "1")]
+    [InlineData(2, "2")]
+    [InlineData(11, "11")]
+    [InlineData(12, null)]
+    [InlineData(-1, null)]
+    public void MapLegacyColorToGoogleColorId_UsesLegacyLabelPalette(int rawColorIndex, string? expected)
+    {
+        Assert.Equal(expected, FavGCalSchedulerImportService.MapLegacyColorToGoogleColorId(rawColorIndex));
+    }
+
     [Fact]
     public async Task AnalyzeAsync_ReadsScheduleIniAndFavCalEvents()
     {
@@ -60,6 +72,29 @@ public sealed class FavGCalSchedulerImportServiceTests
         Assert.True(item.IsDirty);
         Assert.True(item.IsTodoLike);
         Assert.True(TagService.IsHoliday(item));
+        Assert.Equal("5", item.ColorId);
+    }
+
+    [Theory]
+    [InlineData(0, null)]
+    [InlineData(1, "1")]
+    [InlineData(2, "2")]
+    public async Task ImportAsync_ReadsLegacyLabelColorFromPackedField(int legacyColorIndex, string? expectedColorId)
+    {
+        var sourceFolder = CreateLegacyFolder(legacyColorIndex: legacyColorIndex, unrelatedValueAt8: 11);
+        var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
+        await repository.InitializeAsync();
+        var service = new FavGCalSchedulerImportService(repository);
+
+        await service.ImportAsync(new FavGCalImportOptions(
+            sourceFolder,
+            new Dictionary<string, string> { ["user@example.com"] = "primary" }));
+
+        var events = await repository.LoadEventsAsync(
+            new DateTimeOffset(2026, 5, 16, 0, 0, 0, TimeZoneInfo.Local.BaseUtcOffset),
+            new DateTimeOffset(2026, 5, 17, 0, 0, 0, TimeZoneInfo.Local.BaseUtcOffset));
+
+        Assert.Equal(expectedColorId, Assert.Single(events).ColorId);
     }
 
     [Fact]
@@ -197,26 +232,21 @@ public sealed class FavGCalSchedulerImportServiceTests
 
         Assert.Equal(0, result.ImportedCount);
         Assert.Equal(1, result.LinkedExistingGoogleCount);
-        Assert.Single(events);
+        Assert.Equal(1, result.CorrectedColorCount);
+        Assert.Equal("5", Assert.Single(events).ColorId);
     }
 
     [Fact]
-    public async Task ImportAsync_PromotesPreviouslyImportedGoogleEventWhenNativeTodoIsReimported()
+    public async Task ImportAsync_FillsMissingColorWhenDuplicateIsSkipped()
     {
-        var sourceFolder = CreateLegacyFolder(
-            recordKind: 0x06,
-            title: "Legacy native todo",
-            todoProgress: 90,
-            todoPriorityOrdinal: 5);
+        var sourceFolder = CreateLegacyFolder(legacyColorIndex: 2);
         var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
         await repository.InitializeAsync();
         await repository.SaveEventAsync(new CalendarEvent
         {
-            Title = "Legacy native todo",
-            Description = "Body #Holiday",
+            Title = "Legacy todo #todoA56%",
+            Location = "Meeting room",
             CalendarId = "primary",
-            GoogleEventId = "legacyevent123",
-            ColorId = "5",
             Start = new DateTimeOffset(2026, 5, 16, 9, 0, 0, TimeZoneInfo.Local.BaseUtcOffset),
             End = new DateTimeOffset(2026, 5, 16, 10, 0, 0, TimeZoneInfo.Local.BaseUtcOffset)
         });
@@ -230,9 +260,101 @@ public sealed class FavGCalSchedulerImportServiceTests
             new DateTimeOffset(2026, 5, 16, 0, 0, 0, TimeZoneInfo.Local.BaseUtcOffset),
             new DateTimeOffset(2026, 5, 17, 0, 0, 0, TimeZoneInfo.Local.BaseUtcOffset));
 
+        Assert.Equal(1, result.SkippedDuplicateCount);
+        Assert.Equal(1, result.CorrectedColorCount);
+        Assert.Equal("2", Assert.Single(events).ColorId);
+    }
+
+    [Fact]
+    public async Task ImportAsync_DoesNotReplaceExistingColorWithoutRepairOption()
+    {
+        var sourceFolder = CreateLegacyFolder(legacyColorIndex: 2);
+        var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
+        await repository.InitializeAsync();
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "existing",
+            CalendarId = "primary",
+            GoogleEventId = "legacyevent123",
+            ColorId = "9",
+            Start = new DateTimeOffset(2026, 5, 16, 9, 0, 0, TimeZoneInfo.Local.BaseUtcOffset),
+            End = new DateTimeOffset(2026, 5, 16, 10, 0, 0, TimeZoneInfo.Local.BaseUtcOffset)
+        });
+        var service = new FavGCalSchedulerImportService(repository);
+
+        var result = await service.ImportAsync(new FavGCalImportOptions(
+            sourceFolder,
+            new Dictionary<string, string> { ["user@example.com"] = "primary" }));
+
+        var item = await repository.FindEventByGoogleEventIdAsync("primary", "legacyevent123");
+        Assert.Equal(0, result.CorrectedColorCount);
+        Assert.Equal("9", item!.ColorId);
+    }
+
+    [Fact]
+    public async Task ImportAsync_RepairOptionClearsIncorrectColorForWhiteLegacyLabel()
+    {
+        var sourceFolder = CreateLegacyFolder(legacyColorIndex: 0);
+        var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
+        await repository.InitializeAsync();
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "existing",
+            CalendarId = "primary",
+            GoogleEventId = "legacyevent123",
+            ColorId = "9",
+            Start = new DateTimeOffset(2026, 5, 16, 9, 0, 0, TimeZoneInfo.Local.BaseUtcOffset),
+            End = new DateTimeOffset(2026, 5, 16, 10, 0, 0, TimeZoneInfo.Local.BaseUtcOffset)
+        });
+        var service = new FavGCalSchedulerImportService(repository);
+
+        var result = await service.ImportAsync(new FavGCalImportOptions(
+            sourceFolder,
+            new Dictionary<string, string> { ["user@example.com"] = "primary" },
+            RepairExistingColors: true));
+
+        var item = await repository.FindEventByGoogleEventIdAsync("primary", "legacyevent123");
+        Assert.Equal(1, result.CorrectedColorCount);
+        Assert.Null(item!.ColorId);
+    }
+
+    [Fact]
+    public async Task ImportAsync_PromotesPreviouslyImportedGoogleEventWhenNativeTodoIsReimported()
+    {
+        var sourceFolder = CreateLegacyFolder(
+            recordKind: 0x06,
+            title: "Legacy native todo",
+            todoProgress: 90,
+            todoPriorityOrdinal: 5,
+            legacyColorIndex: 2);
+        var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
+        await repository.InitializeAsync();
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "Legacy native todo",
+            Description = "Body #Holiday",
+            CalendarId = "primary",
+            GoogleEventId = "legacyevent123",
+            ColorId = "9",
+            Start = new DateTimeOffset(2026, 5, 16, 9, 0, 0, TimeZoneInfo.Local.BaseUtcOffset),
+            End = new DateTimeOffset(2026, 5, 16, 10, 0, 0, TimeZoneInfo.Local.BaseUtcOffset)
+        });
+        var service = new FavGCalSchedulerImportService(repository);
+
+        var result = await service.ImportAsync(new FavGCalImportOptions(
+            sourceFolder,
+            new Dictionary<string, string> { ["user@example.com"] = "primary" },
+            RepairExistingColors: true));
+
+        var events = await repository.LoadEventsAsync(
+            new DateTimeOffset(2026, 5, 16, 0, 0, 0, TimeZoneInfo.Local.BaseUtcOffset),
+            new DateTimeOffset(2026, 5, 17, 0, 0, 0, TimeZoneInfo.Local.BaseUtcOffset));
+
         var item = Assert.Single(events);
         Assert.Equal(0, result.ImportedCount);
         Assert.Equal(1, result.LinkedExistingGoogleCount);
+        Assert.Equal(1, result.CorrectedColorCount);
+        Assert.Equal("2", item.ColorId);
         Assert.True(item.IsTodoLike);
         Assert.Equal("F", item.TodoPriority);
         Assert.Equal(90, item.TodoProgress);
@@ -327,7 +449,9 @@ public sealed class FavGCalSchedulerImportServiceTests
         byte recordKind = 0x01,
         string title = "Legacy todo #todoA56%",
         int? todoProgress = null,
-        short? todoPriorityOrdinal = null)
+        short? todoPriorityOrdinal = null,
+        int legacyColorIndex = 5,
+        int unrelatedValueAt8 = 0)
     {
         var folder = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(folder);
@@ -341,7 +465,7 @@ public sealed class FavGCalSchedulerImportServiceTests
             """);
         File.WriteAllBytes(
             Path.Combine(folder, "FavSchedule1.favcal"),
-            CreateFavCalBytes(recordKind, title, todoProgress, todoPriorityOrdinal));
+            CreateFavCalBytes(recordKind, title, todoProgress, todoPriorityOrdinal, legacyColorIndex, unrelatedValueAt8));
         return folder;
     }
 
@@ -373,7 +497,13 @@ public sealed class FavGCalSchedulerImportServiceTests
         return zipPath;
     }
 
-    private static byte[] CreateFavCalBytes(byte recordKind, string title, int? todoProgress = null, short? todoPriorityOrdinal = null)
+    private static byte[] CreateFavCalBytes(
+        byte recordKind,
+        string title,
+        int? todoProgress = null,
+        short? todoPriorityOrdinal = null,
+        int legacyColorIndex = 5,
+        int unrelatedValueAt8 = 0)
     {
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.Unicode);
@@ -386,11 +516,11 @@ public sealed class FavGCalSchedulerImportServiceTests
         writer.Write(new byte[] { 0x08, 0x00, recordKind, 0x00 });
         writer.Write((ushort)1);
         writer.Write((ushort)0);
-        writer.Write(5);
+        writer.Write(unrelatedValueAt8);
         writer.Write(new DateTimeOffset(2026, 5, 16, 9, 0, 0, TimeZoneInfo.Local.BaseUtcOffset).ToUnixTimeSeconds());
         writer.Write(new DateTimeOffset(2026, 5, 16, 10, 0, 0, TimeZoneInfo.Local.BaseUtcOffset).ToUnixTimeSeconds());
         writer.Write(60);
-        writer.Write((ushort)0);
+        writer.Write((ushort)(legacyColorIndex << 8));
         WriteFavString(writer, title);
         WriteFavString(writer, "Meeting room");
         WriteFavString(writer, "Body #Holiday");

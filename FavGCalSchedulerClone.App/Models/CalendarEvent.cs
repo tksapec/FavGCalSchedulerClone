@@ -23,7 +23,7 @@ public sealed class CalendarEvent
     public bool IsDirty { get; set; } = true;
     public bool IsTodoLike { get; set; }
     public int? ReminderMinutesBeforeStart { get; set; }
-    public string DisplayColor { get; set; } = "#E5E7EB";
+    public string DisplayColor { get; set; } = "#FFFFFF";
     public string DisplayForegroundColor { get; set; } = "#111827";
     public bool IsGeneratedOccurrence { get; set; }
 

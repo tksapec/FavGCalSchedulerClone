@@ -792,6 +792,7 @@ public partial class MainWindow : Window
         };
         var importSettings = new CheckBox { Content = "旧アプリ設定の一部を反映する", IsChecked = true };
         var skipDuplicates = new CheckBox { Content = "重複予定をスキップする", IsChecked = true };
+        var repairExistingColors = new CheckBox { Content = "既存予定のラベル色を元データで修復する", IsChecked = false };
         var verifyGoogle = new CheckBox { Content = "取り込み前にGoogle予定を取得して照合する", IsChecked = true };
         var analysisText = new TextBox
         {
@@ -878,6 +879,7 @@ public partial class MainWindow : Window
         root.Children.Add(FormGrid(("既定の取り込み先", targetCalendar, "", analyze)));
         root.Children.Add(importSettings);
         root.Children.Add(skipDuplicates);
+        root.Children.Add(repairExistingColors);
         root.Children.Add(verifyGoogle);
         root.Children.Add(WideField("解析結果", analysisText));
         root.Children.Add(DialogButtons(window, "取り込み", "キャンセル"));
@@ -901,7 +903,8 @@ public partial class MainWindow : Window
                 VerifyGoogleEventsBeforeImport: verifyGoogle.IsChecked == true,
                 MarkImportedEventsDirty: true,
                 DefaultTargetCalendarId: defaultTarget,
-                ComparisonZipPath: string.IsNullOrWhiteSpace(comparisonZip.Text) ? null : comparisonZip.Text));
+                ComparisonZipPath: string.IsNullOrWhiteSpace(comparisonZip.Text) ? null : comparisonZip.Text,
+                RepairExistingColors: repairExistingColors.IsChecked == true));
 
             var comparisonText = result.ComparisonSummary is null
                 ? ""
@@ -909,7 +912,7 @@ public partial class MainWindow : Window
 
             MessageBox.Show(
                 this,
-                $"取り込みが完了しました。\n\n追加: {result.ImportedCount} 件\n既存紐付け: {result.LinkedExistingGoogleCount} 件\n重複スキップ: {result.SkippedDuplicateCount} 件\n復元不能ToDo: {result.UnrestoredTodoCount} 件\n解析エラー: {result.ParseErrorCount} 件{comparisonText}",
+                $"取り込みが完了しました。\n\n追加: {result.ImportedCount} 件\n既存紐付け: {result.LinkedExistingGoogleCount} 件\n重複スキップ: {result.SkippedDuplicateCount} 件\nラベル色補正: {result.CorrectedColorCount} 件\n復元不能ToDo: {result.UnrestoredTodoCount} 件\n解析エラー: {result.ParseErrorCount} 件{comparisonText}",
                 "FavGCalSchedulerデータ移行",
                 MessageBoxButton.OK,
                 result.ParseErrorCount == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);

@@ -120,6 +120,20 @@ public sealed class MainViewModelViewModeTests
         Assert.NotEqual(DateTime.Today, viewModel.SelectedDay?.Date);
     }
 
+    [Fact]
+    public async Task CalendarDay_UsesTagBackgroundWithoutChangingEventLabelColor()
+    {
+        var calendarEvent = CreateEvent("Important #important", DateTime.Today);
+        calendarEvent.ColorId = "2";
+        var viewModel = await CreateViewModelAsync([calendarEvent]);
+
+        var day = viewModel.CalendarDays.Single(item => item.Date == DateTime.Today);
+        var item = Assert.Single(day.Events);
+
+        Assert.Equal("#FDE68A", day.TagBackgroundColor);
+        Assert.Equal("#7AE7BF", item.DisplayColor);
+    }
+
     private static async Task<MainViewModel> CreateViewModelAsync()
     {
         return await CreateViewModelAsync([]);
