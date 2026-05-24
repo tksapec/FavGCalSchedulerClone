@@ -160,6 +160,34 @@ public partial class MainWindow : Window
         ShowCalendarContextMenu(element);
     }
 
+    private async void EventSegment_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: CalendarEventSegment { Event: not null } segment })
+        {
+            return;
+        }
+
+        _viewModel.SelectEventSegment(segment);
+        e.Handled = true;
+
+        if (e.ClickCount >= 2)
+        {
+            await OpenSelectedEventEditorAsync();
+        }
+    }
+
+    private void EventSegment_MouseRightButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: CalendarEventSegment { Event: not null } segment } element)
+        {
+            return;
+        }
+
+        _viewModel.SelectEventSegment(segment);
+        e.Handled = true;
+        ShowCalendarContextMenu(element);
+    }
+
     private void ShowCalendarContextMenu(FrameworkElement placementTarget)
     {
         var menu = new ContextMenu { PlacementTarget = placementTarget };
@@ -1517,6 +1545,7 @@ public partial class MainWindow : Window
         border.SetValue(Border.PaddingProperty, new Thickness(4, 1, 4, 1));
         border.SetValue(Border.MarginProperty, new Thickness(1));
         border.SetBinding(Border.BackgroundProperty, new Binding(nameof(CalendarEvent.DisplayColor)));
+        border.SetBinding(Border.ToolTipProperty, new Binding(nameof(CalendarEvent.ToolTipText)));
         var text = new FrameworkElementFactory(typeof(TextBlock));
         text.SetBinding(TextBlock.TextProperty, new Binding(nameof(CalendarEvent.Title)));
         text.SetBinding(TextBlock.ForegroundProperty, new Binding(nameof(CalendarEvent.DisplayForegroundColor)));

@@ -108,6 +108,30 @@ public sealed class MainViewModelViewModeTests
     }
 
     [Fact]
+    public async Task SelectEventSegment_SelectsContinuationDateAndOriginalEvent()
+    {
+        var start = DateTime.Today.AddDays(1);
+        var calendarEvent = new CalendarEvent
+        {
+            Id = "multi",
+            Title = "Multi day",
+            IsAllDay = true,
+            Start = new DateTimeOffset(start),
+            End = new DateTimeOffset(start.AddDays(3))
+        };
+        var viewModel = await CreateViewModelAsync([calendarEvent]);
+        var continuationDate = start.AddDays(1).Date;
+        var segment = viewModel.CalendarDays.Single(day => day.Date == continuationDate)
+            .Segments.Single(item => item.Event?.Id == calendarEvent.Id);
+
+        viewModel.SelectEventSegment(segment);
+
+        Assert.Equal(calendarEvent.Id, viewModel.SelectedEvent?.Id);
+        Assert.Equal(continuationDate, viewModel.SelectedDay?.Date);
+        Assert.Contains(viewModel.SelectedDayEvents, item => item.Id == calendarEvent.Id);
+    }
+
+    [Fact]
     public async Task NavigateToDateAsync_SelectsTargetDateWithoutRevertingToToday()
     {
         var targetDate = DateTime.Today.AddMonths(1).AddDays(3);

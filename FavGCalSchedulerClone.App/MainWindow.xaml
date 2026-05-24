@@ -23,7 +23,8 @@
         <SolidColorBrush x:Key="OutsideMonthBrush" Color="#F1F5F9" />
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
         <DataTemplate x:Key="ColoredTitleTemplate">
-            <Border Background="{Binding DisplayColor}" BorderBrush="#64748B" BorderThickness="1" Margin="1" Padding="4,1">
+            <Border Background="{Binding DisplayColor}" BorderBrush="#64748B" BorderThickness="1" Margin="1" Padding="4,1"
+                    ToolTip="{Binding ToolTipText}">
                 <TextBlock Text="{Binding Title}" Foreground="{Binding DisplayForegroundColor}"
                            FontSize="{Binding DataContext.SideListFontSize, RelativeSource={RelativeSource AncestorType=Window}}"
                            TextTrimming="CharacterEllipsis" />
@@ -78,8 +79,8 @@
             <Setter Property="Background" Value="{StaticResource WeekdayBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource GridLineBrush}" />
             <Setter Property="BorderThickness" Value="0,0,1,1" />
-            <Setter Property="Padding" Value="5" />
-            <Setter Property="ClipToBounds" Value="True" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="ClipToBounds" Value="False" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding IsSunday}" Value="True">
                     <Setter Property="Background" Value="{StaticResource SundayBrush}" />
@@ -104,6 +105,10 @@
                     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
                     <Setter Property="BorderThickness" Value="2" />
                 </DataTrigger>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="BorderBrush" Value="#3B82F6" />
+                    <Setter Property="BorderThickness" Value="2" />
+                </Trigger>
                 <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
                     <Setter Property="BorderBrush" Value="#0F766E" />
                     <Setter Property="BorderThickness" Value="3" />
@@ -120,6 +125,48 @@
             <Setter Property="Padding" Value="4,0" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="ClipToBounds" Value="True" />
+        </Style>
+
+        <Style x:Key="EventSegmentBar" TargetType="Border" BasedOn="{StaticResource EventBar}">
+            <Setter Property="Background" Value="{Binding DisplayColor}" />
+            <Setter Property="ToolTip" Value="{Binding ToolTipText}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsVisible}" Value="False">
+                    <Setter Property="Background" Value="Transparent" />
+                    <Setter Property="BorderBrush" Value="Transparent" />
+                    <Setter Property="BorderThickness" Value="0" />
+                    <Setter Property="IsHitTestVisible" Value="False" />
+                </DataTrigger>
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding IsVisible}" Value="True" />
+                        <Condition Binding="{Binding IsWeekSegmentStart}" Value="True" />
+                        <Condition Binding="{Binding IsWeekSegmentEnd}" Value="False" />
+                    </MultiDataTrigger.Conditions>
+                    <Setter Property="BorderThickness" Value="1,1,0,1" />
+                    <Setter Property="CornerRadius" Value="2,0,0,2" />
+                    <Setter Property="Margin" Value="0,1,-1,0" />
+                </MultiDataTrigger>
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding IsVisible}" Value="True" />
+                        <Condition Binding="{Binding IsWeekSegmentStart}" Value="False" />
+                        <Condition Binding="{Binding IsWeekSegmentEnd}" Value="False" />
+                    </MultiDataTrigger.Conditions>
+                    <Setter Property="BorderThickness" Value="0,1,0,1" />
+                    <Setter Property="CornerRadius" Value="0" />
+                    <Setter Property="Margin" Value="0,1,-1,0" />
+                </MultiDataTrigger>
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding IsVisible}" Value="True" />
+                        <Condition Binding="{Binding IsWeekSegmentStart}" Value="False" />
+                        <Condition Binding="{Binding IsWeekSegmentEnd}" Value="True" />
+                    </MultiDataTrigger.Conditions>
+                    <Setter Property="BorderThickness" Value="0,1,1,1" />
+                    <Setter Property="CornerRadius" Value="0,2,2,0" />
+                </MultiDataTrigger>
+            </Style.Triggers>
         </Style>
 
         <Style TargetType="DataGrid">
@@ -287,12 +334,12 @@
                                         <Border Style="{StaticResource DayCell}" MouseLeftButtonDown="DayCell_MouseLeftButtonDown" MouseRightButtonDown="DayCell_MouseRightButtonDown">
                                             <DockPanel LastChildFill="True">
                                                 <TextBlock DockPanel.Dock="Top" Text="{Binding Date.Day}" Foreground="#334155"
-                                                           FontSize="15" FontWeight="SemiBold" />
-                                                <ItemsControl ItemsSource="{Binding Events}" Margin="0,4,0,0" HorizontalAlignment="Stretch" ClipToBounds="True">
+                                                           FontSize="15" FontWeight="SemiBold" Margin="5,5,5,0" />
+                                                <ItemsControl ItemsSource="{Binding Segments}" Margin="0,4,0,0" HorizontalAlignment="Stretch" ClipToBounds="False">
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate>
-                                                            <Border Style="{StaticResource EventBar}" Background="{Binding DisplayColor}" MouseLeftButtonDown="EventBar_MouseLeftButtonDown" MouseRightButtonDown="EventBar_MouseRightButtonDown">
-                                                                <TextBlock Text="{Binding CalendarCellDisplayText}" FontSize="{Binding DataContext.CalendarLabelFontSize, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{Binding DisplayForegroundColor}"
+                                                            <Border Style="{StaticResource EventSegmentBar}" MouseLeftButtonDown="EventSegment_MouseLeftButtonDown" MouseRightButtonDown="EventSegment_MouseRightButtonDown">
+                                                                <TextBlock Text="{Binding DisplayText}" FontSize="{Binding DataContext.CalendarLabelFontSize, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{Binding DisplayForegroundColor}"
                                                                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                                             </Border>
                                                         </DataTemplate>
@@ -313,15 +360,16 @@
                                 <RowDefinition Height="28" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
-                            <UniformGrid Columns="7" Background="#E2E8F0">
-                                <TextBlock Text="Sun" Foreground="#B91C1C" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
-                                <TextBlock Text="Mon" Foreground="#334155" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
-                                <TextBlock Text="Tue" Foreground="#334155" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
-                                <TextBlock Text="Wed" Foreground="#334155" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
-                                <TextBlock Text="Thu" Foreground="#334155" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
-                                <TextBlock Text="Fri" Foreground="#334155" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
-                                <TextBlock Text="Sat" Foreground="#1D4ED8" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
-                            </UniformGrid>
+                            <ItemsControl ItemsSource="{Binding WeekdayHeaders}" Background="#E2E8F0">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><UniformGrid Columns="7" /></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}" Foreground="#334155" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
 
                             <ListBox Grid.Row="1" ItemsSource="{Binding VisibleCalendarDays}" SelectedItem="{Binding SelectedDay, Mode=TwoWay}"
                                      BorderThickness="0" Background="Transparent" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled"
@@ -354,12 +402,12 @@
                                         <Border Style="{StaticResource DayCell}" MouseLeftButtonDown="DayCell_MouseLeftButtonDown" MouseRightButtonDown="DayCell_MouseRightButtonDown">
                                             <DockPanel LastChildFill="True">
                                                 <TextBlock DockPanel.Dock="Top" Text="{Binding Date.Day}" Foreground="#334155"
-                                                           FontSize="16" FontWeight="SemiBold" />
-                                                <ItemsControl ItemsSource="{Binding Events}" Margin="0,4,0,0" HorizontalAlignment="Stretch" ClipToBounds="True">
+                                                           FontSize="16" FontWeight="SemiBold" Margin="5,5,5,0" />
+                                                <ItemsControl ItemsSource="{Binding Segments}" Margin="0,4,0,0" HorizontalAlignment="Stretch" ClipToBounds="False">
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate>
-                                                            <Border Style="{StaticResource EventBar}" Background="{Binding DisplayColor}" MouseLeftButtonDown="EventBar_MouseLeftButtonDown" MouseRightButtonDown="EventBar_MouseRightButtonDown">
-                                                                <TextBlock Text="{Binding CalendarCellDisplayText}" FontSize="{Binding DataContext.CalendarLabelFontSize, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{Binding DisplayForegroundColor}"
+                                                            <Border Style="{StaticResource EventSegmentBar}" MouseLeftButtonDown="EventSegment_MouseLeftButtonDown" MouseRightButtonDown="EventSegment_MouseRightButtonDown">
+                                                                <TextBlock Text="{Binding DisplayText}" FontSize="{Binding DataContext.CalendarLabelFontSize, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{Binding DisplayForegroundColor}"
                                                                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                                             </Border>
                                                         </DataTemplate>

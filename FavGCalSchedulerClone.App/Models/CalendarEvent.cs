@@ -25,6 +25,7 @@ public sealed class CalendarEvent
     public int? ReminderMinutesBeforeStart { get; set; }
     public string DisplayColor { get; set; } = "#FFFFFF";
     public string DisplayForegroundColor { get; set; } = "#111827";
+    public string ToolTipText { get; set; } = "";
     public bool IsGeneratedOccurrence { get; set; }
 
     public string SearchText => $"{Title} {Description} {Location}".Trim();

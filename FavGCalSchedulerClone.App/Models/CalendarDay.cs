@@ -15,4 +15,5 @@ public sealed class CalendarDay
     public string? TagBackgroundColor { get; set; }
     public bool HasTagBackgroundColor => !string.IsNullOrWhiteSpace(TagBackgroundColor);
     public ObservableCollection<CalendarEvent> Events { get; } = [];
+    public ObservableCollection<CalendarEventSegment> Segments { get; } = [];
 }

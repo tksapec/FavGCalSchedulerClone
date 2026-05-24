@@ -407,6 +407,18 @@ public sealed class MainViewModel : ObservableObject
         SelectedEvent = calendarEvent;
     }
 
+    public void SelectEventSegment(CalendarEventSegment segment)
+    {
+        if (segment.Event is null)
+        {
+            return;
+        }
+
+        SelectedDay = CalendarDays.FirstOrDefault(day => day.Date == segment.Date)
+            ?? FindOrCreateCalendarDay(segment.Date);
+        SelectedEvent = segment.Event;
+    }
+
     public void BeginNewEvent(DateTime date)
     {
         SelectedEvent = null;
@@ -877,6 +889,7 @@ public sealed class MainViewModel : ObservableObject
 
             CalendarDays.Add(day);
         }
+        CalendarSegmentLayoutService.PopulateSegments(CalendarDays, _visibleEvents);
 
         if (_pendingSelectedDate is { } pendingSelectedDate)
         {
@@ -966,11 +979,15 @@ public sealed class MainViewModel : ObservableObject
 
     private void ApplyDisplayColors(IEnumerable<CalendarEvent> events)
     {
+        var calendarNames = AvailableCalendars.ToDictionary(item => item.Id, item => item.Summary, StringComparer.Ordinal);
         foreach (var calendarEvent in events)
         {
             var colors = TagService.ResolveDisplayColors(calendarEvent, _eventColorPalette);
             calendarEvent.DisplayColor = colors.Background;
             calendarEvent.DisplayForegroundColor = colors.Foreground;
+            calendarEvent.ToolTipText = CalendarEventToolTipFormatter.Format(
+                calendarEvent,
+                calendarNames.GetValueOrDefault(calendarEvent.CalendarId));
         }
     }
 
