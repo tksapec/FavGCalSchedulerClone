@@ -190,6 +190,7 @@ public sealed class MainViewModel : ObservableObject
                     SelectedEvent = null;
                 }
 
+                UpdateSegmentSelection();
                 RefreshSelectedDayEvents();
                 RefreshSevenDayEvents();
                 OnPropertyChanged(nameof(CurrentPeriodTitle));
@@ -210,6 +211,7 @@ public sealed class MainViewModel : ObservableObject
         {
             if (SetProperty(ref _selectedEvent, value))
             {
+                UpdateSegmentSelection();
                 LoadEditor(value);
                 DeleteEventCommand.RaiseCanExecuteChanged();
                 MarkSelectedTodoDoneCommand.RaiseCanExecuteChanged();
@@ -417,6 +419,55 @@ public sealed class MainViewModel : ObservableObject
         SelectedDay = CalendarDays.FirstOrDefault(day => day.Date == segment.Date)
             ?? FindOrCreateCalendarDay(segment.Date);
         SelectedEvent = segment.Event;
+    }
+
+    public async Task<bool> MoveEventAsync(
+        CalendarEvent calendarEvent,
+        DateTime sourceSegmentDate,
+        DateTime targetDate,
+        RecurrenceEditScope? recurrenceScope = null)
+    {
+        var dayShift = (targetDate.Date - sourceSegmentDate.Date).Days;
+        if (dayShift == 0 || calendarEvent.IsRecurringSeriesItem && recurrenceScope is null)
+        {
+            return false;
+        }
+
+        SelectedEvent = calendarEvent;
+        var candidate = CloneEventForEditing(calendarEvent);
+        candidate.Start = candidate.Start.AddDays(dayShift);
+        candidate.End = candidate.End.AddDays(dayShift);
+        candidate.IsDirty = true;
+
+        if (!calendarEvent.IsRecurringSeriesItem)
+        {
+            await _repository.SaveEventAsync(candidate);
+            SelectedEvent = candidate;
+        }
+        else
+        {
+            switch (recurrenceScope!.Value)
+            {
+                case RecurrenceEditScope.ThisOccurrence:
+                    await SaveSingleOccurrenceAsync(candidate);
+                    break;
+                case RecurrenceEditScope.ThisAndFollowing:
+                    await SaveThisAndFollowingAsync(candidate);
+                    break;
+                case RecurrenceEditScope.AllEvents:
+                    await SaveEntireSeriesAsync(candidate);
+                    break;
+            }
+        }
+
+        _pendingSelectedDate = targetDate.Date;
+        var movedEvent = SelectedEvent;
+        await RefreshCalendarAsync();
+        SelectedEvent = FindMovedVisibleEvent(movedEvent, candidate, targetDate) ?? movedEvent ?? candidate;
+        UpdateSegmentSelection();
+        Status = calendarEvent.IsTodoLike ? "ToDoを移動しました。" : "予定を移動しました。";
+        await SyncAfterLocalChangeAsync();
+        return true;
     }
 
     public void BeginNewEvent(DateTime date)
@@ -902,6 +953,7 @@ public sealed class MainViewModel : ObservableObject
         }
 
         RefreshVisibleCalendarDays();
+        UpdateSegmentSelection();
         RefreshSelectedDayEvents();
         RefreshSevenDayEvents();
         await RefreshTodosAsync();
@@ -1609,6 +1661,48 @@ public sealed class MainViewModel : ObservableObject
     private async Task SyncAsync()
     {
         await SynchronizeAsync(reportErrors: true);
+    }
+
+    private void UpdateSegmentSelection()
+    {
+        var selectedDayIndex = SelectedDay is null ? -1 : CalendarDays.IndexOf(SelectedDay);
+        var selectedRow = selectedDayIndex < 0 ? -1 : selectedDayIndex / 7;
+
+        for (var index = 0; index < CalendarDays.Count; index++)
+        {
+            foreach (var segment in CalendarDays[index].Segments)
+            {
+                segment.IsSelected = selectedRow >= 0
+                    && index / 7 == selectedRow
+                    && SameVisibleOccurrence(segment.Event, SelectedEvent);
+            }
+        }
+    }
+
+    private static bool SameVisibleOccurrence(CalendarEvent? left, CalendarEvent? right)
+    {
+        return left is not null
+            && right is not null
+            && (ReferenceEquals(left, right)
+                || string.Equals(left.Id, right.Id, StringComparison.Ordinal)
+                    && left.Start == right.Start
+                    && left.OriginalStart == right.OriginalStart);
+    }
+
+    private CalendarEvent? FindMovedVisibleEvent(CalendarEvent? selectedAfterSave, CalendarEvent candidate, DateTime targetDate)
+    {
+        if (selectedAfterSave is not null)
+        {
+            var selected = _visibleEvents.FirstOrDefault(item => SameVisibleOccurrence(item, selectedAfterSave));
+            if (selected is not null)
+            {
+                return selected;
+            }
+        }
+
+        return _visibleEvents.FirstOrDefault(item =>
+            string.Equals(item.Id, candidate.Id, StringComparison.Ordinal)
+            && DateRangeHelper.OccursOn(item, targetDate.Date));
     }
 
     private async Task SyncAfterLocalChangeAsync()

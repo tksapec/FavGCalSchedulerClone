@@ -113,6 +113,10 @@
                     <Setter Property="BorderBrush" Value="#0F766E" />
                     <Setter Property="BorderThickness" Value="3" />
                 </DataTrigger>
+                <DataTrigger Binding="{Binding IsDropTarget}" Value="True">
+                    <Setter Property="BorderBrush" Value="#F59E0B" />
+                    <Setter Property="BorderThickness" Value="3" />
+                </DataTrigger>
             </Style.Triggers>
         </Style>
 
@@ -165,6 +169,46 @@
                     </MultiDataTrigger.Conditions>
                     <Setter Property="BorderThickness" Value="0,1,1,1" />
                     <Setter Property="CornerRadius" Value="0,2,2,0" />
+                </MultiDataTrigger>
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding IsVisible}" Value="True" />
+                        <Condition Binding="{Binding IsSelected}" Value="True" />
+                        <Condition Binding="{Binding IsWeekSegmentStart}" Value="True" />
+                        <Condition Binding="{Binding IsWeekSegmentEnd}" Value="True" />
+                    </MultiDataTrigger.Conditions>
+                    <Setter Property="BorderBrush" Value="#1D4ED8" />
+                    <Setter Property="BorderThickness" Value="2" />
+                </MultiDataTrigger>
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding IsVisible}" Value="True" />
+                        <Condition Binding="{Binding IsSelected}" Value="True" />
+                        <Condition Binding="{Binding IsWeekSegmentStart}" Value="True" />
+                        <Condition Binding="{Binding IsWeekSegmentEnd}" Value="False" />
+                    </MultiDataTrigger.Conditions>
+                    <Setter Property="BorderBrush" Value="#1D4ED8" />
+                    <Setter Property="BorderThickness" Value="2,2,0,2" />
+                </MultiDataTrigger>
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding IsVisible}" Value="True" />
+                        <Condition Binding="{Binding IsSelected}" Value="True" />
+                        <Condition Binding="{Binding IsWeekSegmentStart}" Value="False" />
+                        <Condition Binding="{Binding IsWeekSegmentEnd}" Value="False" />
+                    </MultiDataTrigger.Conditions>
+                    <Setter Property="BorderBrush" Value="#1D4ED8" />
+                    <Setter Property="BorderThickness" Value="0,2,0,2" />
+                </MultiDataTrigger>
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding IsVisible}" Value="True" />
+                        <Condition Binding="{Binding IsSelected}" Value="True" />
+                        <Condition Binding="{Binding IsWeekSegmentStart}" Value="False" />
+                        <Condition Binding="{Binding IsWeekSegmentEnd}" Value="True" />
+                    </MultiDataTrigger.Conditions>
+                    <Setter Property="BorderBrush" Value="#1D4ED8" />
+                    <Setter Property="BorderThickness" Value="0,2,2,2" />
                 </MultiDataTrigger>
             </Style.Triggers>
         </Style>
@@ -331,14 +375,20 @@
                                 </ListBox.ItemContainerStyle>
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
-                                        <Border Style="{StaticResource DayCell}" MouseLeftButtonDown="DayCell_MouseLeftButtonDown" MouseRightButtonDown="DayCell_MouseRightButtonDown">
+                                        <Border Style="{StaticResource DayCell}" AllowDrop="True"
+                                                MouseLeftButtonDown="DayCell_MouseLeftButtonDown" MouseRightButtonDown="DayCell_MouseRightButtonDown"
+                                                DragEnter="DayCell_DragOver" DragOver="DayCell_DragOver" DragLeave="DayCell_DragLeave" Drop="DayCell_Drop">
                                             <DockPanel LastChildFill="True">
                                                 <TextBlock DockPanel.Dock="Top" Text="{Binding Date.Day}" Foreground="#334155"
                                                            FontSize="15" FontWeight="SemiBold" Margin="5,5,5,0" />
                                                 <ItemsControl ItemsSource="{Binding Segments}" Margin="0,4,0,0" HorizontalAlignment="Stretch" ClipToBounds="False">
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate>
-                                                            <Border Style="{StaticResource EventSegmentBar}" MouseLeftButtonDown="EventSegment_MouseLeftButtonDown" MouseRightButtonDown="EventSegment_MouseRightButtonDown">
+                                                            <Border Style="{StaticResource EventSegmentBar}"
+                                                                    PreviewMouseLeftButtonDown="EventSegment_PreviewMouseLeftButtonDown"
+                                                                    PreviewMouseMove="EventSegment_PreviewMouseMove"
+                                                                    MouseLeftButtonDown="EventSegment_MouseLeftButtonDown"
+                                                                    MouseRightButtonDown="EventSegment_MouseRightButtonDown">
                                                                 <TextBlock Text="{Binding DisplayText}" FontSize="{Binding DataContext.CalendarLabelFontSize, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{Binding DisplayForegroundColor}"
                                                                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                                             </Border>
@@ -399,14 +449,20 @@
                                 </ListBox.ItemContainerStyle>
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
-                                        <Border Style="{StaticResource DayCell}" MouseLeftButtonDown="DayCell_MouseLeftButtonDown" MouseRightButtonDown="DayCell_MouseRightButtonDown">
+                                        <Border Style="{StaticResource DayCell}" AllowDrop="True"
+                                                MouseLeftButtonDown="DayCell_MouseLeftButtonDown" MouseRightButtonDown="DayCell_MouseRightButtonDown"
+                                                DragEnter="DayCell_DragOver" DragOver="DayCell_DragOver" DragLeave="DayCell_DragLeave" Drop="DayCell_Drop">
                                             <DockPanel LastChildFill="True">
                                                 <TextBlock DockPanel.Dock="Top" Text="{Binding Date.Day}" Foreground="#334155"
                                                            FontSize="16" FontWeight="SemiBold" Margin="5,5,5,0" />
                                                 <ItemsControl ItemsSource="{Binding Segments}" Margin="0,4,0,0" HorizontalAlignment="Stretch" ClipToBounds="False">
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate>
-                                                            <Border Style="{StaticResource EventSegmentBar}" MouseLeftButtonDown="EventSegment_MouseLeftButtonDown" MouseRightButtonDown="EventSegment_MouseRightButtonDown">
+                                                            <Border Style="{StaticResource EventSegmentBar}"
+                                                                    PreviewMouseLeftButtonDown="EventSegment_PreviewMouseLeftButtonDown"
+                                                                    PreviewMouseMove="EventSegment_PreviewMouseMove"
+                                                                    MouseLeftButtonDown="EventSegment_MouseLeftButtonDown"
+                                                                    MouseRightButtonDown="EventSegment_MouseRightButtonDown">
                                                                 <TextBlock Text="{Binding DisplayText}" FontSize="{Binding DataContext.CalendarLabelFontSize, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{Binding DisplayForegroundColor}"
                                                                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                                             </Border>

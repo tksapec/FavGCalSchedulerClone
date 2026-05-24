@@ -132,6 +132,108 @@ public sealed class MainViewModelViewModeTests
     }
 
     [Fact]
+    public async Task SelectEventSegment_HighlightsOnlyConnectedSegmentsInSelectedWeek()
+    {
+        var start = new DateTime(2026, 5, 15);
+        var calendarEvent = new CalendarEvent
+        {
+            Id = "week-crossing",
+            Title = "Week crossing",
+            IsAllDay = true,
+            Start = new DateTimeOffset(start),
+            End = new DateTimeOffset(new DateTime(2026, 5, 20))
+        };
+        var viewModel = await CreateViewModelAsync([calendarEvent]);
+        await viewModel.NavigateToDateAsync(start);
+        var clickedSegment = viewModel.CalendarDays.Single(day => day.Date == new DateTime(2026, 5, 16))
+            .Segments.Single(item => item.Event?.Id == calendarEvent.Id);
+
+        viewModel.SelectEventSegment(clickedSegment);
+
+        var selectedDates = viewModel.CalendarDays.SelectMany(day => day.Segments)
+            .Where(segment => segment.IsSelected)
+            .Select(segment => segment.Date)
+            .ToArray();
+        Assert.Equal([new DateTime(2026, 5, 15), new DateTime(2026, 5, 16)], selectedDates);
+    }
+
+    [Fact]
+    public async Task SelectedDayChange_ClearsSegmentHighlightWhenSelectionLeavesEvent()
+    {
+        var eventDate = new DateTime(2026, 5, 11);
+        var calendarEvent = CreateEvent("Selected label", eventDate);
+        var viewModel = await CreateViewModelAsync([calendarEvent]);
+        await viewModel.NavigateToDateAsync(eventDate);
+        var segment = viewModel.CalendarDays.Single(day => day.Date == eventDate)
+            .Segments.Single(item => item.Event?.Id == calendarEvent.Id);
+        viewModel.SelectEventSegment(segment);
+
+        viewModel.SelectedDay = viewModel.CalendarDays.Single(day => day.Date == eventDate.AddDays(1));
+
+        Assert.DoesNotContain(viewModel.CalendarDays.SelectMany(day => day.Segments), item => item.IsSelected);
+    }
+
+    [Fact]
+    public async Task MoveEventAsync_ShiftsTimedEventWithoutChangingDurationOrProperties()
+    {
+        var start = new DateTime(2026, 5, 11);
+        var calendarEvent = CreateEvent("Move me", start);
+        calendarEvent.ColorId = "2";
+        calendarEvent.ReminderMinutesBeforeStart = 15;
+        var viewModel = await CreateViewModelAsync([calendarEvent]);
+        await viewModel.NavigateToDateAsync(start);
+        var visibleEvent = viewModel.CalendarDays.Single(day => day.Date == start)
+            .Segments.Single(item => item.Event?.Id == calendarEvent.Id).Event!;
+
+        var moved = await viewModel.MoveEventAsync(visibleEvent, start, start.AddDays(3));
+
+        Assert.True(moved);
+        Assert.Equal(start.AddDays(3).AddHours(9), viewModel.SelectedEvent?.Start.DateTime);
+        Assert.Equal(start.AddDays(3).AddHours(10), viewModel.SelectedEvent?.End.DateTime);
+        Assert.Equal("2", viewModel.SelectedEvent?.ColorId);
+        Assert.Equal(15, viewModel.SelectedEvent?.ReminderMinutesBeforeStart);
+        Assert.Equal(start.AddDays(3), viewModel.SelectedDay?.Date);
+    }
+
+    [Fact]
+    public async Task MoveEventAsync_UsesDraggedContinuationDayAsMultiDayAnchor()
+    {
+        var calendarEvent = new CalendarEvent
+        {
+            Id = "multi-move",
+            Title = "Trip",
+            IsAllDay = true,
+            Start = new DateTimeOffset(new DateTime(2026, 5, 11)),
+            End = new DateTimeOffset(new DateTime(2026, 5, 14))
+        };
+        var viewModel = await CreateViewModelAsync([calendarEvent]);
+        await viewModel.NavigateToDateAsync(new DateTime(2026, 5, 11));
+        var continuation = viewModel.CalendarDays.Single(day => day.Date == new DateTime(2026, 5, 12))
+            .Segments.Single(item => item.Event?.Id == calendarEvent.Id).Event!;
+
+        await viewModel.MoveEventAsync(continuation, new DateTime(2026, 5, 12), new DateTime(2026, 5, 20));
+
+        Assert.Equal(new DateTime(2026, 5, 19), viewModel.SelectedEvent?.Start.Date);
+        Assert.Equal(new DateTime(2026, 5, 22), viewModel.SelectedEvent?.End.Date);
+        Assert.Equal(new DateTime(2026, 5, 20), viewModel.SelectedDay?.Date);
+    }
+
+    [Fact]
+    public async Task MoveEventAsync_RequiresScopeForRecurringEvent()
+    {
+        var start = new DateTime(2026, 5, 11);
+        var recurring = CreateEvent("Recurring", start);
+        recurring.RecurrenceJson = "[\"RRULE:FREQ=DAILY;COUNT=2\"]";
+        var viewModel = await CreateViewModelAsync([recurring]);
+        await viewModel.NavigateToDateAsync(start);
+
+        var moved = await viewModel.MoveEventAsync(recurring, start, start.AddDays(1));
+
+        Assert.False(moved);
+        Assert.Equal(start, recurring.Start.Date);
+    }
+
+    [Fact]
     public async Task NavigateToDateAsync_SelectsTargetDateWithoutRevertingToToday()
     {
         var targetDate = DateTime.Today.AddMonths(1).AddDays(3);

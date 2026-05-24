@@ -21,6 +21,9 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _automaticSyncTimer;
     private MediaPlayer? _previewSoundPlayer;
     private bool _exitRequested;
+    private Point? _dragStartPoint;
+    private CalendarEventSegment? _dragSegment;
+    private CalendarDay? _dragOverDay;
 
     public MainWindow()
     {
@@ -106,6 +109,12 @@ public partial class MainWindow : Window
 
     private async void DayList_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
+        if (IsEventSegmentSource(e.OriginalSource))
+        {
+            e.Handled = true;
+            return;
+        }
+
         _viewModel.SelectedEvent = null;
         await ShowScheduleDialogAsync();
     }
@@ -160,20 +169,61 @@ public partial class MainWindow : Window
         ShowCalendarContextMenu(element);
     }
 
-    private async void EventSegment_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    private async void EventSegment_PreviewMouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (sender is not FrameworkElement { DataContext: CalendarEventSegment { Event: not null } segment })
         {
             return;
         }
 
-        _viewModel.SelectEventSegment(segment);
-        e.Handled = true;
-
         if (e.ClickCount >= 2)
         {
+            _dragStartPoint = null;
+            _dragSegment = null;
+            _viewModel.SelectEventSegment(segment);
+            e.Handled = true;
             await OpenSelectedEventEditorAsync();
+            return;
         }
+
+        _dragStartPoint = e.GetPosition(this);
+        _dragSegment = segment;
+    }
+
+    private void EventSegment_PreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (sender is not FrameworkElement element
+            || _dragStartPoint is not Point startPoint
+            || _dragSegment is not { Event: not null } segment
+            || e.LeftButton != System.Windows.Input.MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        var position = e.GetPosition(this);
+        if (Math.Abs(position.X - startPoint.X) < SystemParameters.MinimumHorizontalDragDistance
+            && Math.Abs(position.Y - startPoint.Y) < SystemParameters.MinimumVerticalDragDistance)
+        {
+            return;
+        }
+
+        _dragStartPoint = null;
+        _dragSegment = null;
+        _viewModel.SelectEventSegment(segment);
+        DragDrop.DoDragDrop(element, segment, DragDropEffects.Move);
+        ClearDragTarget();
+    }
+
+    private void EventSegment_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: CalendarEventSegment { Event: not null } segment }
+            || e.ClickCount >= 2)
+        {
+            return;
+        }
+
+        _viewModel.SelectEventSegment(segment);
+        e.Handled = true;
     }
 
     private void EventSegment_MouseRightButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
@@ -186,6 +236,103 @@ public partial class MainWindow : Window
         _viewModel.SelectEventSegment(segment);
         e.Handled = true;
         ShowCalendarContextMenu(element);
+    }
+
+    private void DayCell_DragOver(object sender, DragEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: CalendarDay day }
+            && e.Data.GetDataPresent(typeof(CalendarEventSegment))
+            && e.Data.GetData(typeof(CalendarEventSegment)) is CalendarEventSegment segment
+            && segment.Event is not null
+            && day.Date.Date != segment.Date.Date)
+        {
+            SetDragTarget(day);
+            e.Effects = DragDropEffects.Move;
+        }
+        else
+        {
+            ClearDragTarget();
+            e.Effects = DragDropEffects.None;
+        }
+
+        e.Handled = true;
+    }
+
+    private void DayCell_DragLeave(object sender, DragEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: CalendarDay day } && ReferenceEquals(_dragOverDay, day))
+        {
+            ClearDragTarget();
+        }
+    }
+
+    private async void DayCell_Drop(object sender, DragEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is not FrameworkElement { DataContext: CalendarDay targetDay }
+            || e.Data.GetData(typeof(CalendarEventSegment)) is not CalendarEventSegment { Event: not null } segment
+            || targetDay.Date.Date == segment.Date.Date)
+        {
+            ClearDragTarget();
+            return;
+        }
+
+        ClearDragTarget();
+        RecurrenceEditScope? recurrenceScope = null;
+        if (segment.Event.IsRecurringSeriesItem)
+        {
+            recurrenceScope = PromptRecurrenceScope(false);
+            if (recurrenceScope is null)
+            {
+                return;
+            }
+        }
+
+        await _viewModel.MoveEventAsync(segment.Event, segment.Date, targetDay.Date, recurrenceScope);
+    }
+
+    private void SetDragTarget(CalendarDay day)
+    {
+        if (ReferenceEquals(_dragOverDay, day))
+        {
+            return;
+        }
+
+        ClearDragTarget();
+        _dragOverDay = day;
+        day.IsDropTarget = true;
+    }
+
+    private void ClearDragTarget()
+    {
+        if (_dragOverDay is null)
+        {
+            return;
+        }
+
+        _dragOverDay.IsDropTarget = false;
+        _dragOverDay = null;
+    }
+
+    private static bool IsEventSegmentSource(object? source)
+    {
+        if (source is not DependencyObject dependencyObject)
+        {
+            return false;
+        }
+
+        var current = dependencyObject;
+        while (current is not null)
+        {
+            if (current is FrameworkElement { DataContext: CalendarEventSegment { Event: not null } })
+            {
+                return true;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return false;
     }
 
     private void ShowCalendarContextMenu(FrameworkElement placementTarget)
@@ -484,6 +631,12 @@ public partial class MainWindow : Window
         }
 
         var calendarEvent = _viewModel.SelectedEvent;
+        if (calendarEvent.IsTodoLike)
+        {
+            await ShowSelectedTodoDialogAsync();
+            return;
+        }
+
         await _viewModel.NavigateToDateAsync(calendarEvent.Start.Date);
         _viewModel.SelectEvent(calendarEvent);
         await ShowScheduleDialogAsync();

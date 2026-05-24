@@ -1,9 +1,12 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 
 namespace FavGCalSchedulerClone.App.Models;
 
-public sealed class CalendarDay
+public sealed class CalendarDay : INotifyPropertyChanged
 {
+    private bool _isDropTarget;
+
     public DateTime Date { get; init; }
     public bool IsCurrentMonth { get; init; }
     public bool IsToday => Date.Date == DateTime.Today;
@@ -16,4 +19,20 @@ public sealed class CalendarDay
     public bool HasTagBackgroundColor => !string.IsNullOrWhiteSpace(TagBackgroundColor);
     public ObservableCollection<CalendarEvent> Events { get; } = [];
     public ObservableCollection<CalendarEventSegment> Segments { get; } = [];
+    public bool IsDropTarget
+    {
+        get => _isDropTarget;
+        set
+        {
+            if (_isDropTarget == value)
+            {
+                return;
+            }
+
+            _isDropTarget = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsDropTarget)));
+        }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
 }

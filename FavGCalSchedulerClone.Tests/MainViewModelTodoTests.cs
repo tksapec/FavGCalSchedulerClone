@@ -294,6 +294,24 @@ public sealed class MainViewModelTodoTests
     }
 
     [Fact]
+    public async Task MoveEventAsync_MovesTodoDueDateWithoutChangingMetadataOrColor()
+    {
+        var viewModel = await CreateViewModelAsync();
+        viewModel.EditorColorId = "2";
+        await viewModel.SaveTodoAsync(DateTime.Today, "F", 56, "Move todo", "body");
+        var todo = Assert.Single(viewModel.TodoEvents);
+
+        var moved = await viewModel.MoveEventAsync(todo, DateTime.Today, DateTime.Today.AddDays(2));
+
+        Assert.True(moved);
+        var updated = Assert.Single(viewModel.TodoEvents);
+        Assert.Equal(DateTime.Today.AddDays(2), updated.Start.Date);
+        Assert.Equal("F", updated.TodoPriority);
+        Assert.Equal(56, updated.TodoProgress);
+        Assert.Equal("2", updated.ColorId);
+    }
+
+    [Fact]
     public async Task TodoOutsideDisplayedMonth_UsesColorAndDisplayPeriodSetting()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
