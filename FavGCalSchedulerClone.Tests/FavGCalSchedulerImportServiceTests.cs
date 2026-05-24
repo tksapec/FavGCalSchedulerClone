@@ -362,6 +362,98 @@ public sealed class FavGCalSchedulerImportServiceTests
     }
 
     [Fact]
+    public async Task ImportAsync_PreservesMultilineBodyForNewNativeTodo()
+    {
+        var body = $"first line{Environment.NewLine}{Environment.NewLine}second line";
+        var sourceFolder = CreateLegacyFolder(
+            recordKind: 0x06,
+            title: "Multiline todo",
+            description: body,
+            todoProgress: 20,
+            todoPriorityOrdinal: 0);
+        var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
+        await repository.InitializeAsync();
+        var service = new FavGCalSchedulerImportService(repository);
+
+        await service.ImportAsync(new FavGCalImportOptions(
+            sourceFolder,
+            new Dictionary<string, string> { ["user@example.com"] = "primary" }));
+
+        var item = await repository.FindEventByGoogleEventIdAsync("primary", "legacyevent123");
+        Assert.Equal(body, TagService.GetTodoBodyForEditing(item!.Description));
+    }
+
+    [Fact]
+    public async Task ImportAsync_DoesNotReplaceExistingTodoBodyWithoutRepairOption()
+    {
+        var sourceFolder = CreateLegacyFolder(
+            recordKind: 0x06,
+            title: "Existing native todo",
+            description: $"source line 1{Environment.NewLine}source line 2",
+            todoProgress: 20,
+            todoPriorityOrdinal: 0);
+        var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
+        await repository.InitializeAsync();
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "Existing native todo",
+            Description = "#todoF90%\nlocal text",
+            CalendarId = "primary",
+            GoogleEventId = "legacyevent123",
+            IsTodoLike = true,
+            Start = new DateTimeOffset(2026, 5, 16, 9, 0, 0, TimeZoneInfo.Local.BaseUtcOffset),
+            End = new DateTimeOffset(2026, 5, 16, 10, 0, 0, TimeZoneInfo.Local.BaseUtcOffset)
+        });
+        var service = new FavGCalSchedulerImportService(repository);
+
+        var result = await service.ImportAsync(new FavGCalImportOptions(
+            sourceFolder,
+            new Dictionary<string, string> { ["user@example.com"] = "primary" }));
+
+        var item = await repository.FindEventByGoogleEventIdAsync("primary", "legacyevent123");
+        Assert.Equal(0, result.CorrectedTodoDescriptionCount);
+        Assert.Equal("local text", TagService.GetTodoBodyForEditing(item!.Description));
+        Assert.Equal("F", item.TodoPriority);
+        Assert.Equal(90, item.TodoProgress);
+    }
+
+    [Fact]
+    public async Task ImportAsync_RepairOptionRestoresExistingTodoBodyAndKeepsMetadata()
+    {
+        var sourceBody = $"source line 1{Environment.NewLine}{Environment.NewLine}source line 2";
+        var sourceFolder = CreateLegacyFolder(
+            recordKind: 0x06,
+            title: "Existing native todo",
+            description: sourceBody,
+            todoProgress: 20,
+            todoPriorityOrdinal: 0);
+        var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
+        await repository.InitializeAsync();
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "Existing native todo",
+            Description = "#todoF90% flattened source text",
+            CalendarId = "primary",
+            GoogleEventId = "legacyevent123",
+            IsTodoLike = true,
+            Start = new DateTimeOffset(2026, 5, 16, 9, 0, 0, TimeZoneInfo.Local.BaseUtcOffset),
+            End = new DateTimeOffset(2026, 5, 16, 10, 0, 0, TimeZoneInfo.Local.BaseUtcOffset)
+        });
+        var service = new FavGCalSchedulerImportService(repository);
+
+        var result = await service.ImportAsync(new FavGCalImportOptions(
+            sourceFolder,
+            new Dictionary<string, string> { ["user@example.com"] = "primary" },
+            RepairExistingTodoDescriptions: true));
+
+        var item = await repository.FindEventByGoogleEventIdAsync("primary", "legacyevent123");
+        Assert.Equal(1, result.CorrectedTodoDescriptionCount);
+        Assert.Equal(sourceBody, TagService.GetTodoBodyForEditing(item!.Description));
+        Assert.Equal("F", item.TodoPriority);
+        Assert.Equal(90, item.TodoProgress);
+    }
+
+    [Fact]
     public async Task ImportFavGCalSchedulerAsync_CanApplyLegacySettings()
     {
         var sourceFolder = CreateLegacyFolder();
@@ -472,6 +564,7 @@ public sealed class FavGCalSchedulerImportServiceTests
     private static string CreateLegacyFolder(
         byte recordKind = 0x01,
         string title = "Legacy todo #todoA56%",
+        string description = "Body #Holiday",
         int? todoProgress = null,
         short? todoPriorityOrdinal = null,
         int legacyColorIndex = 5,
@@ -489,7 +582,7 @@ public sealed class FavGCalSchedulerImportServiceTests
             """);
         File.WriteAllBytes(
             Path.Combine(folder, "FavSchedule1.favcal"),
-            CreateFavCalBytes(recordKind, title, todoProgress, todoPriorityOrdinal, legacyColorIndex, unrelatedValueAt8));
+            CreateFavCalBytes(recordKind, title, description, todoProgress, todoPriorityOrdinal, legacyColorIndex, unrelatedValueAt8));
         return folder;
     }
 
@@ -524,6 +617,7 @@ public sealed class FavGCalSchedulerImportServiceTests
     private static byte[] CreateFavCalBytes(
         byte recordKind,
         string title,
+        string description = "Body #Holiday",
         int? todoProgress = null,
         short? todoPriorityOrdinal = null,
         int legacyColorIndex = 5,
@@ -547,7 +641,7 @@ public sealed class FavGCalSchedulerImportServiceTests
         writer.Write((ushort)(legacyColorIndex << 8));
         WriteFavString(writer, title);
         WriteFavString(writer, "Meeting room");
-        WriteFavString(writer, "Body #Holiday");
+        WriteFavString(writer, description);
         writer.Write(0);
         WriteGoogleId(writer, "legacyevent123");
         if (todoProgress.HasValue && todoPriorityOrdinal.HasValue)

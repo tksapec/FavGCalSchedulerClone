@@ -111,7 +111,7 @@ public sealed class MainViewModel : ObservableObject
         CalendarViewMode.Day => FormatDayTitle(SelectedDay?.Date ?? DateTime.Today),
         _ => JapaneseMonthTitle
     };
-    public string CalendarStatusText => FormatCalendarStatus(DateTime.Today);
+    public string CalendarStatusText => FormatCalendarStatus(SelectedDay?.Date ?? DateTime.Today);
     public bool IsMonthView => CurrentViewMode == CalendarViewMode.Month;
     public bool IsWeekView => CurrentViewMode == CalendarViewMode.Week;
     public bool IsDayView => CurrentViewMode == CalendarViewMode.Day;
@@ -194,6 +194,7 @@ public sealed class MainViewModel : ObservableObject
                 RefreshSelectedDayEvents();
                 RefreshSevenDayEvents();
                 OnPropertyChanged(nameof(CurrentPeriodTitle));
+                OnPropertyChanged(nameof(CalendarStatusText));
                 if (value is not null)
                 {
                     StartDate = value.Date;
@@ -806,7 +807,7 @@ public sealed class MainViewModel : ObservableObject
 
         await ReloadAvailableCalendarsAsync();
         await RefreshCalendarAsync();
-        Status = $"FavGCalSchedulerデータを取り込みました: 追加 {result.ImportedCount} 件、既存紐付け {result.LinkedExistingGoogleCount} 件、重複スキップ {result.SkippedDuplicateCount} 件";
+        Status = $"FavGCalSchedulerデータを取り込みました: 追加 {result.ImportedCount} 件、既存紐付け {result.LinkedExistingGoogleCount} 件、重複スキップ {result.SkippedDuplicateCount} 件、ToDo内容修復 {result.CorrectedTodoDescriptionCount} 件";
         return result;
     }
 
@@ -1174,7 +1175,7 @@ public sealed class MainViewModel : ObservableObject
     {
         var weekOfMonth = ((date.Day - 1) / 7) + 1;
         var elapsedDays = date.DayOfYear;
-        var weekOfYear = elapsedDays / 7;
+        var weekOfYear = ((elapsedDays - 1) / 7) + 1;
         var dayOfWeek = date.ToString("dddd", new CultureInfo("ja-JP"));
         return $"{date:yyyy}年({FormatJapaneseEra(date)}){date:MM月dd日} 第{weekOfMonth}{dayOfWeek} {weekOfYear}週目 経過日数 {elapsedDays}日";
     }

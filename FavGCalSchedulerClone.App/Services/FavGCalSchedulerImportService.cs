@@ -65,6 +65,7 @@ public sealed class FavGCalSchedulerImportService
         var linked = 0;
         var skipped = 0;
         var correctedColors = 0;
+        var correctedTodoDescriptions = 0;
         var parseErrors = analysis.ParseErrorCount;
         var warnings = new List<string>(analysis.Warnings);
         var normalizedImportedEvents = new List<CalendarEvent>();
@@ -111,7 +112,13 @@ public sealed class FavGCalSchedulerImportService
                             options.MarkImportedEventsDirty);
                         var todoChanged = parsedEvent.IsNativeTodo
                             && PromoteExistingEventToTodo(existingGoogleEvent, calendarEvent, options.MarkImportedEventsDirty);
-                        if (colorChanged || todoChanged)
+                        var descriptionChanged = parsedEvent.IsNativeTodo
+                            && ApplyImportedTodoDescription(
+                                existingGoogleEvent,
+                                calendarEvent,
+                                options.RepairExistingTodoDescriptions,
+                                options.MarkImportedEventsDirty);
+                        if (colorChanged || todoChanged || descriptionChanged)
                         {
                             await _repository.SaveEventAsync(existingGoogleEvent);
                         }
@@ -119,6 +126,11 @@ public sealed class FavGCalSchedulerImportService
                         if (colorChanged)
                         {
                             correctedColors++;
+                        }
+
+                        if (descriptionChanged)
+                        {
+                            correctedTodoDescriptions++;
                         }
 
                         linked++;
@@ -138,7 +150,13 @@ public sealed class FavGCalSchedulerImportService
                             options.MarkImportedEventsDirty);
                         var todoChanged = parsedEvent.IsNativeTodo
                             && PromoteExistingEventToTodo(existingDuplicate, calendarEvent, options.MarkImportedEventsDirty);
-                        if (colorChanged || todoChanged)
+                        var descriptionChanged = parsedEvent.IsNativeTodo
+                            && ApplyImportedTodoDescription(
+                                existingDuplicate,
+                                calendarEvent,
+                                options.RepairExistingTodoDescriptions,
+                                options.MarkImportedEventsDirty);
+                        if (colorChanged || todoChanged || descriptionChanged)
                         {
                             await _repository.SaveEventAsync(existingDuplicate);
                         }
@@ -146,6 +164,11 @@ public sealed class FavGCalSchedulerImportService
                         if (colorChanged)
                         {
                             correctedColors++;
+                        }
+
+                        if (descriptionChanged)
+                        {
+                            correctedTodoDescriptions++;
                         }
 
                         skipped++;
@@ -165,7 +188,7 @@ public sealed class FavGCalSchedulerImportService
             comparisonSummary = _compareService.Compare(normalizedImportedEvents, exportData.Events);
         }
 
-        return new FavGCalImportResult(imported, linked, skipped, correctedColors, analysis.UnrestoredTodoCount, parseErrors, warnings, comparisonSummary);
+        return new FavGCalImportResult(imported, linked, skipped, correctedColors, correctedTodoDescriptions, analysis.UnrestoredTodoCount, parseErrors, warnings, comparisonSummary);
     }
 
     public static string? ExtractCalendarIdFromFeedUrl(string? feedUrl)
@@ -526,6 +549,32 @@ public sealed class FavGCalSchedulerImportService
         existingEvent.IsDirty |= markDirty;
         return true;
     }
+
+    private static bool ApplyImportedTodoDescription(
+        CalendarEvent existingEvent,
+        CalendarEvent importedEvent,
+        bool repairExistingTodoDescriptions,
+        bool markDirty)
+    {
+        if (!repairExistingTodoDescriptions || !existingEvent.IsTodoLike || !importedEvent.IsTodoLike)
+        {
+            return false;
+        }
+
+        var metadata = TagService.GetTodoMetadata(existingEvent) ?? TagService.GetTodoMetadata(importedEvent);
+        var description = TagService.UpdateTodoMarker(
+            TagService.GetTodoBodyForEditing(importedEvent.Description),
+            metadata?.Priority,
+            metadata?.Progress ?? 0);
+        if (string.Equals(existingEvent.Description, description, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        existingEvent.Description = description;
+        existingEvent.IsDirty |= markDirty;
+        return true;
+    }
 }
 
 public sealed record FavGCalImportAnalysis(
@@ -559,13 +608,15 @@ public sealed record FavGCalImportOptions(
     bool MarkImportedEventsDirty = true,
     string? DefaultTargetCalendarId = null,
     string? ComparisonZipPath = null,
-    bool RepairExistingColors = false);
+    bool RepairExistingColors = false,
+    bool RepairExistingTodoDescriptions = false);
 
 public sealed record FavGCalImportResult(
     int ImportedCount,
     int LinkedExistingGoogleCount,
     int SkippedDuplicateCount,
     int CorrectedColorCount,
+    int CorrectedTodoDescriptionCount,
     int UnrestoredTodoCount,
     int ParseErrorCount,
     IReadOnlyList<string> Warnings,

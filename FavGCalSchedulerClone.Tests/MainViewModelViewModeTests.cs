@@ -250,6 +250,20 @@ public sealed class MainViewModelViewModeTests
     }
 
     [Fact]
+    public async Task CalendarStatusText_UsesSelectedDayAndOriginalWeekNumbering()
+    {
+        var viewModel = await CreateViewModelAsync();
+
+        await viewModel.NavigateToDateAsync(new DateTime(2026, 5, 24));
+
+        Assert.Contains("2026", viewModel.CalendarStatusText);
+        Assert.Contains("05月24日", viewModel.CalendarStatusText);
+        Assert.Contains("第4日曜日", viewModel.CalendarStatusText);
+        Assert.Contains("21週目", viewModel.CalendarStatusText);
+        Assert.Contains("経過日数 144日", viewModel.CalendarStatusText);
+    }
+
+    [Fact]
     public async Task CalendarDay_UsesTagBackgroundWithoutChangingEventLabelColor()
     {
         var calendarEvent = CreateEvent("Important #important", DateTime.Today);

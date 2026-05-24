@@ -119,18 +119,43 @@ public static partial class TagService
     {
         var marker = BuildTodoMarker(priority, progress);
         var body = GetTodoBodyForEditing(text);
-        return string.IsNullOrWhiteSpace(body) ? marker : $"{marker}{Environment.NewLine}{body}";
+        return body.Length == 0 ? marker : $"{marker}{Environment.NewLine}{body}";
     }
 
     public static string GetTodoBodyForEditing(string? text)
     {
-        var body = TodoRegex().Replace(text ?? "", "");
-        var normalized = body.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
-        var lines = normalized
-            .Split('\n')
-            .Select(line => InlineWhitespaceRegex().Replace(line, " ").Trim())
-            .ToArray();
-        return string.Join(Environment.NewLine, lines).Trim();
+        var source = text ?? "";
+        var marker = TodoRegex().Match(source);
+        var body = source;
+        foreach (Match match in TodoRegex().Matches(source).Reverse())
+        {
+            var start = match.Index;
+            var length = match.Length;
+            if (start > 0 && source[start - 1] == ' ')
+            {
+                start--;
+                length++;
+            }
+
+            body = body.Remove(start, length);
+        }
+
+        if (!marker.Success || marker.Index != 0)
+        {
+            return body;
+        }
+
+        if (body.StartsWith("\r\n", StringComparison.Ordinal))
+        {
+            return body[2..];
+        }
+
+        if (body.StartsWith('\r') || body.StartsWith('\n') || body.StartsWith(' '))
+        {
+            return body[1..];
+        }
+
+        return body;
     }
 
     public static CalendarTag? FindDisplayTag(CalendarEvent calendarEvent, IEnumerable<CalendarTag> tags)
@@ -216,6 +241,4 @@ public static partial class TagService
     [GeneratedRegex(@"#todo(?<priority>[A-Fa-f])?(?<progress>\d{1,3})%", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex TodoRegex();
 
-    [GeneratedRegex(@"[^\S\r\n]+", RegexOptions.Compiled)]
-    private static partial Regex InlineWhitespaceRegex();
 }

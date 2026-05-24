@@ -106,6 +106,17 @@ public sealed class TagServiceTests
     }
 
     [Fact]
+    public void UpdateTodoMarker_PreservesTabsAndInlineWhitespace()
+    {
+        var body = "line 1\tcolumn 2\r\n  indented line";
+
+        var updated = TagService.UpdateTodoMarker(body, "A", 20);
+
+        Assert.Equal($"#todoA20%{Environment.NewLine}{body}", updated);
+        Assert.Equal(body, TagService.GetTodoBodyForEditing(updated));
+    }
+
+    [Fact]
     public void IsWorkday_DetectsWorkdayTagInTitle()
     {
         var item = new CalendarEvent { Title = "休日出勤 #workday" };
