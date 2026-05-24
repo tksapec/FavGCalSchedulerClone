@@ -158,6 +158,21 @@ public sealed class CalendarRepository
         return await ReadEventsAsync(command);
     }
 
+    public async Task<IReadOnlyList<CalendarEvent>> LoadTodoEventsAsync()
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
+                   calendar_id, title, description, location, start, end, is_all_day,
+                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
+            FROM events
+            WHERE is_todo_like = 1 AND is_deleted = 0
+            ORDER BY start, title
+            """;
+        return await ReadEventsAsync(command);
+    }
+
     public async Task<IReadOnlyList<CalendarEvent>> LoadDirtyEventsAsync()
     {
         await using var connection = OpenConnection();

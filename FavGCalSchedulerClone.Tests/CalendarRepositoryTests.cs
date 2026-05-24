@@ -26,6 +26,11 @@ public sealed class CalendarRepositoryTests
         Assert.True(settings.CloseButtonExitsApplication);
         Assert.True(settings.DefaultNewEventIsAllDay);
         Assert.True(settings.UseWindowsToastNotifications);
+        Assert.Equal(CalendarViewMode.Month, settings.StartupCalendarViewMode);
+        Assert.Equal(2, settings.CalendarLabelFontSizeIndex);
+        Assert.Equal(2, settings.SideListFontSizeIndex);
+        Assert.Equal(255, settings.WindowOpacity);
+        Assert.False(settings.SyncAfterLocalChange);
     }
 
     [Fact]
@@ -45,7 +50,24 @@ public sealed class CalendarRepositoryTests
             ConfirmBeforeDelete = false,
             CloseButtonExitsApplication = false,
             DefaultNewEventIsAllDay = false,
-            UseWindowsToastNotifications = false
+            UseWindowsToastNotifications = false,
+            StartupCalendarViewMode = CalendarViewMode.Week,
+            StartupTodoTabIndex = 1,
+            HideMainWindowWhileEditingSchedule = true,
+            ReuseLastScheduleInput = true,
+            DefaultScheduleReminderMinutes = 10,
+            CalendarLabelFontSizeIndex = 3,
+            SideListFontSizeIndex = 1,
+            WeekdayDisplayType = WeekdayDisplayType.JapaneseShort,
+            WeekStartsOnMonday = true,
+            WindowOpacity = 180,
+            IncompleteTodoDisplayPeriodMonths = 3,
+            CompletedTodoDisplayPeriodMonths = 12,
+            EnableReminderSound = true,
+            ReminderSoundFilePath = "sound.wav",
+            ReminderSoundVolume = 40,
+            SyncAfterLocalChange = true,
+            AutomaticSyncIntervalMinutes = 120
         });
 
         var settings = await repository.LoadSettingsAsync();
@@ -58,6 +80,23 @@ public sealed class CalendarRepositoryTests
         Assert.False(settings.CloseButtonExitsApplication);
         Assert.False(settings.DefaultNewEventIsAllDay);
         Assert.False(settings.UseWindowsToastNotifications);
+        Assert.Equal(CalendarViewMode.Week, settings.StartupCalendarViewMode);
+        Assert.Equal(1, settings.StartupTodoTabIndex);
+        Assert.True(settings.HideMainWindowWhileEditingSchedule);
+        Assert.True(settings.ReuseLastScheduleInput);
+        Assert.Equal(10, settings.DefaultScheduleReminderMinutes);
+        Assert.Equal(3, settings.CalendarLabelFontSizeIndex);
+        Assert.Equal(1, settings.SideListFontSizeIndex);
+        Assert.Equal(WeekdayDisplayType.JapaneseShort, settings.WeekdayDisplayType);
+        Assert.True(settings.WeekStartsOnMonday);
+        Assert.Equal(180, settings.WindowOpacity);
+        Assert.Equal(3, settings.IncompleteTodoDisplayPeriodMonths);
+        Assert.Equal(12, settings.CompletedTodoDisplayPeriodMonths);
+        Assert.True(settings.EnableReminderSound);
+        Assert.Equal("sound.wav", settings.ReminderSoundFilePath);
+        Assert.Equal(40, settings.ReminderSoundVolume);
+        Assert.True(settings.SyncAfterLocalChange);
+        Assert.Equal(120, settings.AutomaticSyncIntervalMinutes);
     }
 
     [Fact]

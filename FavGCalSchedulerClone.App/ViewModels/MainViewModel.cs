@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.Text.Json;
 using FavGCalSchedulerClone.App.Models;
 using FavGCalSchedulerClone.App.Services;
 using Microsoft.Win32;
@@ -9,6 +10,8 @@ namespace FavGCalSchedulerClone.App.ViewModels;
 
 public sealed class MainViewModel : ObservableObject
 {
+    private const string ScheduleTitleHistoryKey = "schedule:title-history";
+    private const string ScheduleLocationHistoryKey = "schedule:location-history";
     private readonly CalendarRepository _repository;
     private readonly GoogleCalendarSyncService _syncService;
     private readonly BackupService _backupService = new();
@@ -32,12 +35,16 @@ public sealed class MainViewModel : ObservableObject
     private int? _reminderMinutesBeforeStart;
     private string _oauthClientJsonPath = "";
     private int _selectedTabIndex;
+    private int _selectedTodoTabIndex;
     private DateTime? _pendingSelectedDate;
     private CalendarViewMode _currentViewMode = CalendarViewMode.Month;
     private string _editorCalendarId = GoogleCalendarDefaults.PrimaryCalendarId;
     private string? _editorColorId;
     private int _refreshGeneration;
     private IReadOnlyDictionary<string, EventDisplayColors> _eventColorPalette = TagService.DefaultEventColorPalette;
+    private IReadOnlyList<string> _scheduleTitleHistory = [];
+    private IReadOnlyList<string> _scheduleLocationHistory = [];
+    private int _syncInProgress;
 
     public MainViewModel(CalendarRepository repository, GoogleCalendarSyncService syncService)
     {
@@ -306,10 +313,29 @@ public sealed class MainViewModel : ObservableObject
         set => SetProperty(ref _selectedTabIndex, NormalizeTabIndex(value));
     }
 
+    public int SelectedTodoTabIndex
+    {
+        get => _selectedTodoTabIndex;
+        set => SetProperty(ref _selectedTodoTabIndex, Math.Clamp(value, 0, 1));
+    }
+
     public int StartupTabIndex => _settings.StartupTabIndex;
+    public CalendarViewMode StartupCalendarViewMode => _settings.StartupCalendarViewMode;
     public bool ConfirmBeforeDelete => _settings.ConfirmBeforeDelete;
     public bool CloseButtonExitsApplication => _settings.CloseButtonExitsApplication;
     public bool DefaultNewEventIsAllDay => _settings.DefaultNewEventIsAllDay;
+    public bool HideMainWindowWhileEditingSchedule => _settings.HideMainWindowWhileEditingSchedule;
+    public bool ReuseLastScheduleInput => _settings.ReuseLastScheduleInput;
+    public int? DefaultScheduleReminderMinutes => _settings.DefaultScheduleReminderMinutes;
+    public double CalendarLabelFontSize => _settings.CalendarLabelFontSizeIndex + 9;
+    public double SideListFontSize => _settings.SideListFontSizeIndex + 10;
+    public double WindowOpacity => _settings.WindowOpacity / 255.0;
+    public IReadOnlyList<string> WeekdayHeaders => CreateWeekdayHeaders();
+    public IReadOnlyList<string> ScheduleTitleHistory => _scheduleTitleHistory;
+    public IReadOnlyList<string> ScheduleLocationHistory => _scheduleLocationHistory;
+    public bool EnableReminderSound => _settings.EnableReminderSound;
+    public string? ReminderSoundFilePath => _settings.ReminderSoundFilePath;
+    public int ReminderSoundVolume => _settings.ReminderSoundVolume;
     public bool UseWindowsToastNotifications => _settings.UseWindowsToastNotifications;
     public string DefaultBackupFileName => $"FavGCalSchedulerClone-backup-{DateTime.Now:yyyyMMdd-HHmmss}.zip";
 
@@ -318,7 +344,14 @@ public sealed class MainViewModel : ObservableObject
         await _repository.InitializeAsync();
         _settings = NormalizeSettings(await _repository.LoadSettingsAsync());
         OAuthClientJsonPath = _settings.OAuthClientJsonPath ?? "";
+        OnPropertyChanged(nameof(CalendarLabelFontSize));
+        OnPropertyChanged(nameof(SideListFontSize));
+        OnPropertyChanged(nameof(WindowOpacity));
+        OnPropertyChanged(nameof(WeekdayHeaders));
         SelectedTabIndex = _settings.StartupTabIndex;
+        SelectedTodoTabIndex = _settings.StartupTodoTabIndex;
+        CurrentViewMode = _settings.StartupCalendarViewMode;
+        await ReloadScheduleHistoryAsync();
         SelectedDay = null;
         await ReloadTagsAsync();
         _eventColorPalette = await _syncService.LoadCachedEventColorPaletteAsync();
@@ -377,15 +410,15 @@ public sealed class MainViewModel : ObservableObject
     public void BeginNewEvent(DateTime date)
     {
         SelectedEvent = null;
-        Title = "";
+        Title = _settings.ReuseLastScheduleInput ? _scheduleTitleHistory.FirstOrDefault() ?? "" : "";
         Description = "";
-        Location = "";
+        Location = _settings.ReuseLastScheduleInput ? _scheduleLocationHistory.FirstOrDefault() ?? "" : "";
         StartDate = date.Date;
         EndDate = date.Date;
         StartTime = "09:00";
         EndTime = "10:00";
         IsAllDay = _settings.DefaultNewEventIsAllDay;
-        ReminderMinutesBeforeStart = null;
+        ReminderMinutesBeforeStart = _settings.DefaultScheduleReminderMinutes;
         EditorColorId = null;
         Status = "新しいスケジュールを入力してください。";
     }
@@ -421,6 +454,7 @@ public sealed class MainViewModel : ObservableObject
         await _repository.SaveEventAsync(todoEvent);
         await RefreshCalendarAsync();
         Status = "ToDoを保存しました。同期するとGoogleカレンダーへ反映されます。";
+        await SyncAfterLocalChangeAsync();
     }
 
     public async Task SaveTodoAsync(CalendarEvent editingTodo, DateTime dueDate, string priority, int progress, string title, string? description)
@@ -446,6 +480,7 @@ public sealed class MainViewModel : ObservableObject
         await RefreshCalendarAsync();
         SelectedEvent = _visibleEvents.FirstOrDefault(item => item.Id == editingTodo.Id) ?? editingTodo;
         Status = "ToDoを保存しました。同期するとGoogleカレンダーへ反映されます。";
+        await SyncAfterLocalChangeAsync();
     }
 
     public async Task SaveTodoAsync(string eventId, DateTime dueDate, string priority, int progress, string title, string? description)
@@ -475,6 +510,7 @@ public sealed class MainViewModel : ObservableObject
         await RefreshCalendarAsync();
         MarkSelectedTodoDoneCommand.RaiseCanExecuteChanged();
         Status = "ToDoを処理済みにしました。同期するとGoogleカレンダーへ反映されます。";
+        await SyncAfterLocalChangeAsync();
     }
 
     public async Task MarkTodoDoneAsync(CalendarEvent todoEvent)
@@ -490,7 +526,8 @@ public sealed class MainViewModel : ObservableObject
         await _repository.SaveEventAsync(todoEvent);
         await RefreshCalendarAsync();
         MarkSelectedTodoDoneCommand.RaiseCanExecuteChanged();
-        Status = "ToDoを処理済みにしました。";
+        Status = "ToDoを処理済みにしました。同期するとGoogleカレンダーへ反映されます。";
+        await SyncAfterLocalChangeAsync();
     }
 
     public async Task<IReadOnlyList<CalendarEvent>> LoadYearEventsAsync(DateTime yearInView)
@@ -505,7 +542,7 @@ public sealed class MainViewModel : ObservableObject
 
     public async Task<MonthlyPrintPlan> CreateMonthlyPrintPlanAsync()
     {
-        var (gridStart, gridEnd) = DateRangeHelper.MonthGridRange(CurrentMonth);
+        var (gridStart, gridEnd) = DateRangeHelper.MonthGridRange(CurrentMonth, _settings.WeekStartsOnMonday);
         var events = await _repository.LoadEventsAsync(new DateTimeOffset(gridStart), new DateTimeOffset(gridEnd));
         var expanded = RecurrenceExpansionService.ExpandForRange(events, new DateTimeOffset(gridStart), new DateTimeOffset(gridEnd));
         ApplyDisplayColors(expanded);
@@ -548,14 +585,62 @@ public sealed class MainViewModel : ObservableObject
         _settings.CloseButtonExitsApplication = closeButtonExitsApplication;
         _settings.DefaultNewEventIsAllDay = defaultNewEventIsAllDay;
         _settings.UseWindowsToastNotifications = useWindowsToastNotifications;
+        await SaveApplicationSettingsAsync(_settings);
+    }
+
+    public AppSettings CreateSettingsSnapshot()
+    {
+        return JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(_settings)) ?? new AppSettings();
+    }
+
+    public async Task SaveApplicationSettingsAsync(AppSettings settings)
+    {
+        _settings = NormalizeSettings(settings);
+        SelectedTabIndex = _settings.StartupTabIndex;
+        SelectedTodoTabIndex = _settings.StartupTodoTabIndex;
+        CurrentViewMode = _settings.StartupCalendarViewMode;
         await _repository.SaveSettingsAsync(_settings);
 
-        OnPropertyChanged(nameof(StartupTabIndex));
-        OnPropertyChanged(nameof(ConfirmBeforeDelete));
-        OnPropertyChanged(nameof(CloseButtonExitsApplication));
-        OnPropertyChanged(nameof(DefaultNewEventIsAllDay));
-        OnPropertyChanged(nameof(UseWindowsToastNotifications));
+        foreach (var propertyName in new[]
+        {
+            nameof(StartupTabIndex), nameof(StartupCalendarViewMode), nameof(ConfirmBeforeDelete),
+            nameof(CloseButtonExitsApplication), nameof(DefaultNewEventIsAllDay),
+            nameof(HideMainWindowWhileEditingSchedule), nameof(ReuseLastScheduleInput),
+            nameof(DefaultScheduleReminderMinutes), nameof(CalendarLabelFontSize),
+            nameof(SideListFontSize), nameof(WindowOpacity), nameof(WeekdayHeaders),
+            nameof(EnableReminderSound), nameof(ReminderSoundFilePath),
+            nameof(ReminderSoundVolume), nameof(UseWindowsToastNotifications)
+        })
+        {
+            OnPropertyChanged(propertyName);
+        }
+
+        await RefreshCalendarAsync();
         Status = "アプリ設定を保存しました。";
+    }
+
+    public async Task<IReadOnlyList<string>> LoadScheduleTitleHistoryAsync()
+    {
+        await ReloadScheduleHistoryAsync();
+        return _scheduleTitleHistory;
+    }
+
+    public async Task<IReadOnlyList<string>> LoadScheduleLocationHistoryAsync()
+    {
+        await ReloadScheduleHistoryAsync();
+        return _scheduleLocationHistory;
+    }
+
+    public async Task ClearScheduleTitleHistoryAsync()
+    {
+        await _repository.SaveSettingValueAsync(ScheduleTitleHistoryKey, null);
+        _scheduleTitleHistory = [];
+    }
+
+    public async Task ClearScheduleLocationHistoryAsync()
+    {
+        await _repository.SaveSettingValueAsync(ScheduleLocationHistoryKey, null);
+        _scheduleLocationHistory = [];
     }
 
     public async Task DeleteSelectedEventAsync(RecurrenceEditScope? recurrenceScope = null)
@@ -653,10 +738,7 @@ public sealed class MainViewModel : ObservableObject
         var result = await _favGCalImportService.ImportAsync(options);
         if (options.ImportSettings)
         {
-            await _repository.SaveSettingsAsync(_settings);
-            OnPropertyChanged(nameof(ConfirmBeforeDelete));
-            OnPropertyChanged(nameof(CloseButtonExitsApplication));
-            OnPropertyChanged(nameof(DefaultNewEventIsAllDay));
+            await SaveApplicationSettingsAsync(_settings);
         }
 
         await ReloadAvailableCalendarsAsync();
@@ -676,6 +758,19 @@ public sealed class MainViewModel : ObservableObject
     public async Task AuthorizeGoogleAsync()
     {
         await AuthorizeAsync();
+    }
+
+    public async Task RunAutomaticSyncIfDueAsync()
+    {
+        if (_settings.AutomaticSyncIntervalMinutes is not int interval
+            || !CanSynchronize()
+            || _settings.LastAutomaticSyncAt is { } lastSync
+               && DateTimeOffset.Now - lastSync < TimeSpan.FromMinutes(interval))
+        {
+            return;
+        }
+
+        await SynchronizeAsync(reportErrors: false);
     }
 
     private async Task ReloadTagsAsync()
@@ -748,7 +843,7 @@ public sealed class MainViewModel : ObservableObject
         _settings.DisplayMonth = CurrentMonth;
         await _repository.SaveSettingsAsync(_settings);
 
-        var (gridStart, gridEnd) = DateRangeHelper.MonthGridRange(CurrentMonth);
+        var (gridStart, gridEnd) = DateRangeHelper.MonthGridRange(CurrentMonth, _settings.WeekStartsOnMonday);
         var storedEvents = await _repository.LoadEventsAsync(new DateTimeOffset(gridStart), new DateTimeOffset(gridEnd), includeDeleted: true);
         var visibleEvents = RecurrenceExpansionService
             .ExpandForRange(storedEvents, new DateTimeOffset(gridStart), new DateTimeOffset(gridEnd))
@@ -796,7 +891,7 @@ public sealed class MainViewModel : ObservableObject
         RefreshVisibleCalendarDays();
         RefreshSelectedDayEvents();
         RefreshSevenDayEvents();
-        RefreshTodos(_visibleEvents);
+        await RefreshTodosAsync();
     }
 
     private void RefreshSelectedDayEvents()
@@ -824,21 +919,49 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    private void RefreshTodos(IEnumerable<CalendarEvent> events)
+    private async Task RefreshTodosAsync()
     {
         TodoEvents.Clear();
         CompletedTodoEvents.Clear();
-        foreach (var item in events.Where(e => e.IsTodoLike && !e.IsDeleted).OrderBy(e => e.Start).ThenBy(e => e.TodoPriority).Take(100))
+        var events = (await _repository.LoadTodoEventsAsync()).Where(IsVisible).ToArray();
+        ApplyDisplayColors(events);
+
+        foreach (var item in events
+                     .Where(item => !item.IsTodoDone && IsWithinTodoDisplayPeriod(item, _settings.IncompleteTodoDisplayPeriodMonths))
+                     .OrderBy(item => item.Start)
+                     .ThenBy(item => item.TodoPriority)
+                     .Take(100))
         {
-            if (item.IsTodoDone)
-            {
-                CompletedTodoEvents.Add(item);
-            }
-            else
-            {
-                TodoEvents.Add(item);
-            }
+            TodoEvents.Add(item);
         }
+
+        foreach (var item in events
+                     .Where(item => item.IsTodoDone && IsWithinTodoDisplayPeriod(item, _settings.CompletedTodoDisplayPeriodMonths))
+                     .OrderBy(item => item.Start)
+                     .ThenBy(item => item.TodoPriority)
+                     .Take(100))
+        {
+            CompletedTodoEvents.Add(item);
+        }
+    }
+
+    private async Task ReloadScheduleHistoryAsync()
+    {
+        _scheduleTitleHistory = DeserializeHistory(await _repository.LoadSettingValueAsync(ScheduleTitleHistoryKey));
+        _scheduleLocationHistory = DeserializeHistory(await _repository.LoadSettingValueAsync(ScheduleLocationHistoryKey));
+    }
+
+    private async Task RecordScheduleHistoryAsync(CalendarEvent calendarEvent)
+    {
+        _scheduleTitleHistory = AddHistoryValue(_scheduleTitleHistory, calendarEvent.Title);
+        _scheduleLocationHistory = AddHistoryValue(_scheduleLocationHistory, calendarEvent.Location);
+        await _repository.SaveSettingValueAsync(ScheduleTitleHistoryKey, JsonSerializer.Serialize(_scheduleTitleHistory));
+        await _repository.SaveSettingValueAsync(ScheduleLocationHistoryKey, JsonSerializer.Serialize(_scheduleLocationHistory));
+    }
+
+    private static bool IsWithinTodoDisplayPeriod(CalendarEvent calendarEvent, int months)
+    {
+        return months == 0 || calendarEvent.Start.Date >= DateTime.Today.AddMonths(-months);
     }
 
     private void ApplyDisplayColors(IEnumerable<CalendarEvent> events)
@@ -918,7 +1041,10 @@ public sealed class MainViewModel : ObservableObject
         }
 
         var anchor = SelectedDay?.Date ?? CurrentMonth;
-        var start = anchor.Date.AddDays(-(int)anchor.DayOfWeek);
+        var offset = _settings.WeekStartsOnMonday
+            ? ((int)anchor.DayOfWeek + 6) % 7
+            : (int)anchor.DayOfWeek;
+        var start = anchor.Date.AddDays(-offset);
         return Enumerable.Range(0, 7).Select(offset => FindOrCreateCalendarDay(start.AddDays(offset)));
     }
 
@@ -984,9 +1110,12 @@ public sealed class MainViewModel : ObservableObject
         return $"{date:yyyy}年({FormatJapaneseEra(date)}){date:MM月dd日} 第{weekOfMonth}{dayOfWeek} {weekOfYear}週目 経過日数 {elapsedDays}日";
     }
 
-    private static string FormatWeekTitle(DateTime date)
+    private string FormatWeekTitle(DateTime date)
     {
-        var start = date.Date.AddDays(-(int)date.DayOfWeek);
+        var offset = _settings.WeekStartsOnMonday
+            ? ((int)date.DayOfWeek + 6) % 7
+            : (int)date.DayOfWeek;
+        var start = date.Date.AddDays(-offset);
         var end = start.AddDays(6);
         return $"{start:yyyy/M/d} - {end:yyyy/M/d}";
     }
@@ -1027,9 +1156,11 @@ public sealed class MainViewModel : ObservableObject
         if (SelectedEvent is null || recurrenceScope is null)
         {
             await _repository.SaveEventAsync(candidate);
+            await RecordScheduleHistoryAsync(candidate);
             SelectedEvent = candidate;
             await RefreshCalendarAsync();
             Status = "予定を保存しました。";
+            await SyncAfterLocalChangeAsync();
             return;
         }
 
@@ -1047,7 +1178,9 @@ public sealed class MainViewModel : ObservableObject
         }
 
         await RefreshCalendarAsync();
+        await RecordScheduleHistoryAsync(candidate);
         Status = "予定を保存しました。";
+        await SyncAfterLocalChangeAsync();
     }
 
     private async Task DeleteEventWithRecurrenceAsync(RecurrenceEditScope? recurrenceScope)
@@ -1063,6 +1196,7 @@ public sealed class MainViewModel : ObservableObject
             SelectedEvent = null;
             await RefreshCalendarAsync();
             Status = "予定を削除しました。";
+            await SyncAfterLocalChangeAsync();
             return;
         }
 
@@ -1082,6 +1216,7 @@ public sealed class MainViewModel : ObservableObject
         SelectedEvent = null;
         await RefreshCalendarAsync();
         Status = "予定を削除しました。";
+        await SyncAfterLocalChangeAsync();
     }
 
     private CalendarEvent? BuildEditedEventAsync()
@@ -1456,13 +1591,61 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task SyncAsync()
     {
-        await SaveOAuthPathAsync();
-        Status = "Googleカレンダーと同期中...";
-        var result = await _syncService.SyncAsync(_settings);
-        _eventColorPalette = await _syncService.RefreshEventColorPaletteAsync();
-        await ReloadAvailableCalendarsAsync();
-        await RefreshCalendarAsync();
-        Status = $"同期が完了しました: 送信 {result.Pushed} 件、取得 {result.Pulled} 件。";
+        await SynchronizeAsync(reportErrors: true);
+    }
+
+    private async Task SyncAfterLocalChangeAsync()
+    {
+        if (_settings.SyncAfterLocalChange && CanSynchronize())
+        {
+            await SynchronizeAsync(reportErrors: false);
+        }
+    }
+
+    private bool CanSynchronize()
+    {
+        return !string.IsNullOrWhiteSpace(_settings.OAuthClientJsonPath)
+            && File.Exists(_settings.OAuthClientJsonPath);
+    }
+
+    private async Task SynchronizeAsync(bool reportErrors)
+    {
+        if (Interlocked.Exchange(ref _syncInProgress, 1) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await SaveOAuthPathAsync();
+            if (!CanSynchronize())
+            {
+                if (reportErrors)
+                {
+                    Status = "先にOAuth client JSONを設定してください。";
+                }
+
+                return;
+            }
+
+            Status = "Googleカレンダーと同期中...";
+            var result = await _syncService.SyncAsync(_settings);
+            _settings.LastAutomaticSyncAt = DateTimeOffset.Now;
+            await _repository.SaveSettingsAsync(_settings);
+            _eventColorPalette = await _syncService.RefreshEventColorPaletteAsync();
+            await ReloadAvailableCalendarsAsync();
+            await RefreshCalendarAsync();
+            Status = $"同期が完了しました: 送信 {result.Pushed} 件、取得 {result.Pulled} 件。";
+        }
+        catch (Exception ex) when (!reportErrors)
+        {
+            Debug.WriteLine(ex);
+            Status = $"自動同期に失敗しました。未同期の変更は保持されています: {ex.Message}";
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _syncInProgress, 0);
+        }
     }
 
     private async Task ClearTokensAsync()
@@ -1507,13 +1690,19 @@ public sealed class MainViewModel : ObservableObject
             var key = trimmed[..separator].Trim();
             var value = trimmed[(separator + 1)..].Trim();
             if (section.Equals("DISP_INFO", StringComparison.OrdinalIgnoreCase)
-                && (key.Equals("DeletePopup", StringComparison.OrdinalIgnoreCase)
-                    || key.Equals("AppClose", StringComparison.OrdinalIgnoreCase)))
+                && new[] { "DeletePopup", "AppClose", "EditScheduleWindowHide", "StartWeekdayIndex", "WeekdayType", "FontSize", "BottomInfoFontSize", "ToDoRunLimitMonthCount", "ToDoCompLimitMonthCount" }
+                    .Contains(key, StringComparer.OrdinalIgnoreCase))
             {
                 values[key] = value;
             }
             else if (section.Equals("APP_INFO", StringComparison.OrdinalIgnoreCase)
-                     && key.Equals("ScheduleDeaultAllDay", StringComparison.OrdinalIgnoreCase))
+                     && new[] { "CreateScheduleNoHistory", "ScheduleDeaultAllDay", "ScheduleDeaultAlarmIndex" }
+                         .Contains(key, StringComparer.OrdinalIgnoreCase))
+            {
+                values[key] = value;
+            }
+            else if (section.Equals("SYNC_INFO", StringComparison.OrdinalIgnoreCase)
+                     && new[] { "AddEditDelSync", "SyncIntervalMin" }.Contains(key, StringComparer.OrdinalIgnoreCase))
             {
                 values[key] = value;
             }
@@ -1532,6 +1721,76 @@ public sealed class MainViewModel : ObservableObject
         if (values.TryGetValue("ScheduleDeaultAllDay", out var defaultAllDay))
         {
             _settings.DefaultNewEventIsAllDay = defaultAllDay != "0";
+        }
+
+        if (values.TryGetValue("EditScheduleWindowHide", out var editScheduleWindowHide))
+        {
+            _settings.HideMainWindowWhileEditingSchedule = editScheduleWindowHide != "0";
+        }
+
+        if (values.TryGetValue("StartWeekdayIndex", out var startWeekday)
+            && int.TryParse(startWeekday, out var startWeekdayIndex))
+        {
+            _settings.WeekStartsOnMonday = startWeekdayIndex == 1;
+        }
+
+        if (values.TryGetValue("WeekdayType", out var weekdayType)
+            && int.TryParse(weekdayType, out var weekdayTypeIndex))
+        {
+            _settings.WeekdayDisplayType = weekdayTypeIndex switch
+            {
+                1 => WeekdayDisplayType.EnglishFull,
+                2 => WeekdayDisplayType.JapaneseShort,
+                _ => WeekdayDisplayType.EnglishShort
+            };
+        }
+
+        if (values.TryGetValue("FontSize", out var fontSize) && int.TryParse(fontSize, out var fontIndex))
+        {
+            _settings.CalendarLabelFontSizeIndex = Math.Clamp(fontIndex + 1, 1, 3);
+        }
+
+        if (values.TryGetValue("BottomInfoFontSize", out var sideFontSize) && int.TryParse(sideFontSize, out var sideFontIndex))
+        {
+            _settings.SideListFontSizeIndex = Math.Clamp(sideFontIndex + 1, 1, 3);
+        }
+
+        if (values.TryGetValue("ToDoRunLimitMonthCount", out var runningLimit) && int.TryParse(runningLimit, out var runningMonths))
+        {
+            _settings.IncompleteTodoDisplayPeriodMonths = NormalizeTodoMonths(runningMonths);
+        }
+
+        if (values.TryGetValue("ToDoCompLimitMonthCount", out var completedLimit) && int.TryParse(completedLimit, out var completedMonths))
+        {
+            _settings.CompletedTodoDisplayPeriodMonths = NormalizeTodoMonths(completedMonths);
+        }
+
+        if (values.TryGetValue("CreateScheduleNoHistory", out var noHistory))
+        {
+            _settings.ReuseLastScheduleInput = noHistory == "0";
+        }
+
+        if (values.TryGetValue("ScheduleDeaultAlarmIndex", out var alarmIndex) && int.TryParse(alarmIndex, out var alarm))
+        {
+            _settings.DefaultScheduleReminderMinutes = alarm switch
+            {
+                1 => 0,
+                2 => 5,
+                3 => 10,
+                4 => 30,
+                5 => 60,
+                _ => null
+            };
+        }
+
+        if (values.TryGetValue("AddEditDelSync", out var syncAfterLocalChange))
+        {
+            _settings.SyncAfterLocalChange = syncAfterLocalChange != "0";
+        }
+
+        if (values.TryGetValue("SyncIntervalMin", out var syncMinutes) && int.TryParse(syncMinutes, out var interval))
+        {
+            _settings.AutomaticSyncIntervalMinutes = new[] { 30, 60, 120, 360 }.Contains(interval) ? interval : null;
         }
     }
 
@@ -1616,6 +1875,17 @@ public sealed class MainViewModel : ObservableObject
     private static AppSettings NormalizeSettings(AppSettings settings)
     {
         settings.StartupTabIndex = NormalizeTabIndex(settings.StartupTabIndex);
+        settings.StartupTodoTabIndex = Math.Clamp(settings.StartupTodoTabIndex, 0, 1);
+        settings.CalendarLabelFontSizeIndex = Math.Clamp(settings.CalendarLabelFontSizeIndex, 1, 3);
+        settings.SideListFontSizeIndex = Math.Clamp(settings.SideListFontSizeIndex, 1, 3);
+        settings.WindowOpacity = Math.Clamp(settings.WindowOpacity, 64, 255);
+        settings.ReminderSoundVolume = Math.Clamp(settings.ReminderSoundVolume, 0, 100);
+        settings.IncompleteTodoDisplayPeriodMonths = NormalizeTodoMonths(settings.IncompleteTodoDisplayPeriodMonths);
+        settings.CompletedTodoDisplayPeriodMonths = NormalizeTodoMonths(settings.CompletedTodoDisplayPeriodMonths);
+        settings.AutomaticSyncIntervalMinutes = settings.AutomaticSyncIntervalMinutes is int interval
+            && new[] { 30, 60, 120, 360 }.Contains(interval)
+                ? interval
+                : null;
         settings.VisibleCalendarIds = settings.VisibleCalendarIds
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Distinct(StringComparer.Ordinal)
@@ -1629,6 +1899,45 @@ public sealed class MainViewModel : ObservableObject
             ? settings.VisibleCalendarIds[0]
             : settings.ActiveCalendarId;
         return settings;
+    }
+
+    private IReadOnlyList<string> CreateWeekdayHeaders()
+    {
+        var headers = _settings.WeekdayDisplayType switch
+        {
+            WeekdayDisplayType.EnglishFull => new[] { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" },
+            WeekdayDisplayType.JapaneseShort => new[] { "日", "月", "火", "水", "木", "金", "土" },
+            _ => new[] { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" }
+        };
+
+        return _settings.WeekStartsOnMonday
+            ? headers.Skip(1).Concat(headers.Take(1)).ToArray()
+            : headers;
+    }
+
+    private static IReadOnlyList<string> DeserializeHistory(string? json)
+    {
+        return string.IsNullOrWhiteSpace(json)
+            ? []
+            : JsonSerializer.Deserialize<List<string>>(json) ?? [];
+    }
+
+    private static IReadOnlyList<string> AddHistoryValue(IReadOnlyList<string> history, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return history;
+        }
+
+        return new[] { value.Trim() }
+            .Concat(history.Where(item => !string.Equals(item, value.Trim(), StringComparison.OrdinalIgnoreCase)))
+            .Take(50)
+            .ToArray();
+    }
+
+    private static int NormalizeTodoMonths(int months)
+    {
+        return new[] { 0, 1, 3, 6, 12 }.Contains(months) ? months : 0;
     }
 
     private static int NormalizeTabIndex(int tabIndex) => Math.Clamp(tabIndex, 0, 4);

@@ -294,6 +294,56 @@ public sealed class MainViewModelTodoTests
     }
 
     [Fact]
+    public async Task TodoOutsideDisplayedMonth_UsesColorAndDisplayPeriodSetting()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "Old colored todo",
+            Description = "#todoA20%",
+            ColorId = "2",
+            IsTodoLike = true,
+            CalendarId = "primary",
+            Start = new DateTimeOffset(DateTime.Today.AddYears(-1)),
+            End = new DateTimeOffset(DateTime.Today.AddYears(-1).AddDays(1)),
+            IsAllDay = true
+        });
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        await viewModel.InitializeAsync();
+
+        var item = Assert.Single(viewModel.TodoEvents);
+        Assert.Equal("#7AE7BF", item.DisplayColor);
+
+        var settings = viewModel.CreateSettingsSnapshot();
+        settings.IncompleteTodoDisplayPeriodMonths = 3;
+        await viewModel.SaveApplicationSettingsAsync(settings);
+
+        Assert.Empty(viewModel.TodoEvents);
+    }
+
+    [Fact]
+    public async Task ScheduleHistory_StoresNormalEventInputsButCanBeCleared()
+    {
+        var viewModel = await CreateViewModelAsync();
+        viewModel.BeginNewEvent(DateTime.Today);
+        viewModel.Title = "History title";
+        viewModel.Location = "History room";
+
+        await viewModel.SaveCurrentEventAsync();
+
+        Assert.Contains("History title", await viewModel.LoadScheduleTitleHistoryAsync());
+        Assert.Contains("History room", await viewModel.LoadScheduleLocationHistoryAsync());
+
+        await viewModel.ClearScheduleTitleHistoryAsync();
+        await viewModel.ClearScheduleLocationHistoryAsync();
+
+        Assert.Empty(await viewModel.LoadScheduleTitleHistoryAsync());
+        Assert.Empty(await viewModel.LoadScheduleLocationHistoryAsync());
+    }
+
+    [Fact]
     public async Task SaveTodoAsync_WithExistingEventId_UpdatesTodoWithoutDuplicatingMarker()
     {
         var viewModel = await CreateViewModelAsync();

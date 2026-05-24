@@ -6,7 +6,7 @@
         mc:Ignorable="d"
         Title="FavGCalSchedulerClone" Height="760" Width="1180" MinHeight="720" MinWidth="1040"
         FontFamily="Meiryo UI" FontSize="12"
-        Background="#EDF1F5"
+        Background="#EDF1F5" Opacity="{Binding WindowOpacity}"
         Loaded="Window_Loaded"
         Closing="Window_Closing">
     <Window.Resources>
@@ -22,6 +22,13 @@
         <SolidColorBrush x:Key="HolidayBrush" Color="#FFE4E6" />
         <SolidColorBrush x:Key="OutsideMonthBrush" Color="#F1F5F9" />
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+        <DataTemplate x:Key="ColoredTitleTemplate">
+            <Border Background="{Binding DisplayColor}" BorderBrush="#64748B" BorderThickness="1" Margin="1" Padding="4,1">
+                <TextBlock Text="{Binding Title}" Foreground="{Binding DisplayForegroundColor}"
+                           FontSize="{Binding DataContext.SideListFontSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                           TextTrimming="CharacterEllipsis" />
+            </Border>
+        </DataTemplate>
 
         <Style x:Key="FlatMenuStyle" TargetType="Menu">
             <Setter Property="Background" Value="{StaticResource MenuBarBrush}" />
@@ -238,15 +245,16 @@
                                 <RowDefinition Height="28" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
-                            <UniformGrid Columns="7" Background="#E2E8F0">
-                                <TextBlock Text="Sun" Foreground="#B91C1C" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
-                                <TextBlock Text="Mon" Foreground="#334155" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
-                                <TextBlock Text="Tue" Foreground="#334155" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
-                                <TextBlock Text="Wed" Foreground="#334155" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
-                                <TextBlock Text="Thu" Foreground="#334155" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
-                                <TextBlock Text="Fri" Foreground="#334155" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
-                                <TextBlock Text="Sat" Foreground="#1D4ED8" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
-                            </UniformGrid>
+                            <ItemsControl ItemsSource="{Binding WeekdayHeaders}" Background="#E2E8F0">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><UniformGrid Columns="7" /></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}" Foreground="#334155" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
 
                             <ListBox x:Name="DayList" Grid.Row="1" ItemsSource="{Binding VisibleCalendarDays}" SelectedItem="{Binding SelectedDay, Mode=TwoWay}"
                                      BorderThickness="0" Background="Transparent" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled"
@@ -284,7 +292,7 @@
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate>
                                                             <Border Style="{StaticResource EventBar}" Background="{Binding DisplayColor}" MouseLeftButtonDown="EventBar_MouseLeftButtonDown" MouseRightButtonDown="EventBar_MouseRightButtonDown">
-                                                                <TextBlock Text="{Binding CalendarCellDisplayText}" FontSize="11" Foreground="{Binding DisplayForegroundColor}"
+                                                                <TextBlock Text="{Binding CalendarCellDisplayText}" FontSize="{Binding DataContext.CalendarLabelFontSize, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{Binding DisplayForegroundColor}"
                                                                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                                             </Border>
                                                         </DataTemplate>
@@ -351,7 +359,7 @@
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate>
                                                             <Border Style="{StaticResource EventBar}" Background="{Binding DisplayColor}" MouseLeftButtonDown="EventBar_MouseLeftButtonDown" MouseRightButtonDown="EventBar_MouseRightButtonDown">
-                                                                <TextBlock Text="{Binding CalendarCellDisplayText}" FontSize="11" Foreground="{Binding DisplayForegroundColor}"
+                                                                <TextBlock Text="{Binding CalendarCellDisplayText}" FontSize="{Binding DataContext.CalendarLabelFontSize, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{Binding DisplayForegroundColor}"
                                                                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                                             </Border>
                                                         </DataTemplate>
@@ -377,7 +385,7 @@
                                       MouseDoubleClick="SelectedDayEventsGrid_MouseDoubleClick">
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="日時" Binding="{Binding DateDisplayText}" Width="180" />
-                                    <DataGridTextColumn Header="件名" Binding="{Binding Title}" Width="220" />
+                                    <DataGridTemplateColumn Header="件名" CellTemplate="{StaticResource ColoredTitleTemplate}" Width="220" />
                                     <DataGridTextColumn Header="内容" Binding="{Binding Description}" Width="*" />
                                 </DataGrid.Columns>
                             </DataGrid>
@@ -406,14 +414,14 @@
                                           MouseDoubleClick="SelectedDayEventsGrid_MouseDoubleClick">
                                     <DataGrid.Columns>
                                         <DataGridTextColumn Header="時間" Binding="{Binding DateDisplayText}" Width="120" />
-                                        <DataGridTextColumn Header="件名" Binding="{Binding Title}" Width="*" />
+                                        <DataGridTemplateColumn Header="件名" CellTemplate="{StaticResource ColoredTitleTemplate}" Width="*" />
                                     </DataGrid.Columns>
                                 </DataGrid>
                             </Grid>
                         </Border>
 
                         <Border Grid.Row="2" Background="#FFFFFF" Padding="8">
-                            <TabControl>
+                            <TabControl SelectedIndex="{Binding SelectedTodoTabIndex, Mode=TwoWay}">
                                 <TabItem Header="未完了タスク">
                                     <DataGrid ItemsSource="{Binding TodoEvents}" SelectedItem="{Binding SelectedEvent}"
                                               MouseDoubleClick="TodoEventsGrid_MouseDoubleClick">
@@ -429,7 +437,7 @@
                                             <DataGridTextColumn Header="P" Binding="{Binding TodoPriorityDisplayText}" Width="34" />
                                             <DataGridTextColumn Header="%" Binding="{Binding TodoProgressText}" Width="48" />
                                             <DataGridTextColumn Header="期限" Binding="{Binding DateDisplayText}" Width="120" />
-                                            <DataGridTextColumn Header="件名" Binding="{Binding Title}" Width="*" />
+                                            <DataGridTemplateColumn Header="件名" CellTemplate="{StaticResource ColoredTitleTemplate}" Width="*" />
                                         </DataGrid.Columns>
                                     </DataGrid>
                                 </TabItem>
@@ -440,7 +448,7 @@
                                             <DataGridTextColumn Header="P" Binding="{Binding TodoPriorityDisplayText}" Width="34" />
                                             <DataGridTextColumn Header="%" Binding="{Binding TodoProgressText}" Width="48" />
                                             <DataGridTextColumn Header="期限" Binding="{Binding DateDisplayText}" Width="120" />
-                                            <DataGridTextColumn Header="件名" Binding="{Binding Title}" Width="*" />
+                                            <DataGridTemplateColumn Header="件名" CellTemplate="{StaticResource ColoredTitleTemplate}" Width="*" />
                                         </DataGrid.Columns>
                                     </DataGrid>
                                 </TabItem>

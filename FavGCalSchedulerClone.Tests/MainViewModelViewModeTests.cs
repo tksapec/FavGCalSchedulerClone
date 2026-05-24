@@ -134,6 +134,35 @@ public sealed class MainViewModelViewModeTests
         Assert.Equal("#7AE7BF", item.DisplayColor);
     }
 
+    [Fact]
+    public async Task InitializeAsync_AppliesDisplaySettingsAndMondayStart()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        await repository.SaveSettingsAsync(new AppSettings
+        {
+            StartupCalendarViewMode = CalendarViewMode.Week,
+            StartupTodoTabIndex = 1,
+            CalendarLabelFontSizeIndex = 3,
+            SideListFontSizeIndex = 1,
+            WeekdayDisplayType = WeekdayDisplayType.JapaneseShort,
+            WeekStartsOnMonday = true,
+            WindowOpacity = 128
+        });
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+
+        await viewModel.InitializeAsync();
+
+        Assert.True(viewModel.IsWeekView);
+        Assert.Equal(1, viewModel.SelectedTodoTabIndex);
+        Assert.Equal(12, viewModel.CalendarLabelFontSize);
+        Assert.Equal(11, viewModel.SideListFontSize);
+        Assert.Equal("月", viewModel.WeekdayHeaders[0]);
+        Assert.Equal(DayOfWeek.Monday, viewModel.CalendarDays[0].Date.DayOfWeek);
+        Assert.Equal(128 / 255.0, viewModel.WindowOpacity);
+    }
+
     private static async Task<MainViewModel> CreateViewModelAsync()
     {
         return await CreateViewModelAsync([]);

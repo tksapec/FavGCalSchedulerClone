@@ -27,4 +27,14 @@ public sealed class DateRangeHelperTests
         Assert.Equal(DayOfWeek.Sunday, start.DayOfWeek);
         Assert.Equal(42, (end - start).TotalDays);
     }
+
+    [Fact]
+    public void MonthGridRange_CanStartOnMonday()
+    {
+        var (start, end) = DateRangeHelper.MonthGridRange(new DateTime(2026, 5, 1), weekStartsOnMonday: true);
+
+        Assert.Equal(DayOfWeek.Monday, start.DayOfWeek);
+        Assert.Equal(new DateTime(2026, 4, 27), start);
+        Assert.Equal(42, (end - start).TotalDays);
+    }
 }

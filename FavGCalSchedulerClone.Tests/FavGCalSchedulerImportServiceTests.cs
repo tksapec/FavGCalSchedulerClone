@@ -371,10 +371,22 @@ public sealed class FavGCalSchedulerImportServiceTests
             item0=disp-value
             DeletePopup=1
             AppClose=0
+            EditScheduleWindowHide=1
+            StartWeekdayIndex=1
+            WeekdayType=2
+            FontSize=2
+            BottomInfoFontSize=0
+            ToDoRunLimitMonthCount=3
+            ToDoCompLimitMonthCount=12
             [APP_INFO]
             count=30
             item0=app-value
+            CreateScheduleNoHistory=0
             ScheduleDeaultAllDay=0
+            ScheduleDeaultAlarmIndex=3
+            [SYNC_INFO]
+            AddEditDelSync=1
+            SyncIntervalMin=120
             """);
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
         var repository = new CalendarRepository(dbPath);
@@ -389,6 +401,18 @@ public sealed class FavGCalSchedulerImportServiceTests
         Assert.True(viewModel.ConfirmBeforeDelete);
         Assert.False(viewModel.CloseButtonExitsApplication);
         Assert.False(viewModel.DefaultNewEventIsAllDay);
+        var settings = viewModel.CreateSettingsSnapshot();
+        Assert.True(settings.HideMainWindowWhileEditingSchedule);
+        Assert.True(settings.WeekStartsOnMonday);
+        Assert.Equal(WeekdayDisplayType.JapaneseShort, settings.WeekdayDisplayType);
+        Assert.Equal(3, settings.CalendarLabelFontSizeIndex);
+        Assert.Equal(1, settings.SideListFontSizeIndex);
+        Assert.Equal(3, settings.IncompleteTodoDisplayPeriodMonths);
+        Assert.Equal(12, settings.CompletedTodoDisplayPeriodMonths);
+        Assert.True(settings.ReuseLastScheduleInput);
+        Assert.Equal(10, settings.DefaultScheduleReminderMinutes);
+        Assert.True(settings.SyncAfterLocalChange);
+        Assert.Equal(120, settings.AutomaticSyncIntervalMinutes);
     }
 
     [Fact]

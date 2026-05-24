@@ -21,10 +21,12 @@ public static class DateRangeHelper
         return calendarEvent.Start < dayEnd && calendarEvent.End > dayStart;
     }
 
-    public static (DateTime Start, DateTime End) MonthGridRange(DateTime month)
+    public static (DateTime Start, DateTime End) MonthGridRange(DateTime month, bool weekStartsOnMonday = false)
     {
         var first = new DateTime(month.Year, month.Month, 1);
-        var offset = (int)first.DayOfWeek;
+        var offset = weekStartsOnMonday
+            ? ((int)first.DayOfWeek + 6) % 7
+            : (int)first.DayOfWeek;
         var start = first.AddDays(-offset);
         return (start, start.AddDays(42));
     }
