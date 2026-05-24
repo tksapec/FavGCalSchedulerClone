@@ -713,7 +713,7 @@ public partial class MainWindow : Window
             _viewModel.BeginNewEvent(date);
         }
 
-        var window = CreateOwnedDialog(editingEvent is null ? "スケジュールの追加" : "スケジュールの編集", 1120, 720);
+        var window = CreateOwnedDialog(editingEvent is null ? "スケジュールの追加" : "スケジュールの編集", 1220, 800);
         var root = CreateEditorDialogRoot();
         window.Content = root;
 
@@ -766,7 +766,9 @@ public partial class MainWindow : Window
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
             AcceptsTab = true,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            MinHeight = 255,
+            VerticalContentAlignment = VerticalAlignment.Top
         };
 
         var updatingDateRange = false;
@@ -823,7 +825,7 @@ public partial class MainWindow : Window
         alarmGroup.Content = alarmGrid;
 
         var upper = new Grid();
-        upper.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(460) });
+        upper.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(470) });
         upper.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         Grid.SetColumn(timeGroup, 0);
         Grid.SetColumn(alarmGroup, 1);
@@ -838,11 +840,11 @@ public partial class MainWindow : Window
         details.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         details.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         details.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(90) });
+        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
         details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(92) });
+        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(74) });
         details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(120) });
-        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(88) });
+        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(76) });
         details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(300) });
         AddPositionedField(details, 0, 0, "場所", location, 1, 1);
         AddPositionedField(details, 0, 2, "予定の色", color, 3, 1);
@@ -917,7 +919,7 @@ public partial class MainWindow : Window
 
         var editingTodo = _viewModel.SelectedEvent;
         var date = editingTodo.Start.Date;
-        var window = CreateOwnedDialog("ＴＯＤＯの編集", 820, 600);
+        var window = CreateOwnedDialog("ＴＯＤＯの編集", 824, 610);
         var root = CreateEditorDialogRoot();
         window.Content = root;
 
@@ -936,7 +938,16 @@ public partial class MainWindow : Window
         };
         var color = CreateColorComboBox(editingTodo.ColorId);
         var title = new TextBox { Text = editingTodo.Title };
-        var description = new TextBox { Text = editingTodo.Description ?? string.Empty, AcceptsReturn = true, AcceptsTab = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        var description = new TextBox
+        {
+            Text = TagService.GetTodoBodyForEditing(editingTodo.Description),
+            AcceptsReturn = true,
+            AcceptsTab = true,
+            TextWrapping = TextWrapping.Wrap,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            MinHeight = 145,
+            VerticalContentAlignment = VerticalAlignment.Top
+        };
 
         AddTodoEditorLayout(root, window, dueDate, priority, progress, progressLabel, color, calendar, title, description);
 
@@ -959,7 +970,7 @@ public partial class MainWindow : Window
     private async Task ShowTodoDialogAsync()
     {
         var date = _viewModel.SelectedDay?.Date ?? DateTime.Today;
-        var window = CreateOwnedDialog("ＴＯＤＯの追加", 820, 600);
+        var window = CreateOwnedDialog("ＴＯＤＯの追加", 824, 610);
         var root = CreateEditorDialogRoot();
         window.Content = root;
 
@@ -977,7 +988,15 @@ public partial class MainWindow : Window
         };
         var color = CreateColorComboBox(null);
         var title = new TextBox();
-        var description = new TextBox { AcceptsReturn = true, AcceptsTab = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        var description = new TextBox
+        {
+            AcceptsReturn = true,
+            AcceptsTab = true,
+            TextWrapping = TextWrapping.Wrap,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            MinHeight = 145,
+            VerticalContentAlignment = VerticalAlignment.Top
+        };
 
         AddTodoEditorLayout(root, window, dueDate, priority, done, new TextBlock(), color, calendar, title, description);
 

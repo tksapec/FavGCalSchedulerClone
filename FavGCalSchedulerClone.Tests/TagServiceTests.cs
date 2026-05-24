@@ -83,10 +83,26 @@ public sealed class TagServiceTests
     [Fact]
     public void UpdateTodoMarker_ReplacesExistingMarkerWithoutDuplicating()
     {
-        var updated = TagService.UpdateTodoMarker("既存本文 #todoB10% 詳細", "A", 100);
+        var updated = TagService.UpdateTodoMarker("Existing body #todoB10% details", "A", 100);
 
-        Assert.Equal("#todoA100% 既存本文 詳細", updated);
+        Assert.Equal($"#todoA100%{Environment.NewLine}Existing body details", updated);
         Assert.Single(System.Text.RegularExpressions.Regex.Matches(updated, "#todo", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+    }
+
+    [Fact]
+    public void UpdateTodoMarker_PreservesLinesAndEmptyLines()
+    {
+        var updated = TagService.UpdateTodoMarker("line 1\r\n\r\nline 2 #todoC20%", "F", 56);
+
+        Assert.Equal($"#todoF56%{Environment.NewLine}line 1{Environment.NewLine}{Environment.NewLine}line 2", updated);
+    }
+
+    [Fact]
+    public void GetTodoBodyForEditing_RemovesMarkerWithoutFlatteningLines()
+    {
+        var body = TagService.GetTodoBodyForEditing($"#todoF56%{Environment.NewLine}line 1{Environment.NewLine}{Environment.NewLine}line 2");
+
+        Assert.Equal($"line 1{Environment.NewLine}{Environment.NewLine}line 2", body);
     }
 
     [Fact]
@@ -228,6 +244,27 @@ public sealed class TagServiceTests
 
         Assert.Equal("#123456", color.Background);
         Assert.Equal("#FEDCBA", color.Foreground);
+    }
+
+    [Fact]
+    public void ResolveSelectedDisplayColors_UsesVisibleTintForWhiteLabel()
+    {
+        var color = TagService.ResolveSelectedDisplayColors("#FFFFFF", "#111827");
+
+        Assert.Equal("#DBEAFE", color.Background);
+        Assert.Equal("#1E3A8A", color.Foreground);
+    }
+
+    [Theory]
+    [InlineData("#A4BDFC", "#1D1D1D")]
+    [InlineData("#7AE7BF", "#1D1D1D")]
+    [InlineData("#5484ED", "#FFFFFF")]
+    public void ResolveSelectedDisplayColors_DarkensColoredLabels(string background, string foreground)
+    {
+        var color = TagService.ResolveSelectedDisplayColors(background, foreground);
+
+        Assert.NotEqual(background, color.Background);
+        Assert.False(string.IsNullOrWhiteSpace(color.Foreground));
     }
 
     private static CalendarEvent AllDayEvent(DateTime date, string title)

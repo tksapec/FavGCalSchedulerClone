@@ -14,8 +14,8 @@ public sealed class CalendarEventSegment : INotifyPropertyChanged
     public bool IsWeekSegmentEnd { get; init; }
     public bool ShowText { get; init; }
     public bool IsVisible => Event is not null;
-    public string DisplayColor => Event?.DisplayColor ?? "Transparent";
-    public string DisplayForegroundColor => Event?.DisplayForegroundColor ?? "Transparent";
+    public string DisplayColor => ResolveColors().Background;
+    public string DisplayForegroundColor => ResolveColors().Foreground;
     public string DisplayText => ShowText ? Event?.CalendarCellDisplayText ?? "" : "";
     public string? ToolTipText => Event?.ToolTipText;
     public bool IsSelected
@@ -30,6 +30,8 @@ public sealed class CalendarEventSegment : INotifyPropertyChanged
 
             _isSelected = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSelected)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DisplayColor)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DisplayForegroundColor)));
         }
     }
 
@@ -40,4 +42,16 @@ public sealed class CalendarEventSegment : INotifyPropertyChanged
         Date = date,
         Lane = lane
     };
+
+    private EventDisplayColors ResolveColors()
+    {
+        if (Event is null)
+        {
+            return new EventDisplayColors("Transparent", "Transparent");
+        }
+
+        return IsSelected
+            ? FavGCalSchedulerClone.App.Services.TagService.ResolveSelectedDisplayColors(Event.DisplayColor, Event.DisplayForegroundColor)
+            : new EventDisplayColors(Event.DisplayColor, Event.DisplayForegroundColor);
+    }
 }

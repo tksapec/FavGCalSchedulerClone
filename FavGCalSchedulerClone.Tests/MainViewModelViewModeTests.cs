@@ -155,6 +155,9 @@ public sealed class MainViewModelViewModeTests
             .Select(segment => segment.Date)
             .ToArray();
         Assert.Equal([new DateTime(2026, 5, 15), new DateTime(2026, 5, 16)], selectedDates);
+        Assert.All(
+            viewModel.CalendarDays.SelectMany(day => day.Segments).Where(segment => segment.IsSelected),
+            segment => Assert.NotEqual(segment.Event?.DisplayColor, segment.DisplayColor));
     }
 
     [Fact]

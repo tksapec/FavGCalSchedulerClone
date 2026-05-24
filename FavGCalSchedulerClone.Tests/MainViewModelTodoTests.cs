@@ -262,6 +262,19 @@ public sealed class MainViewModelTodoTests
     }
 
     [Fact]
+    public async Task SaveTodoAsync_PreservesMultilineBodyAndKeepsMarkerInternal()
+    {
+        var viewModel = await CreateViewModelAsync();
+        var body = $"first line{Environment.NewLine}{Environment.NewLine}third line";
+
+        await viewModel.SaveTodoAsync(DateTime.Today, "A", 20, "Multiline todo", body);
+
+        var item = Assert.Single(viewModel.TodoEvents);
+        Assert.Contains("#todoA20%", item.Description);
+        Assert.Equal(body, TagService.GetTodoBodyForEditing(item.Description));
+    }
+
+    [Fact]
     public async Task SaveTodoAsync_EditPreservesExistingReminderWhileChangingProgressAndColor()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
@@ -359,6 +372,20 @@ public sealed class MainViewModelTodoTests
 
         Assert.Empty(await viewModel.LoadScheduleTitleHistoryAsync());
         Assert.Empty(await viewModel.LoadScheduleLocationHistoryAsync());
+    }
+
+    [Fact]
+    public async Task SaveCurrentEventAsync_PreservesMultilineDescription()
+    {
+        var viewModel = await CreateViewModelAsync();
+        var description = $"first line{Environment.NewLine}{Environment.NewLine}third line";
+        viewModel.BeginNewEvent(DateTime.Today);
+        viewModel.Title = "Multiline event";
+        viewModel.Description = description;
+
+        await viewModel.SaveCurrentEventAsync();
+
+        Assert.Equal(description, viewModel.SelectedEvent?.Description);
     }
 
     [Fact]

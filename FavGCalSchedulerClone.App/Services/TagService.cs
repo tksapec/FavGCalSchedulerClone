@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using System.Windows.Media;
 using FavGCalSchedulerClone.App.Models;
 
 namespace FavGCalSchedulerClone.App.Services;
@@ -117,8 +118,19 @@ public static partial class TagService
     public static string UpdateTodoMarker(string? text, string? priority, int progress)
     {
         var marker = BuildTodoMarker(priority, progress);
-        var body = WhitespaceRegex().Replace(TodoRegex().Replace(text ?? "", ""), " ").Trim();
-        return string.IsNullOrWhiteSpace(body) ? marker : $"{marker} {body}";
+        var body = GetTodoBodyForEditing(text);
+        return string.IsNullOrWhiteSpace(body) ? marker : $"{marker}{Environment.NewLine}{body}";
+    }
+
+    public static string GetTodoBodyForEditing(string? text)
+    {
+        var body = TodoRegex().Replace(text ?? "", "");
+        var normalized = body.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        var lines = normalized
+            .Split('\n')
+            .Select(line => InlineWhitespaceRegex().Replace(line, " ").Trim())
+            .ToArray();
+        return string.Join(Environment.NewLine, lines).Trim();
     }
 
     public static CalendarTag? FindDisplayTag(CalendarEvent calendarEvent, IEnumerable<CalendarTag> tags)
@@ -150,6 +162,46 @@ public static partial class TagService
         return new EventDisplayColors(DefaultDisplayColor, DefaultDisplayForegroundColor);
     }
 
+    public static EventDisplayColors ResolveSelectedDisplayColors(string background, string foreground)
+    {
+        if (string.Equals(background, DefaultDisplayColor, StringComparison.OrdinalIgnoreCase))
+        {
+            return new EventDisplayColors("#DBEAFE", "#1E3A8A");
+        }
+
+        if (!TryParseColor(background, out var color))
+        {
+            return new EventDisplayColors(background, foreground);
+        }
+
+        var selected = Color.FromRgb(
+            (byte)Math.Round(color.R * 0.84),
+            (byte)Math.Round(color.G * 0.84),
+            (byte)Math.Round(color.B * 0.84));
+        var selectedBackground = $"#{selected.R:X2}{selected.G:X2}{selected.B:X2}";
+        var luminance = (0.299 * selected.R) + (0.587 * selected.G) + (0.114 * selected.B);
+        return new EventDisplayColors(selectedBackground, luminance < 120 ? "#FFFFFF" : foreground);
+    }
+
+    private static bool TryParseColor(string background, out Color color)
+    {
+        try
+        {
+            var parsed = ColorConverter.ConvertFromString(background);
+            if (parsed is Color parsedColor)
+            {
+                color = parsedColor;
+                return true;
+            }
+        }
+        catch (Exception ex) when (ex is FormatException or NotSupportedException)
+        {
+        }
+
+        color = default;
+        return false;
+    }
+
     private static bool IsDayBackgroundTag(string tagName)
     {
         return tagName.Equals("#holiday", StringComparison.OrdinalIgnoreCase)
@@ -164,6 +216,6 @@ public static partial class TagService
     [GeneratedRegex(@"#todo(?<priority>[A-Fa-f])?(?<progress>\d{1,3})%", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex TodoRegex();
 
-    [GeneratedRegex(@"\s+", RegexOptions.Compiled)]
-    private static partial Regex WhitespaceRegex();
+    [GeneratedRegex(@"[^\S\r\n]+", RegexOptions.Compiled)]
+    private static partial Regex InlineWhitespaceRegex();
 }
