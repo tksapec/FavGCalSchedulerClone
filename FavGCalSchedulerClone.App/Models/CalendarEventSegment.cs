@@ -18,6 +18,8 @@ public sealed class CalendarEventSegment : INotifyPropertyChanged
     public string DisplayForegroundColor => ResolveColors().Foreground;
     public string DisplayText => ShowText ? Event?.CalendarCellDisplayText ?? "" : "";
     public string? ToolTipText => Event?.ToolTipText;
+    public bool ShowTodoIndicator => ShowText && Event?.IsTodoLike == true;
+    public string TodoCheckGlyph => Event?.IsTodoDone == true ? "✓" : "";
     public bool IsSelected
     {
         get => _isSelected;

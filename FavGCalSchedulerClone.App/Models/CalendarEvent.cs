@@ -40,7 +40,7 @@ public sealed class CalendarEvent
             }
 
             var priority = string.IsNullOrWhiteSpace(TodoPriority) ? "" : $"[{TodoPriority}] ";
-            return $"{TodoDoneGlyph} {priority}{TodoProgress}% {Title}".Trim();
+            return $"{priority}{TodoProgress}% {Title}".Trim();
         }
     }
 
@@ -49,7 +49,6 @@ public sealed class CalendarEvent
     public string TodoPriority => TodoMetadata?.Priority ?? "";
     public int TodoProgress => TodoMetadata?.Progress ?? 0;
     public string TodoProgressText => TodoMetadata?.ProgressText ?? "";
-    public string TodoDoneGlyph => IsTodoDone ? "[x]" : "[ ]";
     public string TodoPriorityDisplayText => string.IsNullOrWhiteSpace(TodoPriority) ? "-" : TodoPriority;
     public bool IsTodoDone => TodoMetadata?.IsDone == true;
     public bool IsRecurringMaster => !string.IsNullOrWhiteSpace(RecurrenceJson) && !IsRecurrenceException;

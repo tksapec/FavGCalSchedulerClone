@@ -29,6 +29,6 @@ public sealed class CalendarEventDisplayTests
             Start = new DateTimeOffset(new DateTime(2026, 5, 23))
         };
 
-        Assert.Equal("[ ] [A] 56% Confirm", item.CalendarCellDisplayText);
+        Assert.Equal("[A] 56% Confirm", item.CalendarCellDisplayText);
     }
 }

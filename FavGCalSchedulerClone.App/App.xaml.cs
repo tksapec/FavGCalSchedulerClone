@@ -119,14 +119,20 @@ public partial class App : System.Windows.Application
         using (var graphics = Drawing.Graphics.FromImage(bitmap))
         {
             graphics.SmoothingMode = Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            graphics.TextRenderingHint = Drawing.Text.TextRenderingHint.AntiAliasGridFit;
             graphics.Clear(Drawing.Color.Transparent);
             using var background = new Drawing.SolidBrush(Drawing.Color.FromArgb(153, 27, 27));
-            graphics.FillRoundedRectangle(background, new Drawing.Rectangle(1, 1, 30, 30), 5);
-            using var font = new Drawing.Font("Segoe UI", _trayIconDate.Day >= 10 ? 16 : 19, Drawing.FontStyle.Bold, Drawing.GraphicsUnit.Pixel);
-            using var textBrush = new Drawing.SolidBrush(Drawing.Color.White);
+            graphics.FillRoundedRectangle(background, new Drawing.Rectangle(0, 0, 32, 32), 3);
             var text = _trayIconDate.Day.ToString();
-            var size = graphics.MeasureString(text, font);
-            graphics.DrawString(text, font, textBrush, (32 - size.Width) / 2, (32 - size.Height) / 2 - 1);
+            using var format = new Drawing.StringFormat(Drawing.StringFormat.GenericTypographic)
+            {
+                Alignment = Drawing.StringAlignment.Center,
+                LineAlignment = Drawing.StringAlignment.Center,
+                FormatFlags = Drawing.StringFormatFlags.NoWrap
+            };
+            using var font = CreateLargestTrayDateFont(graphics, text, format);
+            using var textBrush = new Drawing.SolidBrush(Drawing.Color.White);
+            graphics.DrawString(text, font, textBrush, new Drawing.RectangleF(1, 0, 30, 32), format);
         }
 
         var handle = bitmap.GetHicon();
@@ -142,6 +148,26 @@ public partial class App : System.Windows.Application
         {
             DestroyIcon(handle);
         }
+    }
+
+    private static Drawing.Font CreateLargestTrayDateFont(
+        Drawing.Graphics graphics,
+        string text,
+        Drawing.StringFormat format)
+    {
+        for (var size = 31; size >= 8; size--)
+        {
+            var font = new Drawing.Font("Segoe UI", size, Drawing.FontStyle.Bold, Drawing.GraphicsUnit.Pixel);
+            var measured = graphics.MeasureString(text, font, int.MaxValue, format);
+            if (measured.Width <= 30 && measured.Height <= 30)
+            {
+                return font;
+            }
+
+            font.Dispose();
+        }
+
+        return new Drawing.Font("Segoe UI", 8, Drawing.FontStyle.Bold, Drawing.GraphicsUnit.Pixel);
     }
 
     [DllImport("user32.dll", SetLastError = true)]

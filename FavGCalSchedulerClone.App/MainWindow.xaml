@@ -387,8 +387,15 @@
                                                                     PreviewMouseMove="EventSegment_PreviewMouseMove"
                                                                     MouseLeftButtonDown="EventSegment_MouseLeftButtonDown"
                                                                     MouseRightButtonDown="EventSegment_MouseRightButtonDown">
-                                                                <TextBlock Text="{Binding DisplayText}" FontSize="{Binding DataContext.CalendarLabelFontSize, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{Binding DisplayForegroundColor}"
-                                                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                                <DockPanel LastChildFill="True" VerticalAlignment="Center">
+                                                                    <Border DockPanel.Dock="Left" Width="12" Height="12" Background="White" BorderBrush="#475569" BorderThickness="1"
+                                                                            Margin="0,0,3,0" Visibility="{Binding ShowTodoIndicator, Converter={StaticResource BoolToVisibilityConverter}}">
+                                                                        <TextBlock Text="{Binding TodoCheckGlyph}" Foreground="#DC2626" FontSize="11" FontWeight="Bold"
+                                                                                   Margin="-1,-3,0,0" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                                    </Border>
+                                                                    <TextBlock Text="{Binding DisplayText}" FontSize="{Binding DataContext.CalendarLabelFontSize, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{Binding DisplayForegroundColor}"
+                                                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                                </DockPanel>
                                                             </Border>
                                                         </DataTemplate>
                                                     </ItemsControl.ItemTemplate>
@@ -461,8 +468,15 @@
                                                                     PreviewMouseMove="EventSegment_PreviewMouseMove"
                                                                     MouseLeftButtonDown="EventSegment_MouseLeftButtonDown"
                                                                     MouseRightButtonDown="EventSegment_MouseRightButtonDown">
-                                                                <TextBlock Text="{Binding DisplayText}" FontSize="{Binding DataContext.CalendarLabelFontSize, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{Binding DisplayForegroundColor}"
-                                                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                                <DockPanel LastChildFill="True" VerticalAlignment="Center">
+                                                                    <Border DockPanel.Dock="Left" Width="12" Height="12" Background="White" BorderBrush="#475569" BorderThickness="1"
+                                                                            Margin="0,0,3,0" Visibility="{Binding ShowTodoIndicator, Converter={StaticResource BoolToVisibilityConverter}}">
+                                                                        <TextBlock Text="{Binding TodoCheckGlyph}" Foreground="#DC2626" FontSize="11" FontWeight="Bold"
+                                                                                   Margin="-1,-3,0,0" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                                    </Border>
+                                                                    <TextBlock Text="{Binding DisplayText}" FontSize="{Binding DataContext.CalendarLabelFontSize, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{Binding DisplayForegroundColor}"
+                                                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                                </DockPanel>
                                                             </Border>
                                                         </DataTemplate>
                                                     </ItemsControl.ItemTemplate>
@@ -515,7 +529,7 @@
                                 <DataGrid Grid.Row="1" ItemsSource="{Binding SelectedDayEvents}" SelectedItem="{Binding SelectedEvent}"
                                           MouseDoubleClick="SelectedDayEventsGrid_MouseDoubleClick">
                                     <DataGrid.Columns>
-                                        <DataGridTextColumn Header="時間" Binding="{Binding DateDisplayText}" Width="120" />
+                                        <DataGridTextColumn Header="日時" Binding="{Binding DateDisplayText}" Width="98" />
                                         <DataGridTemplateColumn Header="件名" CellTemplate="{StaticResource ColoredTitleTemplate}" Width="*" />
                                     </DataGrid.Columns>
                                 </DataGrid>
@@ -528,18 +542,10 @@
                                     <DataGrid ItemsSource="{Binding TodoEvents}" SelectedItem="{Binding SelectedEvent}"
                                               MouseDoubleClick="TodoEventsGrid_MouseDoubleClick">
                                         <DataGrid.Columns>
-                                            <DataGridTemplateColumn Header="" Width="34">
-                                                <DataGridTemplateColumn.CellTemplate>
-                                                    <DataTemplate>
-                                                        <Button Content="{Binding TodoDoneGlyph}" Padding="0" MinWidth="24" Height="20"
-                                                                Click="TodoDoneButton_Click" />
-                                                    </DataTemplate>
-                                                </DataGridTemplateColumn.CellTemplate>
-                                            </DataGridTemplateColumn>
-                                            <DataGridTextColumn Header="P" Binding="{Binding TodoPriorityDisplayText}" Width="34" />
-                                            <DataGridTextColumn Header="%" Binding="{Binding TodoProgressText}" Width="48" />
-                                            <DataGridTextColumn Header="期限" Binding="{Binding DateDisplayText}" Width="120" />
+                                            <DataGridTextColumn Header="期限" Binding="{Binding DateDisplayText}" Width="86" />
                                             <DataGridTemplateColumn Header="件名" CellTemplate="{StaticResource ColoredTitleTemplate}" Width="*" />
+                                            <DataGridTextColumn Header="%" Binding="{Binding TodoProgressText}" Width="44" />
+                                            <DataGridTextColumn Header="優先度" Binding="{Binding TodoPriorityDisplayText}" Width="50" />
                                         </DataGrid.Columns>
                                     </DataGrid>
                                 </TabItem>
@@ -547,10 +553,10 @@
                                     <DataGrid ItemsSource="{Binding CompletedTodoEvents}" SelectedItem="{Binding SelectedEvent}"
                                               MouseDoubleClick="TodoEventsGrid_MouseDoubleClick">
                                         <DataGrid.Columns>
-                                            <DataGridTextColumn Header="P" Binding="{Binding TodoPriorityDisplayText}" Width="34" />
-                                            <DataGridTextColumn Header="%" Binding="{Binding TodoProgressText}" Width="48" />
-                                            <DataGridTextColumn Header="期限" Binding="{Binding DateDisplayText}" Width="120" />
+                                            <DataGridTextColumn Header="期限" Binding="{Binding DateDisplayText}" Width="86" />
                                             <DataGridTemplateColumn Header="件名" CellTemplate="{StaticResource ColoredTitleTemplate}" Width="*" />
+                                            <DataGridTextColumn Header="%" Binding="{Binding TodoProgressText}" Width="44" />
+                                            <DataGridTextColumn Header="優先度" Binding="{Binding TodoPriorityDisplayText}" Width="50" />
                                         </DataGrid.Columns>
                                     </DataGrid>
                                 </TabItem>

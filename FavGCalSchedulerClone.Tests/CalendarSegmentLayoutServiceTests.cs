@@ -116,7 +116,25 @@ public sealed class CalendarSegmentLayoutServiceTests
 
         var segment = Assert.Single(days[1].Segments, segment => segment.IsVisible);
         Assert.Equal("#7AE7BF", segment.DisplayColor);
-        Assert.Equal("[ ] [A] 20% Todo", segment.DisplayText);
+        Assert.Equal("[A] 20% Todo", segment.DisplayText);
+        Assert.True(segment.ShowTodoIndicator);
+        Assert.Equal("", segment.TodoCheckGlyph);
+    }
+
+    [Fact]
+    public void PopulateSegments_ShowsCheckForCompletedTodoSegment()
+    {
+        var days = CreateDays(new DateTime(2026, 5, 10), 7);
+        var todo = Event("Done", new DateTime(2026, 5, 11), new DateTime(2026, 5, 12));
+        todo.IsTodoLike = true;
+        todo.Description = "#todoA100%";
+
+        CalendarSegmentLayoutService.PopulateSegments(days, [todo]);
+
+        var segment = Assert.Single(days[1].Segments, segment => segment.IsVisible);
+        Assert.True(segment.ShowTodoIndicator);
+        Assert.Equal("✓", segment.TodoCheckGlyph);
+        Assert.Equal("[A] 100% Done", segment.DisplayText);
     }
 
     private static CalendarDay[] CreateDays(DateTime start, int count) =>

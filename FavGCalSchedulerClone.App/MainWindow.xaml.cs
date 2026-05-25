@@ -593,22 +593,24 @@ public partial class MainWindow : Window
 
     private async void SelectedDayEventsGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        if (!DataGridDoubleClickHelper.IsEditableRowDoubleClickTarget(e.OriginalSource))
+        var calendarEvent = DataGridDoubleClickHelper.GetEditableRowItem<CalendarEvent>(e.OriginalSource);
+        if (calendarEvent is null)
         {
             return;
         }
 
-        await OpenSelectedEventEditorAsync();
+        await OpenGridEventEditorAsync(calendarEvent);
     }
 
     private async void TodoEventsGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        if (!DataGridDoubleClickHelper.IsEditableRowDoubleClickTarget(e.OriginalSource))
+        var calendarEvent = DataGridDoubleClickHelper.GetEditableRowItem<CalendarEvent>(e.OriginalSource);
+        if (calendarEvent?.IsTodoLike != true)
         {
             return;
         }
 
-        await ShowSelectedTodoDialogAsync();
+        await OpenGridEventEditorAsync(calendarEvent);
     }
 
     private async void TodoDoneButton_Click(object sender, RoutedEventArgs e)
@@ -647,6 +649,26 @@ public partial class MainWindow : Window
         await _viewModel.NavigateToDateAsync(calendarEvent.Start.Date);
         _viewModel.SelectEvent(calendarEvent);
         await ShowScheduleDialogAsync();
+    }
+
+    private async Task OpenGridEventEditorAsync(CalendarEvent calendarEvent)
+    {
+        try
+        {
+            if (calendarEvent.IsTodoLike)
+            {
+                _viewModel.SelectEvent(calendarEvent, selectEventDay: false);
+                await ShowSelectedTodoDialogAsync(calendarEvent);
+                return;
+            }
+
+            await OpenCalendarEventEditorAsync(calendarEvent);
+        }
+        catch (Exception ex)
+        {
+            _viewModel.Status = $"編集画面を開けませんでした: {ex.Message}";
+            MessageBox.Show(this, ex.Message, "編集エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private async void CalendarSelectionMenu_Checked(object sender, RoutedEventArgs e)
@@ -860,9 +882,9 @@ public partial class MainWindow : Window
         details.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(DialogX(16)) });
-        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(DialogX(112)) });
+        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(DialogX(180)) });
         details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(DialogX(16)) });
-        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(DialogX(300)) });
+        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(DialogX(260)) });
         AddLabeledField(details, 0, 0, "場所", location);
         AddLabeledField(details, 0, 2, "予定の色", color);
         AddLabeledField(details, 0, 4, "カレンダー", calendar);
@@ -926,14 +948,15 @@ public partial class MainWindow : Window
         await _viewModel.SaveCurrentEventAsync(recurrenceScope);
     }
 
-    private async Task ShowSelectedTodoDialogAsync()
+    private async Task ShowSelectedTodoDialogAsync(CalendarEvent? selectedTodo = null)
     {
-        if (_viewModel.SelectedEvent?.IsTodoLike != true)
+        var editingTodo = selectedTodo ?? _viewModel.SelectedEvent;
+        if (editingTodo?.IsTodoLike != true)
         {
             return;
         }
 
-        var editingTodo = _viewModel.SelectedEvent;
+        _viewModel.SelectEvent(editingTodo, selectEventDay: false);
         var date = editingTodo.Start.Date;
         var window = CreateOwnedDialog("ＴＯＤＯの編集", 824, 610, usePhysicalPixelSize: true);
         var root = CreateEditorDialogRoot();
@@ -942,7 +965,18 @@ public partial class MainWindow : Window
         var dueDate = new DatePicker { SelectedDate = date };
         var priority = new ComboBox { SelectedIndex = 0, ItemsSource = new[] { "A", "B", "C", "D", "E", "F" } };
         priority.SelectedItem = string.IsNullOrWhiteSpace(editingTodo.TodoPriority) ? "A" : editingTodo.TodoPriority;
-        var progress = new Slider { Minimum = 0, Maximum = 100, TickFrequency = 1, IsSnapToTickEnabled = true, Width = DialogX(210), Value = editingTodo.TodoProgress };
+        var progress = new Slider
+        {
+            Minimum = 0,
+            Maximum = 100,
+            TickFrequency = 10,
+            SmallChange = 10,
+            LargeChange = 10,
+            IsSnapToTickEnabled = true,
+            IsMoveToPointEnabled = false,
+            Width = DialogX(210),
+            Value = editingTodo.TodoProgress
+        };
         var progressLabel = new TextBlock { Text = $"進捗 {editingTodo.TodoProgress}%", VerticalAlignment = VerticalAlignment.Center };
         progress.ValueChanged += (_, _) => progressLabel.Text = $"進捗 {(int)progress.Value}%";
         var calendar = new ComboBox
@@ -1235,26 +1269,13 @@ public partial class MainWindow : Window
         };
         grid.MouseDoubleClick += async (_, e) =>
         {
-            if (!DataGridDoubleClickHelper.IsEditableRowDoubleClickTarget(e.OriginalSource))
+            var calendarEvent = DataGridDoubleClickHelper.GetEditableRowItem<CalendarEvent>(e.OriginalSource);
+            if (calendarEvent is null)
             {
                 return;
             }
 
-            if (grid.SelectedItem is not CalendarEvent calendarEvent)
-            {
-                return;
-            }
-
-            if (calendarEvent.IsTodoLike)
-            {
-                await _viewModel.NavigateToDateAsync(calendarEvent.Start.Date);
-                _viewModel.SelectEvent(calendarEvent);
-                await ShowSelectedTodoDialogAsync();
-            }
-            else
-            {
-                await OpenCalendarEventEditorAsync(calendarEvent);
-            }
+            await OpenGridEventEditorAsync(calendarEvent);
 
             eventItems.Clear();
             var refreshedEvents = string.IsNullOrWhiteSpace(query)
@@ -1714,7 +1735,7 @@ public partial class MainWindow : Window
             ItemsSource = _viewModel.EventColorOptions,
             SelectedValuePath = nameof(EventColorSelectionItem.Id),
             SelectedValue = selectedColorId,
-            MinWidth = DialogX(106)
+            MinWidth = DialogX(180)
         };
 
         var template = new DataTemplate(typeof(EventColorSelectionItem));
@@ -1906,7 +1927,7 @@ public partial class MainWindow : Window
         details.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         details.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         details.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(DialogX(112)) });
+        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(DialogX(180)) });
         details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(DialogX(16)) });
         details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         AddLabeledField(details, 0, 0, "予定の色", color);
