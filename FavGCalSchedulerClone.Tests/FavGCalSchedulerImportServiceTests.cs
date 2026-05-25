@@ -71,7 +71,7 @@ public sealed class FavGCalSchedulerImportServiceTests
         Assert.Equal("primary", item.CalendarId);
         Assert.True(item.IsDirty);
         Assert.True(item.IsTodoLike);
-        Assert.True(TagService.IsHoliday(item));
+        Assert.False(TagService.IsHoliday(item));
         Assert.Equal("5", item.ColorId);
     }
 

@@ -17,9 +17,9 @@
         <SolidColorBrush x:Key="MenuBarBrush" Color="#F8FAFC" />
         <SolidColorBrush x:Key="PanelBrush" Color="#F8FAFC" />
         <SolidColorBrush x:Key="WeekdayBrush" Color="#FFFFFF" />
-        <SolidColorBrush x:Key="SundayBrush" Color="#FFF1F2" />
-        <SolidColorBrush x:Key="SaturdayBrush" Color="#EFF6FF" />
-        <SolidColorBrush x:Key="HolidayBrush" Color="#FFE4E6" />
+        <SolidColorBrush x:Key="SundayBrush" Color="#FFD6D9" />
+        <SolidColorBrush x:Key="SaturdayBrush" Color="#D9E5FF" />
+        <SolidColorBrush x:Key="HolidayBrush" Color="#FFD6D9" />
         <SolidColorBrush x:Key="OutsideMonthBrush" Color="#F1F5F9" />
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
         <DataTemplate x:Key="ColoredTitleTemplate">
@@ -250,8 +250,6 @@
                 <MenuItem Header="印刷" Click="PrintMenu_Click" />
                 <MenuItem Header="印刷設定" IsEnabled="False" />
                 <MenuItem Header="印刷プレビュー" Click="PrintPreviewMenu_Click" />
-                <Separator />
-                <MenuItem Header="アプリケーションの終了(_X)" Click="ExitMenu_Click" />
             </MenuItem>
             <MenuItem Header="編集(_E)">
                 <MenuItem Header="スケジュールの追加(_A)" Click="AddScheduleMenu_Click" />

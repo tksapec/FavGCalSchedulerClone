@@ -12,6 +12,7 @@ public sealed class GoogleEventMapperTests
         {
             Id = "abc",
             Summary = "Holiday #holiday",
+            Description = "#holiday",
             Start = new EventDateTime { Date = "2026-05-16" },
             End = new EventDateTime { Date = "2026-05-17" }
         };

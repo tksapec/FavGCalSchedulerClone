@@ -6,19 +6,27 @@ namespace FavGCalSchedulerClone.Tests;
 public sealed class TagServiceTests
 {
     [Fact]
-    public void ExtractTags_ReturnsDistinctTagsFromTitleAndDescription()
+    public void ExtractTags_UsesOnlyStandaloneDescriptionLines()
     {
-        var tags = TagService.ExtractTags("会議 #work #important", "memo #work #holiday");
+        var tags = TagService.ExtractTags("#important", "memo #work\n #holiday \n#workday\n今日は#private");
 
-        Assert.Equal(["#holiday", "#important", "#work"], tags);
+        Assert.Equal(["#holiday", "#workday"], tags);
     }
 
     [Fact]
-    public void IsHoliday_DetectsHolidayTagInDescription()
+    public void IsHoliday_DetectsStandaloneHolidayLineInDescription()
     {
-        var item = new CalendarEvent { Title = "振替休日", Description = "Fav互換 #holiday" };
+        var item = new CalendarEvent { Title = "振替休日 #workday", Description = "説明\n#holiday" };
 
         Assert.True(TagService.IsHoliday(item));
+    }
+
+    [Fact]
+    public void IsHoliday_DoesNotDetectTagEmbeddedInDescriptionText()
+    {
+        var item = new CalendarEvent { Description = "今日は#holiday" };
+
+        Assert.False(TagService.IsHoliday(item));
     }
 
     [Fact]
@@ -117,17 +125,17 @@ public sealed class TagServiceTests
     }
 
     [Fact]
-    public void IsWorkday_DetectsWorkdayTagInTitle()
+    public void IsWorkday_DoesNotDetectWorkdayTagInTitle()
     {
         var item = new CalendarEvent { Title = "休日出勤 #workday" };
 
-        Assert.True(TagService.IsWorkday(item));
+        Assert.False(TagService.IsWorkday(item));
     }
 
     [Fact]
     public void IsWorkday_IgnoresCase()
     {
-        var item = new CalendarEvent { Description = "振替出勤 #WORKDAY" };
+        var item = new CalendarEvent { Description = "#WORKDAY" };
 
         Assert.True(TagService.IsWorkday(item));
     }
@@ -136,7 +144,8 @@ public sealed class TagServiceTests
     public void WorkdayOverride_WinsOverHolidayOnSameEvent()
     {
         var date = new DateTime(2026, 5, 16);
-        var item = AllDayEvent(date, "休日出勤 #holiday #workday");
+        var item = AllDayEvent(date, "休日出勤");
+        item.Description = "#holiday\n#workday";
 
         Assert.True(TagService.HasWorkdayOverride([item], date));
         Assert.False(TagService.HasHolidayWithoutWorkdayOverride([item], date));
@@ -146,8 +155,10 @@ public sealed class TagServiceTests
     public void WorkdayOverride_WinsOverHolidayOnSeparateEvents()
     {
         var date = new DateTime(2026, 5, 17);
-        var holiday = AllDayEvent(date, "休日 #holiday");
-        var workday = AllDayEvent(date, "出勤日 #workday");
+        var holiday = AllDayEvent(date, "休日");
+        holiday.Description = "#holiday";
+        var workday = AllDayEvent(date, "出勤日");
+        workday.Description = "#workday";
 
         Assert.True(TagService.HasWorkdayOverride([holiday, workday], date));
         Assert.False(TagService.HasHolidayWithoutWorkdayOverride([holiday, workday], date));
@@ -157,7 +168,8 @@ public sealed class TagServiceTests
     public void WorkdayOverride_AppliesToWeekendDate()
     {
         var saturday = new DateTime(2026, 5, 16);
-        var item = AllDayEvent(saturday, "土曜出勤 #workday");
+        var item = AllDayEvent(saturday, "土曜出勤");
+        item.Description = "#workday";
 
         Assert.Equal(DayOfWeek.Saturday, saturday.DayOfWeek);
         Assert.True(TagService.HasWorkdayOverride([item], saturday));
@@ -222,8 +234,10 @@ public sealed class TagServiceTests
     public void ResolveDayBackgroundColor_UsesHighestPriorityMatchingTag()
     {
         var date = new DateTime(2026, 5, 18);
-        var work = AllDayEvent(date, "Work #work");
-        var important = AllDayEvent(date, "Important #important");
+        var work = AllDayEvent(date, "Work");
+        work.Description = "#work";
+        var important = AllDayEvent(date, "Important");
+        important.Description = "#important";
 
         var color = TagService.ResolveDayBackgroundColor([work, important], date, TagService.DefaultTags);
 
@@ -234,8 +248,10 @@ public sealed class TagServiceTests
     public void ResolveDayBackgroundColor_WorkdayClearsHolidayOrDisplayTagBackground()
     {
         var date = new DateTime(2026, 5, 16);
-        var special = AllDayEvent(date, "Saturday #holiday #important");
-        var workday = AllDayEvent(date, "Workday override #workday");
+        var special = AllDayEvent(date, "Saturday");
+        special.Description = "#holiday\n#important";
+        var workday = AllDayEvent(date, "Workday override");
+        workday.Description = "#workday";
 
         var color = TagService.ResolveDayBackgroundColor([special, workday], date, TagService.DefaultTags);
 

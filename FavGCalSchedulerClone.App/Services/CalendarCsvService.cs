@@ -154,8 +154,8 @@ public sealed class CalendarCsvService
         if (importTags.Length > 0)
         {
             description = string.IsNullOrWhiteSpace(description)
-                ? string.Join(" ", importTags)
-                : $"{string.Join(" ", importTags)} {description}";
+                ? string.Join(Environment.NewLine, importTags)
+                : $"{string.Join(Environment.NewLine, importTags)}{Environment.NewLine}{description}";
         }
 
         var isAllDayText = Get(row, headerMap, "IsAllDay").Trim();

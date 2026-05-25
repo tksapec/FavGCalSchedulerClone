@@ -909,9 +909,9 @@ public sealed class MainViewModel : ObservableObject
 
         var (gridStart, gridEnd) = DateRangeHelper.MonthGridRange(CurrentMonth, _settings.WeekStartsOnMonday);
         var storedEvents = await _repository.LoadEventsAsync(new DateTimeOffset(gridStart), new DateTimeOffset(gridEnd), includeDeleted: true);
-        var visibleEvents = RecurrenceExpansionService
+        var calendarEvents = RecurrenceExpansionService
             .ExpandForRange(storedEvents, new DateTimeOffset(gridStart), new DateTimeOffset(gridEnd))
-            .Where(IsVisible)
+            .Where(IsInVisibleCalendar)
             .ToArray();
         if (generation != _refreshGeneration)
         {
@@ -919,7 +919,7 @@ public sealed class MainViewModel : ObservableObject
         }
 
         _storedEvents = storedEvents;
-        _visibleEvents = visibleEvents;
+        _visibleEvents = calendarEvents.Where(IsVisible).ToArray();
         ApplyDisplayColors(_visibleEvents);
 
         CalendarDays.Clear();
@@ -929,9 +929,9 @@ public sealed class MainViewModel : ObservableObject
             {
                 Date = date,
                 IsCurrentMonth = date.Month == CurrentMonth.Month,
-                IsWorkdayOverride = TagService.HasWorkdayOverride(_visibleEvents, date),
-                IsHoliday = TagService.HasHolidayWithoutWorkdayOverride(_visibleEvents, date),
-                TagBackgroundColor = TagService.ResolveDayBackgroundColor(_visibleEvents, date, Tags)
+                IsWorkdayOverride = TagService.HasWorkdayOverride(calendarEvents, date),
+                IsHoliday = TagService.HasHolidayWithoutWorkdayOverride(calendarEvents, date),
+                TagBackgroundColor = TagService.ResolveDayBackgroundColor(calendarEvents, date, Tags)
             };
 
             foreach (var calendarEvent in _visibleEvents.Where(e => DateRangeHelper.OccursOn(e, date)).Take(5))
@@ -1047,10 +1047,14 @@ public sealed class MainViewModel : ObservableObject
     private bool IsVisible(CalendarEvent calendarEvent)
     {
         var displayTag = TagService.FindDisplayTag(calendarEvent, Tags);
-        var calendarVisible = AvailableCalendars.Count == 0
-            || AvailableCalendars.Any(item => item.IsSelected && item.Id == calendarEvent.CalendarId);
-        return calendarVisible && (displayTag?.IsVisible ?? true);
+        return IsInVisibleCalendar(calendarEvent)
+            && !TagService.IsDayCellDirective(calendarEvent)
+            && (displayTag?.IsVisible ?? true);
     }
+
+    private bool IsInVisibleCalendar(CalendarEvent calendarEvent) =>
+        AvailableCalendars.Count == 0
+        || AvailableCalendars.Any(item => item.IsSelected && item.Id == calendarEvent.CalendarId);
 
     private void NavigatePrimary(int direction)
     {

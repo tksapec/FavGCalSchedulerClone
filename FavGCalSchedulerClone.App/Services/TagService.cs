@@ -35,22 +35,28 @@ public static partial class TagService
 
     public static IReadOnlyList<string> ExtractTags(string? title, string? description)
     {
-        var input = $"{title ?? ""} {description ?? ""}";
-        return TagRegex()
-            .Matches(input)
-            .Select(m => m.Value)
+        return (description ?? "")
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Split('\n')
+            .Select(line => line.Trim())
+            .Where(line => TagLineRegex().IsMatch(line))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
 
     public static bool IsHoliday(CalendarEvent calendarEvent) =>
-        ExtractTags(calendarEvent.Title, calendarEvent.Description)
+        ExtractTags(null, calendarEvent.Description)
             .Any(x => string.Equals(x, "#holiday", StringComparison.OrdinalIgnoreCase));
 
     public static bool IsWorkday(CalendarEvent calendarEvent) =>
-        ExtractTags(calendarEvent.Title, calendarEvent.Description)
+        ExtractTags(null, calendarEvent.Description)
             .Any(x => string.Equals(x, "#workday", StringComparison.OrdinalIgnoreCase));
+
+    public static bool IsDayCellDirective(CalendarEvent calendarEvent) =>
+        ExtractTags(null, calendarEvent.Description)
+            .Any(tag => DefaultTags.Any(defaultTag => string.Equals(defaultTag.Name, tag, StringComparison.OrdinalIgnoreCase)));
 
     public static bool HasWorkdayOverride(IEnumerable<CalendarEvent> events, DateTime date) =>
         events.Any(e => IsWorkday(e) && DateRangeHelper.OccursOn(e, date));
@@ -73,7 +79,7 @@ public static partial class TagService
         }
 
         var eventTags = eventsOnDate
-            .SelectMany(e => ExtractTags(e.Title, e.Description))
+            .SelectMany(e => ExtractTags(null, e.Description))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         return tags
@@ -160,7 +166,7 @@ public static partial class TagService
 
     public static CalendarTag? FindDisplayTag(CalendarEvent calendarEvent, IEnumerable<CalendarTag> tags)
     {
-        var eventTags = ExtractTags(calendarEvent.Title, calendarEvent.Description);
+        var eventTags = ExtractTags(null, calendarEvent.Description);
         return tags
             .Where(t => eventTags.Any(et => string.Equals(et, t.Name, StringComparison.OrdinalIgnoreCase)))
             .OrderByDescending(t => t.Priority)
@@ -229,14 +235,13 @@ public static partial class TagService
 
     private static bool IsDayBackgroundTag(string tagName)
     {
-        return tagName.Equals("#holiday", StringComparison.OrdinalIgnoreCase)
-            || tagName.Equals("#important", StringComparison.OrdinalIgnoreCase)
+        return tagName.Equals("#important", StringComparison.OrdinalIgnoreCase)
             || tagName.Equals("#work", StringComparison.OrdinalIgnoreCase)
             || tagName.Equals("#private", StringComparison.OrdinalIgnoreCase);
     }
 
-    [GeneratedRegex(@"#[\p{L}\p{N}_%-]+", RegexOptions.Compiled)]
-    private static partial Regex TagRegex();
+    [GeneratedRegex(@"^#[\p{L}\p{N}_%-]+$", RegexOptions.Compiled)]
+    private static partial Regex TagLineRegex();
 
     [GeneratedRegex(@"#todo(?<priority>[A-Fa-f])?(?<progress>\d{1,3})%", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex TodoRegex();

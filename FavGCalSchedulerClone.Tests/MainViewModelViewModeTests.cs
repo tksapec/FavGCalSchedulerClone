@@ -266,15 +266,33 @@ public sealed class MainViewModelViewModeTests
     [Fact]
     public async Task CalendarDay_UsesTagBackgroundWithoutChangingEventLabelColor()
     {
-        var calendarEvent = CreateEvent("Important #important", DateTime.Today);
+        var calendarEvent = CreateEvent("Visible event", DateTime.Today);
         calendarEvent.ColorId = "2";
-        var viewModel = await CreateViewModelAsync([calendarEvent]);
+        var directive = CreateEvent("Cell directive", DateTime.Today);
+        directive.Description = "#important";
+        var viewModel = await CreateViewModelAsync([calendarEvent, directive]);
 
         var day = viewModel.CalendarDays.Single(item => item.Date == DateTime.Today);
         var item = Assert.Single(day.Events);
 
         Assert.Equal("#FDE68A", day.TagBackgroundColor);
         Assert.Equal("#7AE7BF", item.DisplayColor);
+        Assert.DoesNotContain(day.Segments, segment => segment.Event?.Title == directive.Title);
+    }
+
+    [Fact]
+    public async Task CalendarDay_HolidayDirectiveIsHiddenAndUsesSundayBackgroundState()
+    {
+        var date = new DateTime(2026, 5, 18);
+        var directive = CreateEvent("Holiday directive", date);
+        directive.Description = "#holiday";
+        var viewModel = await CreateViewModelAsync([directive]);
+        await viewModel.NavigateToDateAsync(date);
+
+        var day = viewModel.CalendarDays.Single(item => item.Date == date);
+        Assert.True(day.IsHoliday);
+        Assert.Empty(day.Events);
+        Assert.DoesNotContain(day.Segments, segment => segment.IsVisible);
     }
 
     [Fact]

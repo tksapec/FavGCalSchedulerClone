@@ -54,7 +54,7 @@ public partial class MainWindow : Window
 
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
-        if (_exitRequested || _viewModel.CloseButtonExitsApplication)
+        if (_exitRequested)
         {
             _reminderService.Stop();
             _reminderService.Dispose();
@@ -65,7 +65,7 @@ public partial class MainWindow : Window
         }
 
         e.Cancel = true;
-        WindowState = WindowState.Minimized;
+        Hide();
     }
 
     private IReminderNotifier CreateReminderNotifier()
@@ -669,7 +669,7 @@ public partial class MainWindow : Window
             MessageBoxImage.Information);
     }
 
-    private void ExitMenu_Click(object sender, RoutedEventArgs e)
+    internal void ExitFromTray()
     {
         _exitRequested = true;
         Close();
@@ -1344,7 +1344,6 @@ public partial class MainWindow : Window
         var startupView = Options(Enum.GetValues<CalendarViewMode>().Cast<object>(), settings.StartupCalendarViewMode);
         var startupTodo = Options(new object[] { "未処理ToDo", "処理済みToDo" }, settings.StartupTodoTabIndex == 0 ? "未処理ToDo" : "処理済みToDo");
         var confirmDelete = new CheckBox { Content = "スケジュールを削除する際に確認ポップアップを表示する", IsChecked = settings.ConfirmBeforeDelete, Margin = new Thickness(0, 6, 0, 6) };
-        var closeExits = new CheckBox { Content = "ウィンドウの閉じるボタンでアプリを終了する", IsChecked = settings.CloseButtonExitsApplication, Margin = new Thickness(0, 6, 0, 6) };
         var hideEditor = new CheckBox { Content = "スケジュール編集時にメインウィンドウを非表示にする", IsChecked = settings.HideMainWindowWhileEditingSchedule, Margin = new Thickness(0, 6, 0, 6) };
         var noReuse = new CheckBox { Content = "新規入力時、場所や件名に前回の入力内容を設定しない", IsChecked = !settings.ReuseLastScheduleInput, Margin = new Thickness(0, 6, 0, 6) };
         var defaultAllDay = new CheckBox { Content = "スケジュール作成時に終日にチェックを付ける", IsChecked = settings.DefaultNewEventIsAllDay, Margin = new Thickness(0, 6, 0, 6) };
@@ -1354,7 +1353,6 @@ public partial class MainWindow : Window
         appPage.Children.Add(new TextBlock { Text = "起動時のToDoタブ表示タイプ" });
         appPage.Children.Add(startupTodo);
         appPage.Children.Add(confirmDelete);
-        appPage.Children.Add(closeExits);
         appPage.Children.Add(hideEditor);
         appPage.Children.Add(new Separator { Margin = new Thickness(0, 8, 0, 8) });
         appPage.Children.Add(noReuse);
@@ -1483,7 +1481,7 @@ public partial class MainWindow : Window
         settings.StartupCalendarViewMode = startupView.SelectedItem is CalendarViewMode mode ? mode : CalendarViewMode.Month;
         settings.StartupTodoTabIndex = startupTodo.SelectedIndex;
         settings.ConfirmBeforeDelete = confirmDelete.IsChecked == true;
-        settings.CloseButtonExitsApplication = closeExits.IsChecked == true;
+        settings.CloseButtonExitsApplication = false;
         settings.HideMainWindowWhileEditingSchedule = hideEditor.IsChecked == true;
         settings.ReuseLastScheduleInput = noReuse.IsChecked != true;
         settings.DefaultNewEventIsAllDay = defaultAllDay.IsChecked == true;

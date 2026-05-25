@@ -60,14 +60,16 @@ public sealed class MonthlyPrintPlannerTests
 
         await repository.SaveTagAsync(new CalendarTag { Name = "#hidden", Color = "#FF0000", IsVisible = false, Priority = 100 });
         await repository.SaveEventAsync(EventOn(new DateTime(DateTime.Today.Year, DateTime.Today.Month, 16), "shown"));
-        await repository.SaveEventAsync(EventOn(new DateTime(DateTime.Today.Year, DateTime.Today.Month, 16), "hidden #hidden"));
+        var hidden = EventOn(new DateTime(DateTime.Today.Year, DateTime.Today.Month, 16), "hidden");
+        hidden.Description = "#hidden";
+        await repository.SaveEventAsync(hidden);
         await viewModel.InitializeAsync();
 
         var plan = await viewModel.CreateMonthlyPrintPlanAsync();
         var entries = plan.Days.SelectMany(day => day.Entries).Select(entry => entry.Text).ToArray();
 
         Assert.Contains("shown", entries);
-        Assert.DoesNotContain("hidden #hidden", entries);
+        Assert.DoesNotContain("hidden", entries);
     }
 
     private static CalendarEvent EventOn(DateTime date, string title, bool isDeleted = false)
