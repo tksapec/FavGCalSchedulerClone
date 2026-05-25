@@ -98,9 +98,6 @@
                 <DataTrigger Binding="{Binding IsWorkdayOverride}" Value="True">
                     <Setter Property="Background" Value="{StaticResource WeekdayBrush}" />
                 </DataTrigger>
-                <DataTrigger Binding="{Binding HasTagBackgroundColor}" Value="True">
-                    <Setter Property="Background" Value="{Binding TagBackgroundColor}" />
-                </DataTrigger>
                 <DataTrigger Binding="{Binding IsToday}" Value="True">
                     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
                     <Setter Property="BorderThickness" Value="2" />
@@ -527,6 +524,7 @@
                                 </Grid.RowDefinitions>
                                 <TextBlock Text="選択日の予定" FontSize="13" FontWeight="SemiBold" Foreground="#1E293B" Margin="0,0,0,8" />
                                 <DataGrid Grid.Row="1" ItemsSource="{Binding SelectedDayEvents}" SelectedItem="{Binding SelectedEvent}"
+                                          PreviewMouseRightButtonDown="SidePanelEventsGrid_PreviewMouseRightButtonDown"
                                           MouseDoubleClick="SelectedDayEventsGrid_MouseDoubleClick">
                                     <DataGrid.Columns>
                                         <DataGridTextColumn Header="日時" Binding="{Binding DateDisplayText}" Width="132" />
@@ -540,6 +538,7 @@
                             <TabControl SelectedIndex="{Binding SelectedTodoTabIndex, Mode=TwoWay}">
                                 <TabItem Header="未完了タスク">
                                     <DataGrid ItemsSource="{Binding TodoEvents}" SelectedItem="{Binding SelectedEvent}"
+                                              PreviewMouseRightButtonDown="SidePanelEventsGrid_PreviewMouseRightButtonDown"
                                               MouseDoubleClick="TodoEventsGrid_MouseDoubleClick">
                                         <DataGrid.Columns>
                                             <DataGridTextColumn Header="期限" Binding="{Binding DateDisplayText}" Width="88" />
@@ -551,6 +550,7 @@
                                 </TabItem>
                                 <TabItem Header="処理済みタスク">
                                     <DataGrid ItemsSource="{Binding CompletedTodoEvents}" SelectedItem="{Binding SelectedEvent}"
+                                              PreviewMouseRightButtonDown="SidePanelEventsGrid_PreviewMouseRightButtonDown"
                                               MouseDoubleClick="TodoEventsGrid_MouseDoubleClick">
                                         <DataGrid.Columns>
                                             <DataGridTextColumn Header="期限" Binding="{Binding DateDisplayText}" Width="88" />

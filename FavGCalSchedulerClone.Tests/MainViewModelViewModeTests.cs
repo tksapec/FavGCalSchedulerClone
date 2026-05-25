@@ -264,20 +264,19 @@ public sealed class MainViewModelViewModeTests
     }
 
     [Fact]
-    public async Task CalendarDay_UsesTagBackgroundWithoutChangingEventLabelColor()
+    public async Task CalendarDay_RetiredDayTagRemainsVisibleWithoutChangingEventLabelColor()
     {
         var calendarEvent = CreateEvent("Visible event", DateTime.Today);
         calendarEvent.ColorId = "2";
-        var directive = CreateEvent("Cell directive", DateTime.Today);
-        directive.Description = "#important";
-        var viewModel = await CreateViewModelAsync([calendarEvent, directive]);
+        var ordinaryEvent = CreateEvent("Ordinary tag text", DateTime.Today);
+        ordinaryEvent.Description = "#important";
+        var viewModel = await CreateViewModelAsync([calendarEvent, ordinaryEvent]);
 
         var day = viewModel.CalendarDays.Single(item => item.Date == DateTime.Today);
-        var item = Assert.Single(day.Events);
+        var item = day.Events.Single(item => item.Title == calendarEvent.Title);
 
-        Assert.Equal("#FDE68A", day.TagBackgroundColor);
         Assert.Equal("#7AE7BF", item.DisplayColor);
-        Assert.DoesNotContain(day.Segments, segment => segment.Event?.Title == directive.Title);
+        Assert.Contains(day.Segments, segment => segment.Event?.Title == ordinaryEvent.Title && segment.IsVisible);
     }
 
     [Fact]
@@ -291,6 +290,25 @@ public sealed class MainViewModelViewModeTests
 
         var day = viewModel.CalendarDays.Single(item => item.Date == date);
         Assert.True(day.IsHoliday);
+        Assert.Empty(day.Events);
+        Assert.DoesNotContain(day.Segments, segment => segment.IsVisible);
+    }
+
+    [Theory]
+    [InlineData(16)]
+    [InlineData(17)]
+    public async Task CalendarDay_WorkdayDirectiveOnWeekendIsHiddenAndUsesWeekdayState(int dayNumber)
+    {
+        var date = new DateTime(2026, 5, dayNumber);
+        var directive = CreateEvent("Workday directive", date);
+        directive.Description = "#workday";
+        var viewModel = await CreateViewModelAsync([directive]);
+        await viewModel.NavigateToDateAsync(date);
+
+        var day = viewModel.CalendarDays.Single(item => item.Date == date);
+        Assert.True(day.IsWeekend);
+        Assert.True(day.IsWorkdayOverride);
+        Assert.False(day.IsHoliday);
         Assert.Empty(day.Events);
         Assert.DoesNotContain(day.Segments, segment => segment.IsVisible);
     }

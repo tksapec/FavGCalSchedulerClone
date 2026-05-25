@@ -19,6 +19,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly FavGCalSchedulerImportService _favGCalImportService;
     private IReadOnlyList<CalendarEvent> _storedEvents = [];
     private IReadOnlyList<CalendarEvent> _visibleEvents = [];
+    private IReadOnlyList<CalendarEvent> _dayDirectiveEvents = [];
     private AppSettings _settings = new();
     private DateTime _currentMonth = new(DateTime.Today.Year, DateTime.Today.Month, 1);
     private CalendarDay? _selectedDay;
@@ -919,27 +920,14 @@ public sealed class MainViewModel : ObservableObject
         }
 
         _storedEvents = storedEvents;
+        _dayDirectiveEvents = calendarEvents;
         _visibleEvents = calendarEvents.Where(IsVisible).ToArray();
         ApplyDisplayColors(_visibleEvents);
 
         CalendarDays.Clear();
         for (var date = gridStart; date < gridEnd; date = date.AddDays(1))
         {
-            var day = new CalendarDay
-            {
-                Date = date,
-                IsCurrentMonth = date.Month == CurrentMonth.Month,
-                IsWorkdayOverride = TagService.HasWorkdayOverride(calendarEvents, date),
-                IsHoliday = TagService.HasHolidayWithoutWorkdayOverride(calendarEvents, date),
-                TagBackgroundColor = TagService.ResolveDayBackgroundColor(calendarEvents, date, Tags)
-            };
-
-            foreach (var calendarEvent in _visibleEvents.Where(e => DateRangeHelper.OccursOn(e, date)).Take(5))
-            {
-                day.Events.Add(calendarEvent);
-            }
-
-            CalendarDays.Add(day);
+            CalendarDays.Add(CreateCalendarDay(date, _dayDirectiveEvents));
         }
         CalendarSegmentLayoutService.PopulateSegments(CalendarDays, _visibleEvents);
 
@@ -1135,7 +1123,7 @@ public sealed class MainViewModel : ObservableObject
     private CalendarDay FindOrCreateCalendarDay(DateTime date)
     {
         return CalendarDays.FirstOrDefault(day => day.Date == date)
-            ?? CreateCalendarDay(date, _visibleEvents);
+            ?? CreateCalendarDay(date, _dayDirectiveEvents);
     }
 
     private CalendarDay CreateCalendarDay(DateTime date, IEnumerable<CalendarEvent> events)
@@ -1145,8 +1133,7 @@ public sealed class MainViewModel : ObservableObject
             Date = date,
             IsCurrentMonth = date.Month == CurrentMonth.Month,
             IsWorkdayOverride = TagService.HasWorkdayOverride(events, date),
-            IsHoliday = TagService.HasHolidayWithoutWorkdayOverride(events, date),
-            TagBackgroundColor = TagService.ResolveDayBackgroundColor(events, date, Tags)
+            IsHoliday = TagService.HasHolidayWithoutWorkdayOverride(events, date)
         };
 
         foreach (var calendarEvent in _visibleEvents.Where(e => DateRangeHelper.OccursOn(e, date)).Take(5))

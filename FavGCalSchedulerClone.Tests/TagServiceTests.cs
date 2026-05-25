@@ -231,31 +231,25 @@ public sealed class TagServiceTests
     }
 
     [Fact]
-    public void ResolveDayBackgroundColor_UsesHighestPriorityMatchingTag()
+    public void RetiredDayTag_IsNotADirectiveOrConfiguredVisibilityTag()
     {
-        var date = new DateTime(2026, 5, 18);
-        var work = AllDayEvent(date, "Work");
-        work.Description = "#work";
-        var important = AllDayEvent(date, "Important");
-        important.Description = "#important";
+        var item = AllDayEvent(new DateTime(2026, 5, 18), "Ordinary description");
+        item.Description = "#important";
+        var retiredTag = new CalendarTag { Name = "#important", Color = "#FDE68A", IsVisible = false };
 
-        var color = TagService.ResolveDayBackgroundColor([work, important], date, TagService.DefaultTags);
-
-        Assert.Equal("#FDE68A", color);
+        Assert.False(TagService.IsDayCellDirective(item));
+        Assert.Null(TagService.FindDisplayTag(item, [retiredTag]));
     }
 
-    [Fact]
-    public void ResolveDayBackgroundColor_WorkdayClearsHolidayOrDisplayTagBackground()
+    [Theory]
+    [InlineData("#holiday")]
+    [InlineData("#workday")]
+    public void SupportedDayTag_IsADirective(string description)
     {
-        var date = new DateTime(2026, 5, 16);
-        var special = AllDayEvent(date, "Saturday");
-        special.Description = "#holiday\n#important";
-        var workday = AllDayEvent(date, "Workday override");
-        workday.Description = "#workday";
+        var item = AllDayEvent(new DateTime(2026, 5, 16), "Directive");
+        item.Description = description;
 
-        var color = TagService.ResolveDayBackgroundColor([special, workday], date, TagService.DefaultTags);
-
-        Assert.Null(color);
+        Assert.True(TagService.IsDayCellDirective(item));
     }
 
     [Fact]

@@ -27,10 +27,7 @@ public static partial class TagService
     public static IReadOnlyList<CalendarTag> DefaultTags { get; } =
     [
         new() { Name = "#holiday", Color = "#FCA5A5", Priority = 100 },
-        new() { Name = "#workday", Color = "#FFFFFF", Priority = 95 },
-        new() { Name = "#important", Color = "#FDE68A", Priority = 90 },
-        new() { Name = "#work", Color = "#93C5FD", Priority = 50 },
-        new() { Name = "#private", Color = "#C4B5FD", Priority = 40 }
+        new() { Name = "#workday", Color = "#FFFFFF", Priority = 95 }
     ];
 
     public static IReadOnlyList<string> ExtractTags(string? title, string? description)
@@ -55,8 +52,7 @@ public static partial class TagService
             .Any(x => string.Equals(x, "#workday", StringComparison.OrdinalIgnoreCase));
 
     public static bool IsDayCellDirective(CalendarEvent calendarEvent) =>
-        ExtractTags(null, calendarEvent.Description)
-            .Any(tag => DefaultTags.Any(defaultTag => string.Equals(defaultTag.Name, tag, StringComparison.OrdinalIgnoreCase)));
+        IsHoliday(calendarEvent) || IsWorkday(calendarEvent);
 
     public static bool HasWorkdayOverride(IEnumerable<CalendarEvent> events, DateTime date) =>
         events.Any(e => IsWorkday(e) && DateRangeHelper.OccursOn(e, date));
@@ -65,28 +61,6 @@ public static partial class TagService
     {
         var eventsOnDate = events.Where(e => DateRangeHelper.OccursOn(e, date)).ToArray();
         return eventsOnDate.Any(IsHoliday) && !eventsOnDate.Any(IsWorkday);
-    }
-
-    public static string? ResolveDayBackgroundColor(
-        IEnumerable<CalendarEvent> events,
-        DateTime date,
-        IEnumerable<CalendarTag> tags)
-    {
-        var eventsOnDate = events.Where(e => DateRangeHelper.OccursOn(e, date)).ToArray();
-        if (eventsOnDate.Any(IsWorkday))
-        {
-            return null;
-        }
-
-        var eventTags = eventsOnDate
-            .SelectMany(e => ExtractTags(null, e.Description))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        return tags
-            .Where(t => IsDayBackgroundTag(t.Name) && eventTags.Contains(t.Name))
-            .OrderByDescending(t => t.Priority)
-            .Select(t => t.Color)
-            .FirstOrDefault();
     }
 
     public static bool IsTodoLike(CalendarEvent calendarEvent) =>
@@ -168,7 +142,8 @@ public static partial class TagService
     {
         var eventTags = ExtractTags(null, calendarEvent.Description);
         return tags
-            .Where(t => eventTags.Any(et => string.Equals(et, t.Name, StringComparison.OrdinalIgnoreCase)))
+            .Where(t => !IsRetiredDayTag(t.Name)
+                && eventTags.Any(et => string.Equals(et, t.Name, StringComparison.OrdinalIgnoreCase)))
             .OrderByDescending(t => t.Priority)
             .FirstOrDefault();
     }
@@ -233,7 +208,7 @@ public static partial class TagService
         return false;
     }
 
-    private static bool IsDayBackgroundTag(string tagName)
+    private static bool IsRetiredDayTag(string tagName)
     {
         return tagName.Equals("#important", StringComparison.OrdinalIgnoreCase)
             || tagName.Equals("#work", StringComparison.OrdinalIgnoreCase)

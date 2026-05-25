@@ -15,8 +15,6 @@ public sealed class CalendarDay : INotifyPropertyChanged
     public bool IsSaturday => Date.DayOfWeek == DayOfWeek.Saturday;
     public bool IsHoliday { get; set; }
     public bool IsWorkdayOverride { get; set; }
-    public string? TagBackgroundColor { get; set; }
-    public bool HasTagBackgroundColor => !string.IsNullOrWhiteSpace(TagBackgroundColor);
     public ObservableCollection<CalendarEvent> Events { get; } = [];
     public ObservableCollection<CalendarEventSegment> Segments { get; } = [];
     public bool IsDropTarget

@@ -25,6 +25,13 @@ public static class DataGridDoubleClickHelper
             || string.Equals(typeName, typeof(DataGridRow).FullName, StringComparison.Ordinal);
     }
 
+    public static bool IsChromeTarget(object? originalSource)
+    {
+        return originalSource is DependencyObject source
+            && (FindAncestor<DataGridColumnHeader>(source) is not null
+                || FindAncestor<ScrollBar>(source) is not null);
+    }
+
     private static DataGridRow? GetRow(object? originalSource)
     {
         if (originalSource is not DependencyObject source

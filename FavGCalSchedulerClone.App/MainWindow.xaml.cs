@@ -602,6 +602,27 @@ public partial class MainWindow : Window
         await OpenGridEventEditorAsync(calendarEvent);
     }
 
+    private void SidePanelEventsGrid_PreviewMouseRightButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement element || DataGridDoubleClickHelper.IsChromeTarget(e.OriginalSource))
+        {
+            return;
+        }
+
+        var calendarEvent = DataGridDoubleClickHelper.GetEditableRowItem<CalendarEvent>(e.OriginalSource);
+        if (calendarEvent is null)
+        {
+            _viewModel.SelectedEvent = null;
+        }
+        else
+        {
+            _viewModel.SelectEvent(calendarEvent, selectEventDay: false);
+        }
+
+        e.Handled = true;
+        ShowCalendarContextMenu(element);
+    }
+
     private async void TodoEventsGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         var calendarEvent = DataGridDoubleClickHelper.GetEditableRowItem<CalendarEvent>(e.OriginalSource);
