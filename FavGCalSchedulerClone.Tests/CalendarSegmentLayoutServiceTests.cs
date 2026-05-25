@@ -116,7 +116,7 @@ public sealed class CalendarSegmentLayoutServiceTests
 
         var segment = Assert.Single(days[1].Segments, segment => segment.IsVisible);
         Assert.Equal("#7AE7BF", segment.DisplayColor);
-        Assert.Equal("[A] 20% Todo", segment.DisplayText);
+        Assert.Equal("Todo", segment.DisplayText);
         Assert.True(segment.ShowTodoIndicator);
         Assert.Equal("", segment.TodoCheckGlyph);
     }
@@ -134,7 +134,7 @@ public sealed class CalendarSegmentLayoutServiceTests
         var segment = Assert.Single(days[1].Segments, segment => segment.IsVisible);
         Assert.True(segment.ShowTodoIndicator);
         Assert.Equal("✓", segment.TodoCheckGlyph);
-        Assert.Equal("[A] 100% Done", segment.DisplayText);
+        Assert.Equal("Done", segment.DisplayText);
     }
 
     private static CalendarDay[] CreateDays(DateTime start, int count) =>

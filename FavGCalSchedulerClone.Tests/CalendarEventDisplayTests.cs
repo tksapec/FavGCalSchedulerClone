@@ -18,7 +18,7 @@ public sealed class CalendarEventDisplayTests
     }
 
     [Fact]
-    public void CalendarCellDisplayText_ShowsTodoStatePriorityAndProgress()
+    public void CalendarCellDisplayText_ShowsOnlyTodoTitle()
     {
         var item = new CalendarEvent
         {
@@ -29,6 +29,6 @@ public sealed class CalendarEventDisplayTests
             Start = new DateTimeOffset(new DateTime(2026, 5, 23))
         };
 
-        Assert.Equal("[A] 56% Confirm", item.CalendarCellDisplayText);
+        Assert.Equal("Confirm", item.CalendarCellDisplayText);
     }
 }

@@ -39,8 +39,7 @@ public sealed class CalendarEvent
                 return CalendarDisplayText;
             }
 
-            var priority = string.IsNullOrWhiteSpace(TodoPriority) ? "" : $"[{TodoPriority}] ";
-            return $"{priority}{TodoProgress}% {Title}".Trim();
+            return Title;
         }
     }
 

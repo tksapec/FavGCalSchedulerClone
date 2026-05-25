@@ -882,11 +882,11 @@ public partial class MainWindow : Window
         details.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(DialogX(16)) });
-        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(DialogX(180)) });
+        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(DialogX(214)) });
         details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(DialogX(16)) });
         details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(DialogX(260)) });
         AddLabeledField(details, 0, 0, "場所", location);
-        AddLabeledField(details, 0, 2, "予定の色", color);
+        AddLabeledField(details, 0, 2, "予定の色", color, rightMarginPhysicalPixels: 0);
         AddLabeledField(details, 0, 4, "カレンダー", calendar);
         AddLabeledField(details, 1, 0, "件名", title, columnSpan: 5);
         AddLabeledField(details, 2, 0, "内容", description, columnSpan: 5, stretchVertically: true);
@@ -1735,7 +1735,7 @@ public partial class MainWindow : Window
             ItemsSource = _viewModel.EventColorOptions,
             SelectedValuePath = nameof(EventColorSelectionItem.Id),
             SelectedValue = selectedColorId,
-            MinWidth = DialogX(180)
+            MinWidth = DialogX(200)
         };
 
         var template = new DataTemplate(typeof(EventColorSelectionItem));
@@ -1852,9 +1852,10 @@ public partial class MainWindow : Window
         string label,
         FrameworkElement input,
         int columnSpan = 1,
-        bool stretchVertically = false)
+        bool stretchVertically = false,
+        double rightMarginPhysicalPixels = 16)
     {
-        var field = new Grid { Margin = DialogThickness(0, 0, 16, 12) };
+        var field = new Grid { Margin = DialogThickness(0, 0, rightMarginPhysicalPixels, 12) };
         field.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         field.RowDefinitions.Add(new RowDefinition
         {
@@ -1927,10 +1928,10 @@ public partial class MainWindow : Window
         details.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         details.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         details.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(DialogX(180)) });
+        details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(DialogX(214)) });
         details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(DialogX(16)) });
         details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        AddLabeledField(details, 0, 0, "予定の色", color);
+        AddLabeledField(details, 0, 0, "予定の色", color, rightMarginPhysicalPixels: 0);
         AddLabeledField(details, 0, 2, "カレンダー", calendar);
         AddLabeledField(details, 1, 0, "件名", title, columnSpan: 3);
         AddLabeledField(details, 2, 0, "内容", description, columnSpan: 3, stretchVertically: true);

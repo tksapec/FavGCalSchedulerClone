@@ -529,7 +529,7 @@
                                 <DataGrid Grid.Row="1" ItemsSource="{Binding SelectedDayEvents}" SelectedItem="{Binding SelectedEvent}"
                                           MouseDoubleClick="SelectedDayEventsGrid_MouseDoubleClick">
                                     <DataGrid.Columns>
-                                        <DataGridTextColumn Header="日時" Binding="{Binding DateDisplayText}" Width="98" />
+                                        <DataGridTextColumn Header="日時" Binding="{Binding DateDisplayText}" Width="132" />
                                         <DataGridTemplateColumn Header="件名" CellTemplate="{StaticResource ColoredTitleTemplate}" Width="*" />
                                     </DataGrid.Columns>
                                 </DataGrid>
@@ -542,10 +542,10 @@
                                     <DataGrid ItemsSource="{Binding TodoEvents}" SelectedItem="{Binding SelectedEvent}"
                                               MouseDoubleClick="TodoEventsGrid_MouseDoubleClick">
                                         <DataGrid.Columns>
-                                            <DataGridTextColumn Header="期限" Binding="{Binding DateDisplayText}" Width="86" />
+                                            <DataGridTextColumn Header="期限" Binding="{Binding DateDisplayText}" Width="88" />
                                             <DataGridTemplateColumn Header="件名" CellTemplate="{StaticResource ColoredTitleTemplate}" Width="*" />
-                                            <DataGridTextColumn Header="%" Binding="{Binding TodoProgressText}" Width="44" />
-                                            <DataGridTextColumn Header="優先度" Binding="{Binding TodoPriorityDisplayText}" Width="50" />
+                                            <DataGridTextColumn Header="%" Binding="{Binding TodoProgressText}" Width="40" />
+                                            <DataGridTextColumn Header="P" Binding="{Binding TodoPriorityDisplayText}" Width="30" />
                                         </DataGrid.Columns>
                                     </DataGrid>
                                 </TabItem>
@@ -553,10 +553,10 @@
                                     <DataGrid ItemsSource="{Binding CompletedTodoEvents}" SelectedItem="{Binding SelectedEvent}"
                                               MouseDoubleClick="TodoEventsGrid_MouseDoubleClick">
                                         <DataGrid.Columns>
-                                            <DataGridTextColumn Header="期限" Binding="{Binding DateDisplayText}" Width="86" />
+                                            <DataGridTextColumn Header="期限" Binding="{Binding DateDisplayText}" Width="88" />
                                             <DataGridTemplateColumn Header="件名" CellTemplate="{StaticResource ColoredTitleTemplate}" Width="*" />
-                                            <DataGridTextColumn Header="%" Binding="{Binding TodoProgressText}" Width="44" />
-                                            <DataGridTextColumn Header="優先度" Binding="{Binding TodoPriorityDisplayText}" Width="50" />
+                                            <DataGridTextColumn Header="%" Binding="{Binding TodoProgressText}" Width="40" />
+                                            <DataGridTextColumn Header="P" Binding="{Binding TodoPriorityDisplayText}" Width="30" />
                                         </DataGrid.Columns>
                                     </DataGrid>
                                 </TabItem>
