@@ -721,7 +721,7 @@ public sealed class GoogleCalendarSyncService
         var secrets = GoogleClientSecrets.FromStream(stream);
         var credential = await GoogleWebAuthorizationBroker.AuthorizeAsync(
             secrets.Secrets,
-            [GoogleCalendarDefaults.CalendarEventsScope],
+            GoogleCalendarDefaults.CalendarScopes,
             "personal-user",
             cancellationToken,
             new ProtectedFileDataStore(AppPaths.TokenDirectory));
