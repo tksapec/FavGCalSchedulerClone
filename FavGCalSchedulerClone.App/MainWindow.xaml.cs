@@ -34,6 +34,7 @@ public partial class MainWindow : Window
         _automaticSyncTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
         _automaticSyncTimer.Tick += async (_, _) => await _viewModel.RunAutomaticSyncIfDueAsync();
         DataContext = _viewModel;
+        _viewModel.SetManualSyncPreviewConfirmation(preview => Task.FromResult(ShowSyncPreviewDialog(preview) == true));
         ToastNotificationManagerCompat.OnActivated += ToastNotificationManagerCompat_OnActivated;
     }
 
@@ -528,44 +529,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void PrintPreviewMenu_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            var plan = await _viewModel.CreateMonthlyPrintPlanAsync();
-            ShowPrintPreview(plan);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, ex.Message, "印刷プレビュー失敗", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-
-    private async void PrintMenu_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            var plan = await _viewModel.CreateMonthlyPrintPlanAsync();
-            var dialog = new PrintDialog();
-            if (dialog.ShowDialog() != true)
-            {
-                return;
-            }
-
-            var width = dialog.PrintableAreaWidth > 0 ? dialog.PrintableAreaWidth : 1122;
-            var height = dialog.PrintableAreaHeight > 0 ? dialog.PrintableAreaHeight : 794;
-            var visual = MonthlyPrintVisualBuilder.Build(plan, width, height);
-            visual.Measure(new Size(width, height));
-            visual.Arrange(new Rect(0, 0, width, height));
-            dialog.PrintVisual(visual, plan.Title);
-            _viewModel.Status = "印刷を開始しました。";
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, ex.Message, "印刷失敗", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-
     private async void ScheduleListMenu_Click(object sender, RoutedEventArgs e)
     {
         await ShowEventListDialogAsync("スケジュール一覧", string.Empty);
@@ -590,17 +553,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            var settings = _viewModel.CreateSettingsSnapshot();
-            if (settings.ShowSyncPreviewBeforeManualSync)
-            {
-                var preview = await _viewModel.CreateSyncPreviewAsync();
-                if (ShowSyncPreviewDialog(preview) != true)
-                {
-                    return;
-                }
-            }
-
-            var result = await _viewModel.SynchronizeManuallyAsync();
+            var result = await _viewModel.SynchronizeManuallyWithPreviewAsync();
             if (result is not null)
             {
                 MessageBox.Show(
@@ -752,35 +705,6 @@ public partial class MainWindow : Window
     {
         _exitRequested = true;
         Close();
-    }
-
-    private void ShowPrintPreview(MonthlyPrintPlan plan)
-    {
-        var window = CreateOwnedDialog("印刷プレビュー", 1180, 860);
-        window.ResizeMode = ResizeMode.CanResize;
-        window.MinWidth = 900;
-        window.MinHeight = 640;
-
-        var preview = MonthlyPrintVisualBuilder.Build(plan, 1122, 794);
-        preview.Margin = new Thickness(16);
-
-        var scrollViewer = new ScrollViewer
-        {
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            Background = System.Windows.Media.Brushes.WhiteSmoke,
-            Content = new Border
-            {
-                Background = System.Windows.Media.Brushes.White,
-                BorderBrush = System.Windows.Media.Brushes.LightGray,
-                BorderThickness = new Thickness(1),
-                Margin = new Thickness(16),
-                Child = preview
-            }
-        };
-
-        window.Content = scrollViewer;
-        window.ShowDialog();
     }
 
     private async Task ShowScheduleDialogAsync()
@@ -1633,9 +1557,44 @@ public partial class MainWindow : Window
             var dialog = new OpenFileDialog { Filter = "Google OAuth client JSON (*.json)|*.json|All files (*.*)|*.*" };
             if (dialog.ShowDialog(window) == true) oauthPath.Text = dialog.FileName;
         };
-        authorize.Click += async (_, _) => { await _viewModel.SetOAuthClientJsonPathAsync(oauthPath.Text); await _viewModel.AuthorizeGoogleAsync(); };
-        clearToken.Click += (_, _) => _viewModel.ClearTokensCommand.Execute(null);
-        reloadCalendars.Click += (_, _) => _viewModel.ReloadCalendarListCommand.Execute(null);
+        authorize.Click += async (_, _) =>
+        {
+            try
+            {
+                await _viewModel.SetOAuthClientJsonPathAsync(oauthPath.Text);
+                await _viewModel.AuthorizeGoogleAsync();
+                MessageBox.Show(window, "Google認証が完了しました。", "Google認証", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(window, ex.Message, "Google認証エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        };
+        clearToken.Click += async (_, _) =>
+        {
+            try
+            {
+                await _viewModel.ClearTokensAsync();
+                MessageBox.Show(window, "保存済みGoogleトークンを削除しました。", "トークン削除", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(window, ex.Message, "トークン削除エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        };
+        reloadCalendars.Click += async (_, _) =>
+        {
+            try
+            {
+                await _viewModel.SetOAuthClientJsonPathAsync(oauthPath.Text);
+                await _viewModel.ReloadAvailableCalendarsAsync();
+                MessageBox.Show(window, "カレンダー一覧を更新しました。", "カレンダー一覧", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(window, ex.Message, "カレンダー一覧更新エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        };
         accountPage.Children.Add(new TextBlock { Text = "Google Calendar API OAuth client JSON" });
         accountPage.Children.Add(oauthPath);
         foreach (var button in new[] { chooseOAuth, authorize, clearToken, reloadCalendars }) accountPage.Children.Add(button);

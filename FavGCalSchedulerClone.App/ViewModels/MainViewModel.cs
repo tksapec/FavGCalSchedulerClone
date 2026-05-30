@@ -46,6 +46,7 @@ public sealed class MainViewModel : ObservableObject
     private IReadOnlyList<string> _scheduleTitleHistory = [];
     private IReadOnlyList<string> _scheduleLocationHistory = [];
     private int _syncInProgress;
+    private Func<SyncPreview, Task<bool>>? _confirmManualSyncPreviewAsync;
 
     public MainViewModel(CalendarRepository repository, GoogleCalendarSyncService syncService)
     {
@@ -65,7 +66,7 @@ public sealed class MainViewModel : ObservableObject
         SaveEventCommand = new AsyncRelayCommand(() => SaveEventWithRecurrenceAsync(null));
         DeleteEventCommand = new AsyncRelayCommand(() => DeleteEventWithRecurrenceAsync(null), () => SelectedEvent is not null);
         MarkSelectedTodoDoneCommand = new AsyncRelayCommand(MarkSelectedTodoDoneAsync, () => SelectedEvent?.IsTodoLike == true && !SelectedEvent.IsTodoDone);
-        SyncCommand = new AsyncRelayCommand(SyncAsync);
+        SyncCommand = new AsyncRelayCommand(SynchronizeManuallyWithPreviewAsync);
         ReloadCalendarListCommand = new AsyncRelayCommand(ReloadAvailableCalendarsAsync);
         BrowseOAuthClientCommand = new AsyncRelayCommand(BrowseOAuthClientAsync);
         AuthorizeCommand = new AsyncRelayCommand(AuthorizeAsync);
@@ -605,15 +606,6 @@ public sealed class MainViewModel : ObservableObject
         return expanded.Where(IsVisible).OrderBy(e => e.Start).ThenBy(e => e.Title).ToArray();
     }
 
-    public async Task<MonthlyPrintPlan> CreateMonthlyPrintPlanAsync()
-    {
-        var (gridStart, gridEnd) = DateRangeHelper.MonthGridRange(CurrentMonth, _settings.WeekStartsOnMonday);
-        var events = await _repository.LoadEventsAsync(new DateTimeOffset(gridStart), new DateTimeOffset(gridEnd));
-        var expanded = RecurrenceExpansionService.ExpandForRange(events, new DateTimeOffset(gridStart), new DateTimeOffset(gridEnd));
-        ApplyDisplayColors(expanded);
-        return MonthlyPrintPlanner.Create(CurrentMonth, expanded.Where(IsVisible));
-    }
-
     public async Task<IReadOnlyList<CalendarEvent>> SearchYearEventsAsync(DateTime yearInView, string query)
     {
         var events = await LoadYearEventsAsync(yearInView);
@@ -836,6 +828,27 @@ public sealed class MainViewModel : ObservableObject
         return await SynchronizeAsync(reportErrors: true);
     }
 
+    public void SetManualSyncPreviewConfirmation(Func<SyncPreview, Task<bool>>? confirmManualSyncPreviewAsync)
+    {
+        _confirmManualSyncPreviewAsync = confirmManualSyncPreviewAsync;
+    }
+
+    public async Task<SyncResult?> SynchronizeManuallyWithPreviewAsync()
+    {
+        var settings = CreateSettingsSnapshot();
+        if (settings.ShowSyncPreviewBeforeManualSync && _confirmManualSyncPreviewAsync is not null)
+        {
+            var preview = await CreateSyncPreviewAsync();
+            if (!await _confirmManualSyncPreviewAsync(preview))
+            {
+                Status = "同期をキャンセルしました。";
+                return null;
+            }
+        }
+
+        return await SynchronizeManuallyAsync();
+    }
+
     public async Task<SyncDiagnosticsSnapshot> LoadSyncDiagnosticsAsync()
     {
         await SaveOAuthPathAsync();
@@ -953,17 +966,24 @@ public sealed class MainViewModel : ObservableObject
         }
         CalendarSegmentLayoutService.PopulateSegments(CalendarDays, _visibleEvents);
 
+        CalendarDay? selectedDay;
+        DateTime? visibleAnchorDate;
         if (_pendingSelectedDate is { } pendingSelectedDate)
         {
-            SelectedDay = CalendarDays.FirstOrDefault(d => d.Date == pendingSelectedDate.Date) ?? CalendarDays.FirstOrDefault();
+            selectedDay = CalendarDays.FirstOrDefault(d => d.Date == pendingSelectedDate.Date) ?? FindOrCreateCalendarDay(pendingSelectedDate.Date);
+            visibleAnchorDate = selectedDay.Date;
             _pendingSelectedDate = null;
         }
         else
         {
-            SelectedDay ??= CalendarDays.FirstOrDefault(d => d.Date == DateTime.Today) ?? CalendarDays.FirstOrDefault();
+            selectedDay = SelectedDay is not null
+                ? CalendarDays.FirstOrDefault(d => d.Date == SelectedDay.Date) ?? FindOrCreateCalendarDay(SelectedDay.Date)
+                : CalendarDays.FirstOrDefault(d => d.Date == DateTime.Today) ?? CalendarDays.FirstOrDefault();
+            visibleAnchorDate = selectedDay?.Date;
         }
 
-        RefreshVisibleCalendarDays();
+        RefreshVisibleCalendarDays(visibleAnchorDate);
+        SelectedDay = selectedDay;
         UpdateSegmentSelection();
         RefreshSelectedDayEvents();
         RefreshSevenDayEvents();
@@ -1099,15 +1119,15 @@ public sealed class MainViewModel : ObservableObject
         StartRefreshCalendar();
     }
 
-    private void RefreshVisibleCalendarDays()
+    private void RefreshVisibleCalendarDays(DateTime? anchorDate = null)
     {
         VisibleCalendarDays.Clear();
 
         IEnumerable<CalendarDay> days = CurrentViewMode switch
         {
             CalendarViewMode.Month => CalendarDays,
-            CalendarViewMode.Week => GetWeekDays(),
-            CalendarViewMode.Day => GetDayDays(),
+            CalendarViewMode.Week => GetWeekDays(anchorDate),
+            CalendarViewMode.Day => GetDayDays(anchorDate),
             _ => CalendarDays
         };
 
@@ -1117,14 +1137,14 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    private IEnumerable<CalendarDay> GetWeekDays()
+    private IEnumerable<CalendarDay> GetWeekDays(DateTime? anchorDate = null)
     {
         if (CalendarDays.Count == 0)
         {
             return [];
         }
 
-        var anchor = SelectedDay?.Date ?? CurrentMonth;
+        var anchor = anchorDate?.Date ?? SelectedDay?.Date ?? CurrentMonth;
         var offset = _settings.WeekStartsOnMonday
             ? ((int)anchor.DayOfWeek + 6) % 7
             : (int)anchor.DayOfWeek;
@@ -1132,14 +1152,14 @@ public sealed class MainViewModel : ObservableObject
         return Enumerable.Range(0, 7).Select(offset => FindOrCreateCalendarDay(start.AddDays(offset)));
     }
 
-    private IEnumerable<CalendarDay> GetDayDays()
+    private IEnumerable<CalendarDay> GetDayDays(DateTime? anchorDate = null)
     {
         if (CalendarDays.Count == 0)
         {
             return [];
         }
 
-        return [FindOrCreateCalendarDay((SelectedDay?.Date ?? CurrentMonth).Date)];
+        return [FindOrCreateCalendarDay((anchorDate?.Date ?? SelectedDay?.Date ?? CurrentMonth).Date)];
     }
 
     private CalendarDay FindOrCreateCalendarDay(DateTime date)
@@ -1672,11 +1692,6 @@ public sealed class MainViewModel : ObservableObject
         Status = "Google認証が完了しました。";
     }
 
-    private async Task SyncAsync()
-    {
-        await SynchronizeManuallyAsync();
-    }
-
     private void UpdateSegmentSelection()
     {
         var selectedDayIndex = SelectedDay is null ? -1 : CalendarDays.IndexOf(SelectedDay);
@@ -1782,7 +1797,7 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    private async Task ClearTokensAsync()
+    public async Task ClearTokensAsync()
     {
         await _syncService.ClearTokensAsync();
         Status = "保存済みGoogleトークンを削除しました。";

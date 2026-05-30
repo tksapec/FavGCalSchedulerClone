@@ -40,6 +40,57 @@ public sealed class MainViewModelViewModeTests
     }
 
     [Fact]
+    public async Task GoToTodayAsync_InWeekViewFromDifferentWeek_SelectsTodayAfterVisibleDaysRefresh()
+    {
+        var viewModel = await CreateViewModelAsync();
+        var previousWeek = DateTime.Today.AddDays(-14);
+        viewModel.CurrentViewMode = CalendarViewMode.Week;
+        await viewModel.NavigateToDateAsync(previousWeek);
+        Assert.Equal(previousWeek.Date, viewModel.SelectedDay?.Date);
+
+        await viewModel.GoToTodayAsync();
+
+        Assert.True(viewModel.IsWeekView);
+        Assert.NotNull(viewModel.SelectedDay);
+        Assert.Equal(DateTime.Today, viewModel.SelectedDay.Date);
+        Assert.Equal(7, viewModel.VisibleCalendarDays.Count);
+        Assert.Contains(viewModel.VisibleCalendarDays, day => day.Date == DateTime.Today);
+    }
+
+    [Fact]
+    public async Task GoToTodayAsync_InWeekViewWithMondayStart_UsesWeekContainingToday()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        await repository.SaveSettingsAsync(new AppSettings { WeekStartsOnMonday = true });
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        await viewModel.InitializeAsync();
+        viewModel.CurrentViewMode = CalendarViewMode.Week;
+
+        await viewModel.GoToTodayAsync();
+
+        var expectedStart = DateTime.Today.AddDays(-(((int)DateTime.Today.DayOfWeek + 6) % 7));
+        Assert.Equal(DateTime.Today, viewModel.SelectedDay?.Date);
+        Assert.Equal(expectedStart, viewModel.VisibleCalendarDays.First().Date);
+        Assert.Contains(viewModel.VisibleCalendarDays, day => day.Date == DateTime.Today);
+    }
+
+    [Fact]
+    public async Task NavigateToDateAsync_InWeekView_SelectsTargetAndKeepsWeekVisible()
+    {
+        var viewModel = await CreateViewModelAsync();
+        var target = DateTime.Today.AddMonths(1).AddDays(3);
+        viewModel.CurrentViewMode = CalendarViewMode.Week;
+
+        await viewModel.NavigateToDateAsync(target);
+
+        Assert.Equal(target.Date, viewModel.SelectedDay?.Date);
+        Assert.Equal(7, viewModel.VisibleCalendarDays.Count);
+        Assert.Contains(viewModel.VisibleCalendarDays, day => day.Date == target.Date);
+    }
+
+    [Fact]
     public async Task NavigationCommands_UseWeekAndDayUnits()
     {
         var viewModel = await CreateViewModelAsync();

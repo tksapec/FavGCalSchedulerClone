@@ -9,6 +9,15 @@
         Background="#EDF1F5" Opacity="{Binding WindowOpacity}"
         Loaded="Window_Loaded"
         Closing="Window_Closing">
+    <Window.InputBindings>
+        <KeyBinding Key="F5" Command="{Binding ShowMonthViewCommand}" />
+        <KeyBinding Key="F6" Command="{Binding ShowWeekViewCommand}" />
+        <KeyBinding Key="F7" Command="{Binding ShowDayViewCommand}" />
+        <KeyBinding Key="Home" Command="{Binding TodayCommand}" />
+        <KeyBinding Key="PageUp" Command="{Binding PreviousMonthCommand}" />
+        <KeyBinding Key="PageDown" Command="{Binding NextMonthCommand}" />
+        <KeyBinding Key="F8" Command="{Binding SyncCommand}" />
+    </Window.InputBindings>
     <Window.Resources>
         <SolidColorBrush x:Key="ChromeBrush" Color="#243447" />
         <SolidColorBrush x:Key="ChromeHoverBrush" Color="#31465C" />
@@ -243,10 +252,6 @@
                 <Separator />
                 <MenuItem Header="インポート(_I)" Click="ImportCsvMenu_Click" />
                 <MenuItem Header="エクスポート(_E)" Click="ExportCsvMenu_Click" />
-                <Separator />
-                <MenuItem Header="印刷" Click="PrintMenu_Click" />
-                <MenuItem Header="印刷設定" IsEnabled="False" />
-                <MenuItem Header="印刷プレビュー" Click="PrintPreviewMenu_Click" />
             </MenuItem>
             <MenuItem Header="編集(_E)">
                 <MenuItem Header="スケジュールの追加(_A)" Click="AddScheduleMenu_Click" />
@@ -285,8 +290,6 @@
                 <MenuItem Header="通知一覧..." Click="ReminderHistoryMenu_Click" />
             </MenuItem>
             <MenuItem Header="ヘルプ(_H)">
-                <MenuItem Header="サポートサイト" IsEnabled="False" />
-                <Separator />
                 <MenuItem Header="バージョン情報(_A)..." Click="AboutMenu_Click" />
             </MenuItem>
         </Menu>
@@ -541,6 +544,19 @@
                                     <DataGrid ItemsSource="{Binding TodoEvents}" SelectedItem="{Binding SelectedEvent}"
                                               PreviewMouseRightButtonDown="SidePanelEventsGrid_PreviewMouseRightButtonDown"
                                               MouseDoubleClick="TodoEventsGrid_MouseDoubleClick">
+                                        <DataGrid.RowStyle>
+                                            <Style TargetType="DataGridRow">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsOverdueTodo}" Value="True">
+                                                        <Setter Property="Background" Value="#FDE2E2" />
+                                                    </DataTrigger>
+                                                    <Trigger Property="IsSelected" Value="True">
+                                                        <Setter Property="Background" Value="#2563EB" />
+                                                        <Setter Property="Foreground" Value="#FFFFFF" />
+                                                    </Trigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </DataGrid.RowStyle>
                                         <DataGrid.Columns>
                                             <DataGridTextColumn Header="期限" Binding="{Binding DateDisplayText}" Width="88" />
                                             <DataGridTemplateColumn Header="件名" CellTemplate="{StaticResource ColoredTitleTemplate}" Width="*" />

@@ -31,4 +31,60 @@ public sealed class CalendarEventDisplayTests
 
         Assert.Equal("Confirm", item.CalendarCellDisplayText);
     }
+
+    [Fact]
+    public void IsOverdueTodo_ReturnsTrueForIncompleteTodoBeforeToday()
+    {
+        var item = Todo(DateTime.Today.AddDays(-1), 56);
+
+        Assert.True(item.IsOverdueTodo);
+    }
+
+    [Fact]
+    public void IsOverdueTodo_ReturnsFalseForIncompleteTodoDueToday()
+    {
+        var item = Todo(DateTime.Today, 56);
+
+        Assert.False(item.IsOverdueTodo);
+    }
+
+    [Fact]
+    public void IsOverdueTodo_ReturnsFalseForIncompleteTodoAfterToday()
+    {
+        var item = Todo(DateTime.Today.AddDays(1), 56);
+
+        Assert.False(item.IsOverdueTodo);
+    }
+
+    [Fact]
+    public void IsOverdueTodo_ReturnsFalseForCompletedTodoBeforeToday()
+    {
+        var item = Todo(DateTime.Today.AddDays(-1), 100);
+
+        Assert.False(item.IsOverdueTodo);
+    }
+
+    [Fact]
+    public void IsOverdueTodo_ReturnsFalseForNormalEventBeforeToday()
+    {
+        var item = new CalendarEvent
+        {
+            Title = "Past meeting",
+            IsTodoLike = false,
+            Start = new DateTimeOffset(DateTime.Today.AddDays(-1)),
+            End = new DateTimeOffset(DateTime.Today)
+        };
+
+        Assert.False(item.IsOverdueTodo);
+    }
+
+    private static CalendarEvent Todo(DateTime dueDate, int progress) => new()
+    {
+        Title = "Todo",
+        Description = $"#todoA{progress}%",
+        IsAllDay = true,
+        IsTodoLike = true,
+        Start = new DateTimeOffset(dueDate.Date),
+        End = new DateTimeOffset(dueDate.Date.AddDays(1))
+    };
 }

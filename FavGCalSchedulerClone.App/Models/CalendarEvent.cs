@@ -50,6 +50,7 @@ public sealed class CalendarEvent
     public string TodoProgressText => TodoMetadata?.ProgressText ?? "";
     public string TodoPriorityDisplayText => string.IsNullOrWhiteSpace(TodoPriority) ? "-" : TodoPriority;
     public bool IsTodoDone => TodoMetadata?.IsDone == true;
+    public bool IsOverdueTodo => IsTodoLike && !IsTodoDone && Start.Date < DateTime.Today;
     public bool IsRecurringMaster => !string.IsNullOrWhiteSpace(RecurrenceJson) && !IsRecurrenceException;
     public bool IsRecurringSeriesItem => IsRecurringMaster || IsRecurrenceException || IsGeneratedOccurrence || !string.IsNullOrWhiteSpace(RecurringEventId) || !string.IsNullOrWhiteSpace(RecurringParentId);
 }
