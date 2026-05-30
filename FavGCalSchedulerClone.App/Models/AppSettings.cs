@@ -29,6 +29,9 @@ public sealed class AppSettings
     public bool SyncAfterLocalChange { get; set; }
     public int? AutomaticSyncIntervalMinutes { get; set; }
     public DateTimeOffset? LastAutomaticSyncAt { get; set; }
+    public bool ShowSyncPreviewBeforeManualSync { get; set; }
+    public bool EnableSyncDiagnostics { get; set; }
+    public SyncConflictPolicy SyncConflictPolicy { get; set; } = SyncConflictPolicy.SkipLocalDirty;
 }
 
 public enum WeekdayDisplayType
@@ -36,4 +39,11 @@ public enum WeekdayDisplayType
     EnglishFull,
     EnglishShort,
     JapaneseShort
+}
+
+public enum SyncConflictPolicy
+{
+    SkipLocalDirty,
+    PreferLocal,
+    PreferGoogle
 }

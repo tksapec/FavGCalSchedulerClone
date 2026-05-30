@@ -825,6 +825,28 @@ public sealed class MainViewModel : ObservableObject
         await AuthorizeAsync();
     }
 
+    public async Task<SyncPreview> CreateSyncPreviewAsync()
+    {
+        await SaveOAuthPathAsync();
+        return await _syncService.PreviewAsync(_settings);
+    }
+
+    public async Task<SyncResult?> SynchronizeManuallyAsync()
+    {
+        return await SynchronizeAsync(reportErrors: true);
+    }
+
+    public async Task<SyncDiagnosticsSnapshot> LoadSyncDiagnosticsAsync()
+    {
+        await SaveOAuthPathAsync();
+        return await _syncService.LoadDiagnosticsAsync(_settings);
+    }
+
+    public async Task ClearSyncDiagnosticsAsync()
+    {
+        await _syncService.ClearSyncDiagnosticsAsync();
+    }
+
     public async Task RunAutomaticSyncIfDueAsync()
     {
         if (_settings.AutomaticSyncIntervalMinutes is not int interval
@@ -1652,7 +1674,7 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task SyncAsync()
     {
-        await SynchronizeAsync(reportErrors: true);
+        await SynchronizeManuallyAsync();
     }
 
     private void UpdateSegmentSelection()
@@ -1711,11 +1733,11 @@ public sealed class MainViewModel : ObservableObject
             && File.Exists(_settings.OAuthClientJsonPath);
     }
 
-    private async Task SynchronizeAsync(bool reportErrors)
+    private async Task<SyncResult?> SynchronizeAsync(bool reportErrors)
     {
         if (Interlocked.Exchange(ref _syncInProgress, 1) != 0)
         {
-            return;
+            return null;
         }
 
         try
@@ -1728,7 +1750,7 @@ public sealed class MainViewModel : ObservableObject
                     Status = "先にOAuth client JSONを設定してください。";
                 }
 
-                return;
+                return null;
             }
 
             Status = "Googleカレンダーと同期中...";
@@ -1739,11 +1761,20 @@ public sealed class MainViewModel : ObservableObject
             await ReloadAvailableCalendarsAsync();
             await RefreshCalendarAsync();
             Status = $"同期が完了しました: 送信 {result.Pushed} 件、取得 {result.Pulled} 件。";
+            return result;
+        }
+        catch (Exception ex) when (reportErrors)
+        {
+            Debug.WriteLine(ex);
+            await _syncService.RecordFailedSyncAsync(ex.Message, _settings.EnableSyncDiagnostics);
+            throw;
         }
         catch (Exception ex) when (!reportErrors)
         {
             Debug.WriteLine(ex);
+            await _syncService.RecordFailedSyncAsync(ex.Message, _settings.EnableSyncDiagnostics);
             Status = $"自動同期に失敗しました。未同期の変更は保持されています: {ex.Message}";
+            return null;
         }
         finally
         {

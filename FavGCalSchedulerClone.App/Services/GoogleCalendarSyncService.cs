@@ -1,17 +1,20 @@
 using System.Diagnostics;
+using System.Text.Json;
 using FavGCalSchedulerClone.App.Models;
 using Google;
 using Google.Apis.Auth.OAuth2;
 using Google.Apis.Calendar.v3;
 using Google.Apis.Calendar.v3.Data;
 using Google.Apis.Services;
-using System.Text.Json;
 
 namespace FavGCalSchedulerClone.App.Services;
 
 public sealed class GoogleCalendarSyncService
 {
     private const string EventColorPaletteSettingKey = "google-event-color-palette";
+    private const string SyncLastResultKey = "sync:last-result";
+    private const string SyncHistoryKey = "sync:history";
+    private const int MaxSyncHistoryCount = 20;
     private readonly CalendarRepository _repository;
 
     public GoogleCalendarSyncService(CalendarRepository repository)
@@ -98,31 +101,52 @@ public sealed class GoogleCalendarSyncService
 
     public async Task<SyncResult> SyncAsync(AppSettings settings, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(settings.OAuthClientJsonPath) || !File.Exists(settings.OAuthClientJsonPath))
-        {
-            throw new InvalidOperationException("OAuth client JSONを設定してください。");
-        }
+        var startedAt = DateTimeOffset.Now;
+        EnsureOAuthSettings(settings);
 
-        var service = await CreateServiceAsync(settings.OAuthClientJsonPath, cancellationToken);
+        var service = await CreateServiceAsync(settings.OAuthClientJsonPath!, cancellationToken);
         var pushed = 0;
         var pulled = 0;
+        var skipped = 0;
+        var conflicts = 0;
+        var failed = 0;
+        var deleted = 0;
+        var recreated = 0;
+
         foreach (var calendarId in ResolveTargetCalendarIds(settings))
         {
-            pushed += await PushDirtyEventsAsync(service, calendarId, cancellationToken);
-            pulled += await PullRemoteEventsAsync(service, calendarId, cancellationToken);
+            var push = await PushDirtyEventsAsync(service, calendarId, cancellationToken);
+            pushed += push.Pushed;
+            failed += push.Failed;
+            deleted += push.Deleted;
+            recreated += push.Recreated;
+
+            var pull = await PullRemoteEventsAsync(service, calendarId, settings.SyncConflictPolicy, cancellationToken);
+            pulled += pull.Pulled;
+            skipped += pull.Skipped;
+            conflicts += pull.Conflicts;
         }
 
-        return new SyncResult(pushed, pulled);
+        var result = new SyncResult(
+            pushed,
+            pulled,
+            skipped,
+            conflicts,
+            failed,
+            deleted,
+            recreated,
+            startedAt,
+            DateTimeOffset.Now,
+            $"pushed={pushed}, pulled={pulled}, skipped={skipped}, conflicts={conflicts}, failed={failed}");
+        await SaveSyncResultAsync(result, settings.EnableSyncDiagnostics);
+        return result;
     }
 
     public async Task<int> PullAsync(AppSettings settings, IEnumerable<string>? calendarIds = null, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(settings.OAuthClientJsonPath) || !File.Exists(settings.OAuthClientJsonPath))
-        {
-            throw new InvalidOperationException("OAuth client JSONを設定してください。");
-        }
+        EnsureOAuthSettings(settings);
 
-        var service = await CreateServiceAsync(settings.OAuthClientJsonPath, cancellationToken);
+        var service = await CreateServiceAsync(settings.OAuthClientJsonPath!, cancellationToken);
         var targets = calendarIds?
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Distinct(StringComparer.Ordinal)
@@ -135,10 +159,104 @@ public sealed class GoogleCalendarSyncService
         var pulled = 0;
         foreach (var calendarId in targets)
         {
-            pulled += await PullRemoteEventsAsync(service, calendarId, cancellationToken);
+            pulled += (await PullRemoteEventsAsync(service, calendarId, settings.SyncConflictPolicy, cancellationToken)).Pulled;
         }
 
         return pulled;
+    }
+
+    public async Task<SyncPreview> PreviewAsync(AppSettings settings, CancellationToken cancellationToken = default)
+    {
+        EnsureOAuthSettings(settings);
+
+        var service = await CreateServiceAsync(settings.OAuthClientJsonPath!, cancellationToken);
+        var pushItems = new List<SyncPreviewItem>();
+        var pullItems = new List<SyncPreviewItem>();
+        var deleteItems = new List<SyncPreviewItem>();
+        var conflictItems = new List<SyncPreviewItem>();
+        var errorItems = new List<SyncPreviewItem>();
+        var calendars = new List<SyncCalendarDiagnostic>();
+        var dirtyEvents = await _repository.LoadDirtyEventsAsync();
+
+        foreach (var calendarId in ResolveTargetCalendarIds(settings))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var calendarDirty = dirtyEvents.Where(e => e.CalendarId == calendarId).OrderBy(e => e.UpdatedAt).ToArray();
+            var syncToken = await _repository.GetSyncTokenAsync(calendarId);
+            calendars.Add(new SyncCalendarDiagnostic(calendarId, !string.IsNullOrWhiteSpace(syncToken), calendarDirty.Length));
+
+            foreach (var localEvent in calendarDirty)
+            {
+                var item = ToPreviewItem(calendarId, localEvent, localEvent.IsDeleted ? "delete" : "push", localEvent.IsDeleted ? "Googleから削除予定" : "Googleへ送信予定");
+                if (localEvent.IsDeleted)
+                {
+                    deleteItems.Add(item);
+                }
+                else
+                {
+                    pushItems.Add(item);
+                }
+            }
+
+            try
+            {
+                foreach (var googleEvent in await LoadRemoteChangesForPreviewAsync(service, calendarId, syncToken, cancellationToken))
+                {
+                    var remoteEvent = GoogleEventMapper.FromGoogleEvent(googleEvent, calendarId);
+                    var item = ToPreviewItem(calendarId, remoteEvent, "pull", "Googleから取得予定");
+                    var local = await _repository.FindEventByGoogleEventIdAsync(calendarId, googleEvent.Id);
+                    if (local?.IsDirty == true)
+                    {
+                        conflictItems.Add(item with { Detail = $"ローカル未同期変更とGoogle変更が競合: {settings.SyncConflictPolicy}" });
+                    }
+                    else if (remoteEvent.IsDeleted)
+                    {
+                        deleteItems.Add(item with { Kind = "remote-delete", Detail = "Google側削除を反映予定" });
+                    }
+                    else
+                    {
+                        pullItems.Add(item);
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                errorItems.Add(new SyncPreviewItem(calendarId, null, null, "Preview error", null, "error", ex.Message));
+            }
+        }
+
+        return new SyncPreview(DateTimeOffset.Now, pushItems, pullItems, deleteItems, conflictItems, errorItems, calendars);
+    }
+
+    public async Task<SyncDiagnosticsSnapshot> LoadDiagnosticsAsync(AppSettings settings)
+    {
+        var history = await LoadSyncHistoryAsync();
+        var dirtyEvents = await _repository.LoadDirtyEventsAsync();
+        var calendars = new List<SyncCalendarDiagnostic>();
+        foreach (var calendarId in ResolveTargetCalendarIds(settings))
+        {
+            var syncToken = await _repository.GetSyncTokenAsync(calendarId);
+            calendars.Add(new SyncCalendarDiagnostic(
+                calendarId,
+                !string.IsNullOrWhiteSpace(syncToken),
+                dirtyEvents.Count(item => item.CalendarId == calendarId)));
+        }
+
+        return new SyncDiagnosticsSnapshot(history.FirstOrDefault(), history, calendars, dirtyEvents.Count);
+    }
+
+    public async Task<SyncResult> RecordFailedSyncAsync(string message, bool keepHistory)
+    {
+        var result = new SyncResult(0, 0, 0, 0, 1, 0, 0, DateTimeOffset.Now, DateTimeOffset.Now, message);
+        await SaveSyncResultAsync(result, keepHistory);
+        return result;
+    }
+
+    public Task ClearSyncDiagnosticsAsync()
+    {
+        return Task.WhenAll(
+            _repository.SaveSettingValueAsync(SyncLastResultKey, null),
+            _repository.SaveSettingValueAsync(SyncHistoryKey, null));
     }
 
     public async Task<IReadOnlySet<string>> FindExistingEventIdsAsync(
@@ -168,6 +286,26 @@ public sealed class GoogleCalendarSyncService
         return existing;
     }
 
+    internal static GoogleNotFoundSyncAction ResolveNotFoundAction(CalendarEvent localEvent)
+    {
+        return localEvent.IsDeleted
+            ? GoogleNotFoundSyncAction.MarkLocalSynced
+            : GoogleNotFoundSyncAction.RecreateRemote;
+    }
+
+    internal static bool ShouldApplyRemoteChange(CalendarEvent? existingLocal, SyncConflictPolicy conflictPolicy)
+    {
+        return existingLocal?.IsDirty != true || conflictPolicy == SyncConflictPolicy.PreferGoogle;
+    }
+
+    private static void EnsureOAuthSettings(AppSettings settings)
+    {
+        if (string.IsNullOrWhiteSpace(settings.OAuthClientJsonPath) || !File.Exists(settings.OAuthClientJsonPath))
+        {
+            throw new InvalidOperationException("OAuth client JSONを設定してください。");
+        }
+    }
+
     private static IReadOnlyList<string> ResolveTargetCalendarIds(AppSettings settings)
     {
         var ids = settings.VisibleCalendarIds
@@ -183,48 +321,43 @@ public sealed class GoogleCalendarSyncService
         return [string.IsNullOrWhiteSpace(settings.ActiveCalendarId) ? GoogleCalendarDefaults.PrimaryCalendarId : settings.ActiveCalendarId];
     }
 
-    private async Task<int> PushDirtyEventsAsync(CalendarService service, string calendarId, CancellationToken cancellationToken)
+    private async Task<SyncPushSummary> PushDirtyEventsAsync(CalendarService service, string calendarId, CancellationToken cancellationToken)
     {
         var dirtyEvents = (await _repository.LoadDirtyEventsAsync())
             .Where(e => e.CalendarId == calendarId)
             .ToArray();
 
-        var recurringMasters = dirtyEvents.Where(item => item.IsRecurringMaster).OrderBy(item => item.UpdatedAt).ToArray();
-        var standaloneEvents = dirtyEvents.Where(item => !item.IsRecurringMaster && !item.IsRecurrenceException).OrderBy(item => item.UpdatedAt).ToArray();
-        var recurrenceExceptions = dirtyEvents.Where(item => item.IsRecurrenceException).OrderBy(item => item.UpdatedAt).ToArray();
+        var ordered = dirtyEvents
+            .OrderByDescending(item => item.IsRecurringMaster)
+            .ThenBy(item => item.IsRecurrenceException)
+            .ThenBy(item => item.UpdatedAt)
+            .ToArray();
         var pushed = 0;
+        var failed = 0;
+        var deleted = 0;
+        var recreated = 0;
 
-        foreach (var localEvent in recurringMasters)
+        foreach (var localEvent in ordered)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (await TryPushEventAsync(() => PushNormalEventAsync(service, calendarId, localEvent, cancellationToken)))
+            var outcome = await TryPushEventAsync(() => localEvent.IsRecurrenceException
+                ? PushRecurrenceExceptionAsync(service, calendarId, localEvent, cancellationToken)
+                : PushNormalEventAsync(service, calendarId, localEvent, cancellationToken));
+            if (!outcome.Success)
             {
-                pushed++;
+                failed++;
+                continue;
             }
+
+            pushed++;
+            deleted += outcome.Deleted ? 1 : 0;
+            recreated += outcome.Recreated ? 1 : 0;
         }
 
-        foreach (var localEvent in standaloneEvents)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (await TryPushEventAsync(() => PushNormalEventAsync(service, calendarId, localEvent, cancellationToken)))
-            {
-                pushed++;
-            }
-        }
-
-        foreach (var localEvent in recurrenceExceptions)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (await TryPushEventAsync(() => PushRecurrenceExceptionAsync(service, calendarId, localEvent, cancellationToken)))
-            {
-                pushed++;
-            }
-        }
-
-        return pushed;
+        return new SyncPushSummary(pushed, failed, deleted, recreated);
     }
 
-    private static async Task<bool> TryPushEventAsync(Func<Task<bool>> push)
+    private static async Task<SyncPushOutcome> TryPushEventAsync(Func<Task<SyncPushOutcome>> push)
     {
         try
         {
@@ -237,11 +370,11 @@ public sealed class GoogleCalendarSyncService
         catch (Exception ex)
         {
             Debug.WriteLine(ex);
-            return false;
+            return SyncPushOutcome.Failed;
         }
     }
 
-    private async Task<bool> PushNormalEventAsync(CalendarService service, string calendarId, CalendarEvent localEvent, CancellationToken cancellationToken)
+    private async Task<SyncPushOutcome> PushNormalEventAsync(CalendarService service, string calendarId, CalendarEvent localEvent, CancellationToken cancellationToken)
     {
         if (localEvent.IsDeleted)
         {
@@ -254,12 +387,12 @@ public sealed class GoogleCalendarSyncService
                 catch (GoogleApiException ex) when (IsNotFound(ex))
                 {
                     await _repository.MarkSyncedAsync(localEvent);
-                    return true;
+                    return SyncPushOutcome.DeletedEvent;
                 }
             }
 
             await _repository.MarkSyncedAsync(localEvent);
-            return true;
+            return SyncPushOutcome.DeletedEvent;
         }
 
         var googleEvent = GoogleEventMapper.ToGoogleEvent(localEvent);
@@ -267,30 +400,29 @@ public sealed class GoogleCalendarSyncService
         {
             var inserted = await service.Events.Insert(googleEvent, calendarId).ExecuteAsync(cancellationToken);
             await _repository.MarkSyncedAsync(localEvent, inserted.Id);
-        }
-        else
-        {
-            try
-            {
-                await service.Events.Update(googleEvent, calendarId, localEvent.GoogleEventId).ExecuteAsync(cancellationToken);
-                await _repository.MarkSyncedAsync(localEvent);
-            }
-            catch (GoogleApiException ex) when (IsNotFound(ex))
-            {
-                var inserted = await service.Events.Insert(googleEvent, calendarId).ExecuteAsync(cancellationToken);
-                await _repository.MarkSyncedAsync(localEvent, inserted.Id);
-            }
+            return SyncPushOutcome.Pushed;
         }
 
-        return true;
+        try
+        {
+            await service.Events.Update(googleEvent, calendarId, localEvent.GoogleEventId).ExecuteAsync(cancellationToken);
+            await _repository.MarkSyncedAsync(localEvent);
+            return SyncPushOutcome.Pushed;
+        }
+        catch (GoogleApiException ex) when (IsNotFound(ex))
+        {
+            var inserted = await service.Events.Insert(googleEvent, calendarId).ExecuteAsync(cancellationToken);
+            await _repository.MarkSyncedAsync(localEvent, inserted.Id);
+            return SyncPushOutcome.RecreatedEvent;
+        }
     }
 
-    private async Task<bool> PushRecurrenceExceptionAsync(CalendarService service, string calendarId, CalendarEvent localEvent, CancellationToken cancellationToken)
+    private async Task<SyncPushOutcome> PushRecurrenceExceptionAsync(CalendarService service, string calendarId, CalendarEvent localEvent, CancellationToken cancellationToken)
     {
         var recurringEventId = await ResolveRecurringEventIdAsync(localEvent);
         if (string.IsNullOrWhiteSpace(recurringEventId))
         {
-            return false;
+            return SyncPushOutcome.Failed;
         }
 
         var remoteEventId = localEvent.GoogleEventId;
@@ -301,7 +433,7 @@ public sealed class GoogleCalendarSyncService
 
         if (string.IsNullOrWhiteSpace(remoteEventId))
         {
-            return false;
+            return SyncPushOutcome.Failed;
         }
 
         if (localEvent.IsDeleted)
@@ -313,11 +445,11 @@ public sealed class GoogleCalendarSyncService
             catch (GoogleApiException ex) when (IsNotFound(ex))
             {
                 await _repository.MarkSyncedAsync(localEvent, remoteEventId);
-                return true;
+                return SyncPushOutcome.DeletedEvent;
             }
 
             await _repository.MarkSyncedAsync(localEvent, remoteEventId);
-            return true;
+            return SyncPushOutcome.DeletedEvent;
         }
 
         try
@@ -331,21 +463,14 @@ public sealed class GoogleCalendarSyncService
             remoteEvent.End = ToEventDateTime(localEvent.End, localEvent.IsAllDay);
             await service.Events.Update(remoteEvent, calendarId, remoteEventId).ExecuteAsync(cancellationToken);
             await _repository.MarkSyncedAsync(localEvent, remoteEventId);
+            return SyncPushOutcome.Pushed;
         }
         catch (GoogleApiException ex) when (IsNotFound(ex))
         {
             var inserted = await service.Events.Insert(GoogleEventMapper.ToGoogleEvent(localEvent), calendarId).ExecuteAsync(cancellationToken);
             await _repository.MarkSyncedAsync(localEvent, inserted.Id);
+            return SyncPushOutcome.RecreatedEvent;
         }
-
-        return true;
-    }
-
-    public static GoogleNotFoundSyncAction ResolveNotFoundAction(CalendarEvent localEvent)
-    {
-        return localEvent.IsDeleted
-            ? GoogleNotFoundSyncAction.MarkLocalSynced
-            : GoogleNotFoundSyncAction.RecreateRemote;
     }
 
     private static bool IsNotFound(GoogleApiException ex)
@@ -388,10 +513,12 @@ public sealed class GoogleCalendarSyncService
             ?.Id;
     }
 
-    private async Task<int> PullRemoteEventsAsync(CalendarService service, string calendarId, CancellationToken cancellationToken)
+    private async Task<SyncPullSummary> PullRemoteEventsAsync(CalendarService service, string calendarId, SyncConflictPolicy conflictPolicy, CancellationToken cancellationToken)
     {
         var syncToken = await _repository.GetSyncTokenAsync(calendarId);
         var pulled = 0;
+        var skipped = 0;
+        var conflicts = 0;
 
         try
         {
@@ -415,6 +542,14 @@ public sealed class GoogleCalendarSyncService
                 var page = await request.ExecuteAsync(cancellationToken);
                 foreach (var googleEvent in page.Items ?? [])
                 {
+                    var localEvent = await _repository.FindEventByGoogleEventIdAsync(calendarId, googleEvent.Id);
+                    if (!ShouldApplyRemoteChange(localEvent, conflictPolicy))
+                    {
+                        conflicts++;
+                        skipped++;
+                        continue;
+                    }
+
                     await _repository.UpsertSyncedEventAsync(GoogleEventMapper.FromGoogleEvent(googleEvent, calendarId));
                     pulled++;
                 }
@@ -432,10 +567,10 @@ public sealed class GoogleCalendarSyncService
         catch (GoogleApiException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.Gone)
         {
             await _repository.SaveSyncTokenAsync(calendarId, null);
-            return await PullRemoteEventsAsync(service, calendarId, cancellationToken);
+            return await PullRemoteEventsAsync(service, calendarId, conflictPolicy, cancellationToken);
         }
 
-        return pulled;
+        return new SyncPullSummary(pulled, skipped, conflicts);
     }
 
     private static bool MatchesOriginalStart(Event googleEvent, DateTimeOffset expected, bool isAllDay)
@@ -467,6 +602,119 @@ public sealed class GoogleCalendarSyncService
         };
     }
 
+    private static SyncPreviewItem ToPreviewItem(string calendarId, CalendarEvent calendarEvent, string kind, string detail)
+    {
+        return new SyncPreviewItem(
+            calendarId,
+            calendarEvent.Id,
+            calendarEvent.GoogleEventId,
+            string.IsNullOrWhiteSpace(calendarEvent.Title) ? "(no title)" : calendarEvent.Title,
+            calendarEvent.Start,
+            kind,
+            detail);
+    }
+
+    private static async Task<IReadOnlyList<Event>> LoadRemoteChangesForPreviewAsync(
+        CalendarService service,
+        string calendarId,
+        string? syncToken,
+        CancellationToken cancellationToken)
+    {
+        var events = new List<Event>();
+        string? pageToken = null;
+        do
+        {
+            var request = service.Events.List(calendarId);
+            request.ShowDeleted = true;
+            request.SingleEvents = false;
+            request.MaxResults = 2500;
+            request.PageToken = pageToken;
+            if (string.IsNullOrWhiteSpace(syncToken))
+            {
+                request.TimeMinDateTimeOffset = DateTimeOffset.Now.AddYears(-5);
+            }
+            else
+            {
+                request.SyncToken = syncToken;
+            }
+
+            var page = await request.ExecuteAsync(cancellationToken);
+            events.AddRange(page.Items ?? []);
+            pageToken = page.NextPageToken;
+        }
+        while (!string.IsNullOrWhiteSpace(pageToken));
+
+        return events;
+    }
+
+    private async Task SaveSyncResultAsync(SyncResult result, bool keepHistory)
+    {
+        await _repository.SaveSettingValueAsync(SyncLastResultKey, JsonSerializer.Serialize(result));
+        if (!keepHistory)
+        {
+            return;
+        }
+
+        var history = (await LoadStoredSyncHistoryAsync()).ToList();
+        history.Insert(0, result);
+        await _repository.SaveSettingValueAsync(SyncHistoryKey, JsonSerializer.Serialize(history.Take(MaxSyncHistoryCount)));
+    }
+
+    private async Task<IReadOnlyList<SyncResult>> LoadSyncHistoryAsync()
+    {
+        var lastJson = await _repository.LoadSettingValueAsync(SyncLastResultKey);
+        var history = (await LoadStoredSyncHistoryAsync()).ToList();
+        var last = DeserializeSyncResult(lastJson);
+        if (last is not null && history.All(item => item.StartedAt != last.StartedAt))
+        {
+            history.Insert(0, last);
+        }
+
+        return history
+            .OrderByDescending(item => item.StartedAt)
+            .Take(MaxSyncHistoryCount)
+            .ToArray();
+    }
+
+    private async Task<IReadOnlyList<SyncResult>> LoadStoredSyncHistoryAsync()
+    {
+        return DeserializeSyncResults(await _repository.LoadSettingValueAsync(SyncHistoryKey));
+    }
+
+    private static IReadOnlyList<SyncResult> DeserializeSyncResults(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return [];
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<SyncResult>>(json) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static SyncResult? DeserializeSyncResult(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<SyncResult>(json);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     private static async Task<CalendarService> CreateServiceAsync(string clientJsonPath, CancellationToken cancellationToken)
     {
         await using var stream = File.OpenRead(clientJsonPath);
@@ -486,9 +734,18 @@ public sealed class GoogleCalendarSyncService
     }
 }
 
-public sealed record SyncResult(int Pushed, int Pulled);
 public enum GoogleNotFoundSyncAction
 {
     MarkLocalSynced,
     RecreateRemote
+}
+
+internal sealed record SyncPushSummary(int Pushed, int Failed, int Deleted, int Recreated);
+internal sealed record SyncPullSummary(int Pulled, int Skipped, int Conflicts);
+internal sealed record SyncPushOutcome(bool Success, bool Deleted, bool Recreated)
+{
+    public static SyncPushOutcome Pushed { get; } = new(true, false, false);
+    public static SyncPushOutcome Failed { get; } = new(false, false, false);
+    public static SyncPushOutcome DeletedEvent { get; } = new(true, true, false);
+    public static SyncPushOutcome RecreatedEvent { get; } = new(true, false, true);
 }

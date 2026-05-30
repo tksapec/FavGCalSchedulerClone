@@ -31,6 +31,9 @@ public sealed class CalendarRepositoryTests
         Assert.Equal(2, settings.SideListFontSizeIndex);
         Assert.Equal(255, settings.WindowOpacity);
         Assert.False(settings.SyncAfterLocalChange);
+        Assert.False(settings.ShowSyncPreviewBeforeManualSync);
+        Assert.False(settings.EnableSyncDiagnostics);
+        Assert.Equal(SyncConflictPolicy.SkipLocalDirty, settings.SyncConflictPolicy);
     }
 
     [Fact]
@@ -67,7 +70,10 @@ public sealed class CalendarRepositoryTests
             ReminderSoundFilePath = "sound.wav",
             ReminderSoundVolume = 40,
             SyncAfterLocalChange = true,
-            AutomaticSyncIntervalMinutes = 120
+            AutomaticSyncIntervalMinutes = 120,
+            ShowSyncPreviewBeforeManualSync = true,
+            EnableSyncDiagnostics = true,
+            SyncConflictPolicy = SyncConflictPolicy.PreferGoogle
         });
 
         var settings = await repository.LoadSettingsAsync();
@@ -97,6 +103,9 @@ public sealed class CalendarRepositoryTests
         Assert.Equal(40, settings.ReminderSoundVolume);
         Assert.True(settings.SyncAfterLocalChange);
         Assert.Equal(120, settings.AutomaticSyncIntervalMinutes);
+        Assert.True(settings.ShowSyncPreviewBeforeManualSync);
+        Assert.True(settings.EnableSyncDiagnostics);
+        Assert.Equal(SyncConflictPolicy.PreferGoogle, settings.SyncConflictPolicy);
     }
 
     [Fact]

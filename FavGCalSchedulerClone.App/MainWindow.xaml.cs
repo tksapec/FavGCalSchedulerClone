@@ -586,6 +586,42 @@ public partial class MainWindow : Window
         await ShowReminderHistoryDialogAsync();
     }
 
+    private async void SyncMenu_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var settings = _viewModel.CreateSettingsSnapshot();
+            if (settings.ShowSyncPreviewBeforeManualSync)
+            {
+                var preview = await _viewModel.CreateSyncPreviewAsync();
+                if (ShowSyncPreviewDialog(preview) != true)
+                {
+                    return;
+                }
+            }
+
+            var result = await _viewModel.SynchronizeManuallyAsync();
+            if (result is not null)
+            {
+                MessageBox.Show(
+                    this,
+                    $"同期が完了しました。\n\n送信: {result.Pushed} 件\n取得: {result.Pulled} 件\nスキップ: {result.Skipped} 件\n競合: {result.Conflicts} 件\n失敗: {result.Failed} 件",
+                    "Google同期",
+                    MessageBoxButton.OK,
+                    result.Failed == 0 && result.Conflicts == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Google同期エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private async void SyncDiagnosticsMenu_Click(object sender, RoutedEventArgs e)
+    {
+        await ShowSyncDiagnosticsDialogAsync();
+    }
+
     private async void DeleteEventButton_Click(object sender, RoutedEventArgs e)
     {
         await DeleteSelectedEventWithOptionalConfirmationAsync();
@@ -1356,6 +1392,111 @@ public partial class MainWindow : Window
         window.ShowDialog();
     }
 
+    private bool? ShowSyncPreviewDialog(SyncPreview preview)
+    {
+        var window = CreateOwnedDialog("Google同期プレビュー", 780, 520);
+        var panel = new DockPanel { Margin = new Thickness(12), LastChildFill = true };
+        window.Content = panel;
+
+        var summary = new TextBlock
+        {
+            Text = $"送信 {preview.PushCount} 件 / 取得 {preview.PullCount} 件 / 削除 {preview.DeleteCount} 件 / 競合 {preview.ConflictCount} 件 / エラー {preview.ErrorCount} 件",
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 0, 0, 8)
+        };
+        DockPanel.SetDock(summary, Dock.Top);
+        panel.Children.Add(summary);
+
+        var buttons = DialogButtons(window, "同期実行", "キャンセル");
+        DockPanel.SetDock(buttons, Dock.Bottom);
+        panel.Children.Add(buttons);
+
+        var items = new ObservableCollection<SyncPreviewItem>(
+            preview.PushItems
+                .Concat(preview.PullItems)
+                .Concat(preview.DeleteItems)
+                .Concat(preview.ConflictItems)
+                .Concat(preview.ErrorItems));
+        var grid = new DataGrid
+        {
+            ItemsSource = items,
+            AutoGenerateColumns = false,
+            CanUserAddRows = false,
+            IsReadOnly = true,
+            HeadersVisibility = DataGridHeadersVisibility.Column,
+            RowHeight = 24
+        };
+        grid.Columns.Add(new DataGridTextColumn { Header = "種別", Binding = new Binding(nameof(SyncPreviewItem.Kind)), Width = 90 });
+        grid.Columns.Add(new DataGridTextColumn { Header = "カレンダー", Binding = new Binding(nameof(SyncPreviewItem.CalendarId)), Width = 120 });
+        grid.Columns.Add(new DataGridTextColumn { Header = "開始", Binding = new Binding(nameof(SyncPreviewItem.Start)), Width = 150 });
+        grid.Columns.Add(new DataGridTextColumn { Header = "件名", Binding = new Binding(nameof(SyncPreviewItem.Title)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
+        grid.Columns.Add(new DataGridTextColumn { Header = "詳細", Binding = new Binding(nameof(SyncPreviewItem.Detail)), Width = 220 });
+        panel.Children.Add(grid);
+
+        return window.ShowDialog();
+    }
+
+    private async Task ShowSyncDiagnosticsDialogAsync()
+    {
+        var diagnostics = await _viewModel.LoadSyncDiagnosticsAsync();
+        var window = CreateOwnedDialog("Google同期診断", 820, 540);
+        var panel = new DockPanel { Margin = new Thickness(12), LastChildFill = true };
+        window.Content = panel;
+
+        var last = diagnostics.LastResult;
+        var summaryText = last is null
+            ? $"未同期変更: {diagnostics.DirtyCount} 件\n最終同期結果はありません。"
+            : $"未同期変更: {diagnostics.DirtyCount} 件\n最終同期: {last.FinishedAt:yyyy/MM/dd HH:mm:ss} / 送信 {last.Pushed} / 取得 {last.Pulled} / 競合 {last.Conflicts} / 失敗 {last.Failed}";
+        var summary = new TextBlock { Text = summaryText, Margin = new Thickness(0, 0, 0, 8), FontWeight = FontWeights.SemiBold };
+        DockPanel.SetDock(summary, Dock.Top);
+        panel.Children.Add(summary);
+
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0) };
+        var clear = new Button { Content = "ログ削除", MinWidth = 96, Height = 28, Margin = new Thickness(0, 0, 8, 0) };
+        var close = new Button { Content = "閉じる", MinWidth = 96, Height = 28 };
+        clear.Click += async (_, _) =>
+        {
+            await _viewModel.ClearSyncDiagnosticsAsync();
+            window.Close();
+        };
+        close.Click += (_, _) => window.Close();
+        buttons.Children.Add(clear);
+        buttons.Children.Add(close);
+        DockPanel.SetDock(buttons, Dock.Bottom);
+        panel.Children.Add(buttons);
+
+        var tabs = new TabControl();
+        var calendarGrid = new DataGrid
+        {
+            ItemsSource = new ObservableCollection<SyncCalendarDiagnostic>(diagnostics.Calendars),
+            AutoGenerateColumns = false,
+            CanUserAddRows = false,
+            IsReadOnly = true
+        };
+        calendarGrid.Columns.Add(new DataGridTextColumn { Header = "カレンダー", Binding = new Binding(nameof(SyncCalendarDiagnostic.CalendarId)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
+        calendarGrid.Columns.Add(new DataGridCheckBoxColumn { Header = "syncToken", Binding = new Binding(nameof(SyncCalendarDiagnostic.HasSyncToken)), Width = 90 });
+        calendarGrid.Columns.Add(new DataGridTextColumn { Header = "未同期", Binding = new Binding(nameof(SyncCalendarDiagnostic.DirtyCount)), Width = 80 });
+        tabs.Items.Add(new TabItem { Header = "カレンダー", Content = calendarGrid });
+
+        var historyGrid = new DataGrid
+        {
+            ItemsSource = new ObservableCollection<SyncResult>(diagnostics.History),
+            AutoGenerateColumns = false,
+            CanUserAddRows = false,
+            IsReadOnly = true
+        };
+        historyGrid.Columns.Add(new DataGridTextColumn { Header = "終了", Binding = new Binding(nameof(SyncResult.FinishedAt)), Width = 160 });
+        historyGrid.Columns.Add(new DataGridTextColumn { Header = "送信", Binding = new Binding(nameof(SyncResult.Pushed)), Width = 60 });
+        historyGrid.Columns.Add(new DataGridTextColumn { Header = "取得", Binding = new Binding(nameof(SyncResult.Pulled)), Width = 60 });
+        historyGrid.Columns.Add(new DataGridTextColumn { Header = "競合", Binding = new Binding(nameof(SyncResult.Conflicts)), Width = 60 });
+        historyGrid.Columns.Add(new DataGridTextColumn { Header = "失敗", Binding = new Binding(nameof(SyncResult.Failed)), Width = 60 });
+        historyGrid.Columns.Add(new DataGridTextColumn { Header = "詳細", Binding = new Binding(nameof(SyncResult.Message)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
+        tabs.Items.Add(new TabItem { Header = "ログ", Content = historyGrid });
+        panel.Children.Add(tabs);
+
+        window.ShowDialog();
+    }
+
     private async Task OpenReminderHistoryItemAsync(ReminderHistoryItem item)
     {
         if (WindowState == WindowState.Minimized)
@@ -1501,9 +1642,16 @@ public partial class MainWindow : Window
         tabs.Items.Add(Tab("GoogleAccount設定", accountPage));
 
         var syncPage = Page();
+        var syncPreview = new CheckBox { Content = "手動同期前にプレビューを表示する", IsChecked = settings.ShowSyncPreviewBeforeManualSync, Margin = new Thickness(0, 8, 0, 8) };
+        var syncDiagnostics = new CheckBox { Content = "同期診断ログを保存する", IsChecked = settings.EnableSyncDiagnostics, Margin = new Thickness(0, 0, 0, 12) };
+        var conflictPolicy = Options(Enum.GetValues<SyncConflictPolicy>().Cast<object>(), settings.SyncConflictPolicy);
         var syncAfterChange = new CheckBox { Content = "スケジュールの追加／編集／削除時にGoogleカレンダーと同期を行う", IsChecked = settings.SyncAfterLocalChange, Margin = new Thickness(0, 8, 0, 18) };
         var syncInterval = Options(new object[] { "自動同期しない", "30分", "1時間", "2時間", "6時間" }, settings.AutomaticSyncIntervalMinutes switch { 30 => "30分", 60 => "1時間", 120 => "2時間", 360 => "6時間", _ => "自動同期しない" });
         syncPage.Children.Add(syncAfterChange);
+        syncPage.Children.Add(syncPreview);
+        syncPage.Children.Add(syncDiagnostics);
+        syncPage.Children.Add(new TextBlock { Text = "競合時の扱い" });
+        syncPage.Children.Add(conflictPolicy);
         syncPage.Children.Add(new TextBlock { Text = "スケジュール表示中の自動同期間隔" });
         syncPage.Children.Add(syncInterval);
         tabs.Items.Add(Tab("Googleカレンダー設定", syncPage));
@@ -1541,6 +1689,9 @@ public partial class MainWindow : Window
         settings.UseWindowsToastNotifications = toast.IsChecked == true;
         settings.OAuthClientJsonPath = string.IsNullOrWhiteSpace(oauthPath.Text) ? null : oauthPath.Text.Trim();
         settings.SyncAfterLocalChange = syncAfterChange.IsChecked == true;
+        settings.ShowSyncPreviewBeforeManualSync = syncPreview.IsChecked == true;
+        settings.EnableSyncDiagnostics = syncDiagnostics.IsChecked == true;
+        settings.SyncConflictPolicy = conflictPolicy.SelectedItem is SyncConflictPolicy policy ? policy : SyncConflictPolicy.SkipLocalDirty;
         settings.AutomaticSyncIntervalMinutes = syncInterval.SelectedIndex switch { 1 => 30, 2 => 60, 3 => 120, 4 => 360, _ => null };
         await _viewModel.SetOAuthClientJsonPathAsync(oauthPath.Text);
         await _viewModel.SaveApplicationSettingsAsync(settings);

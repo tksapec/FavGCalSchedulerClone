@@ -274,7 +274,8 @@
                 <MenuItem Header="Google認証" Command="{Binding AuthorizeCommand}" />
                 <MenuItem Header="トークン削除" Command="{Binding ClearTokensCommand}" />
                 <Separator />
-                <MenuItem Header="同期する" InputGestureText="F8" Command="{Binding SyncCommand}" />
+                <MenuItem Header="同期する" InputGestureText="F8" Click="SyncMenu_Click" />
+                <MenuItem Header="同期診断..." Click="SyncDiagnosticsMenu_Click" />
                 <MenuItem Header="カレンダー一覧を更新" Command="{Binding ReloadCalendarListCommand}" />
                 <Separator />
                 <MenuItem Header="表示カレンダー" ItemsSource="{Binding AvailableCalendars}" ItemContainerStyle="{StaticResource CalendarMenuItemStyle}" />
