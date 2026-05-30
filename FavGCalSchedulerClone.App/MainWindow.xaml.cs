@@ -9,6 +9,7 @@ using System.Windows.Threading;
 using FavGCalSchedulerClone.App.Models;
 using FavGCalSchedulerClone.App.Services;
 using FavGCalSchedulerClone.App.ViewModels;
+using FavGCalSchedulerClone.App.Views.Dialogs;
 using Microsoft.Toolkit.Uwp.Notifications;
 using Microsoft.Win32;
 
@@ -34,7 +35,7 @@ public partial class MainWindow : Window
         _automaticSyncTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
         _automaticSyncTimer.Tick += async (_, _) => await _viewModel.RunAutomaticSyncIfDueAsync();
         DataContext = _viewModel;
-        _viewModel.SetManualSyncPreviewConfirmation(preview => Task.FromResult(ShowSyncPreviewDialog(preview) == true));
+        _viewModel.SetManualSyncPreviewConfirmation(preview => Task.FromResult(SyncDialogs.ShowPreview(this, preview) == true));
         ToastNotificationManagerCompat.OnActivated += ToastNotificationManagerCompat_OnActivated;
     }
 
@@ -693,12 +694,7 @@ public partial class MainWindow : Window
 
     private void AboutMenu_Click(object sender, RoutedEventArgs e)
     {
-        MessageBox.Show(
-            this,
-            "FavGCalSchedulerClone\nVersion 0.1.0",
-            "バージョン情報",
-            MessageBoxButton.OK,
-            MessageBoxImage.Information);
+        AboutDialog.Show(this);
     }
 
     internal void ExitFromTray()
@@ -1278,147 +1274,13 @@ public partial class MainWindow : Window
     private async Task ShowReminderHistoryDialogAsync()
     {
         var history = await _reminderService.LoadHistoryAsync();
-        var window = CreateOwnedDialog("通知一覧", 760, 460);
-        var panel = new DockPanel { Margin = new Thickness(12), LastChildFill = true };
-        window.Content = panel;
-
-        var close = new Button { Content = "閉じる", MinWidth = 96, Height = 28 };
-        close.Click += (_, _) => window.Close();
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0) };
-        buttons.Children.Add(close);
-        DockPanel.SetDock(buttons, Dock.Bottom);
-        panel.Children.Add(buttons);
-
-        var grid = new DataGrid
-        {
-            ItemsSource = new ObservableCollection<ReminderHistoryItem>(history),
-            AutoGenerateColumns = false,
-            CanUserAddRows = false,
-            IsReadOnly = true,
-            HeadersVisibility = DataGridHeadersVisibility.Column,
-            RowHeight = 24
-        };
-        grid.MouseDoubleClick += async (_, _) =>
-        {
-            if (grid.SelectedItem is ReminderHistoryItem item)
-            {
-                await OpenReminderHistoryItemAsync(item);
-                window.Close();
-            }
-        };
-        grid.Columns.Add(new DataGridTextColumn { Header = "通知日時", Binding = new Binding(nameof(ReminderHistoryItem.NotifiedAtText)), Width = 140 });
-        grid.Columns.Add(new DataGridTextColumn { Header = "種別", Binding = new Binding(nameof(ReminderHistoryItem.KindText)), Width = 70 });
-        grid.Columns.Add(new DataGridTextColumn { Header = "予定日時", Binding = new Binding(nameof(ReminderHistoryItem.DateDisplayText)), Width = 140 });
-        grid.Columns.Add(new DataGridTextColumn { Header = "件名", Binding = new Binding(nameof(ReminderHistoryItem.Title)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
-        grid.Columns.Add(new DataGridTextColumn { Header = "スヌーズ", Binding = new Binding(nameof(ReminderHistoryItem.SnoozedUntilText)), Width = 140 });
-        panel.Children.Add(grid);
-
-        window.ShowDialog();
-    }
-
-    private bool? ShowSyncPreviewDialog(SyncPreview preview)
-    {
-        var window = CreateOwnedDialog("Google同期プレビュー", 780, 520);
-        var panel = new DockPanel { Margin = new Thickness(12), LastChildFill = true };
-        window.Content = panel;
-
-        var summary = new TextBlock
-        {
-            Text = $"送信 {preview.PushCount} 件 / 取得 {preview.PullCount} 件 / 削除 {preview.DeleteCount} 件 / 競合 {preview.ConflictCount} 件 / エラー {preview.ErrorCount} 件",
-            FontWeight = FontWeights.SemiBold,
-            Margin = new Thickness(0, 0, 0, 8)
-        };
-        DockPanel.SetDock(summary, Dock.Top);
-        panel.Children.Add(summary);
-
-        var buttons = DialogButtons(window, "同期実行", "キャンセル");
-        DockPanel.SetDock(buttons, Dock.Bottom);
-        panel.Children.Add(buttons);
-
-        var items = new ObservableCollection<SyncPreviewItem>(
-            preview.PushItems
-                .Concat(preview.PullItems)
-                .Concat(preview.DeleteItems)
-                .Concat(preview.ConflictItems)
-                .Concat(preview.ErrorItems));
-        var grid = new DataGrid
-        {
-            ItemsSource = items,
-            AutoGenerateColumns = false,
-            CanUserAddRows = false,
-            IsReadOnly = true,
-            HeadersVisibility = DataGridHeadersVisibility.Column,
-            RowHeight = 24
-        };
-        grid.Columns.Add(new DataGridTextColumn { Header = "種別", Binding = new Binding(nameof(SyncPreviewItem.Kind)), Width = 90 });
-        grid.Columns.Add(new DataGridTextColumn { Header = "カレンダー", Binding = new Binding(nameof(SyncPreviewItem.CalendarId)), Width = 120 });
-        grid.Columns.Add(new DataGridTextColumn { Header = "開始", Binding = new Binding(nameof(SyncPreviewItem.Start)), Width = 150 });
-        grid.Columns.Add(new DataGridTextColumn { Header = "件名", Binding = new Binding(nameof(SyncPreviewItem.Title)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
-        grid.Columns.Add(new DataGridTextColumn { Header = "詳細", Binding = new Binding(nameof(SyncPreviewItem.Detail)), Width = 220 });
-        panel.Children.Add(grid);
-
-        return window.ShowDialog();
+        ReminderHistoryDialog.Show(this, history, OpenReminderHistoryItemAsync);
     }
 
     private async Task ShowSyncDiagnosticsDialogAsync()
     {
         var diagnostics = await _viewModel.LoadSyncDiagnosticsAsync();
-        var window = CreateOwnedDialog("Google同期診断", 820, 540);
-        var panel = new DockPanel { Margin = new Thickness(12), LastChildFill = true };
-        window.Content = panel;
-
-        var last = diagnostics.LastResult;
-        var summaryText = last is null
-            ? $"未同期変更: {diagnostics.DirtyCount} 件\n最終同期結果はありません。"
-            : $"未同期変更: {diagnostics.DirtyCount} 件\n最終同期: {last.FinishedAt:yyyy/MM/dd HH:mm:ss} / 送信 {last.Pushed} / 取得 {last.Pulled} / 競合 {last.Conflicts} / 失敗 {last.Failed}";
-        var summary = new TextBlock { Text = summaryText, Margin = new Thickness(0, 0, 0, 8), FontWeight = FontWeights.SemiBold };
-        DockPanel.SetDock(summary, Dock.Top);
-        panel.Children.Add(summary);
-
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0) };
-        var clear = new Button { Content = "ログ削除", MinWidth = 96, Height = 28, Margin = new Thickness(0, 0, 8, 0) };
-        var close = new Button { Content = "閉じる", MinWidth = 96, Height = 28 };
-        clear.Click += async (_, _) =>
-        {
-            await _viewModel.ClearSyncDiagnosticsAsync();
-            window.Close();
-        };
-        close.Click += (_, _) => window.Close();
-        buttons.Children.Add(clear);
-        buttons.Children.Add(close);
-        DockPanel.SetDock(buttons, Dock.Bottom);
-        panel.Children.Add(buttons);
-
-        var tabs = new TabControl();
-        var calendarGrid = new DataGrid
-        {
-            ItemsSource = new ObservableCollection<SyncCalendarDiagnostic>(diagnostics.Calendars),
-            AutoGenerateColumns = false,
-            CanUserAddRows = false,
-            IsReadOnly = true
-        };
-        calendarGrid.Columns.Add(new DataGridTextColumn { Header = "カレンダー", Binding = new Binding(nameof(SyncCalendarDiagnostic.CalendarId)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
-        calendarGrid.Columns.Add(new DataGridCheckBoxColumn { Header = "syncToken", Binding = new Binding(nameof(SyncCalendarDiagnostic.HasSyncToken)), Width = 90 });
-        calendarGrid.Columns.Add(new DataGridTextColumn { Header = "未同期", Binding = new Binding(nameof(SyncCalendarDiagnostic.DirtyCount)), Width = 80 });
-        tabs.Items.Add(new TabItem { Header = "カレンダー", Content = calendarGrid });
-
-        var historyGrid = new DataGrid
-        {
-            ItemsSource = new ObservableCollection<SyncResult>(diagnostics.History),
-            AutoGenerateColumns = false,
-            CanUserAddRows = false,
-            IsReadOnly = true
-        };
-        historyGrid.Columns.Add(new DataGridTextColumn { Header = "終了", Binding = new Binding(nameof(SyncResult.FinishedAt)), Width = 160 });
-        historyGrid.Columns.Add(new DataGridTextColumn { Header = "送信", Binding = new Binding(nameof(SyncResult.Pushed)), Width = 60 });
-        historyGrid.Columns.Add(new DataGridTextColumn { Header = "取得", Binding = new Binding(nameof(SyncResult.Pulled)), Width = 60 });
-        historyGrid.Columns.Add(new DataGridTextColumn { Header = "競合", Binding = new Binding(nameof(SyncResult.Conflicts)), Width = 60 });
-        historyGrid.Columns.Add(new DataGridTextColumn { Header = "失敗", Binding = new Binding(nameof(SyncResult.Failed)), Width = 60 });
-        historyGrid.Columns.Add(new DataGridTextColumn { Header = "詳細", Binding = new Binding(nameof(SyncResult.Message)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
-        tabs.Items.Add(new TabItem { Header = "ログ", Content = historyGrid });
-        panel.Children.Add(tabs);
-
-        window.ShowDialog();
+        SyncDialogs.ShowDiagnostics(this, diagnostics, _viewModel.ClearSyncDiagnosticsAsync);
     }
 
     private async Task OpenReminderHistoryItemAsync(ReminderHistoryItem item)

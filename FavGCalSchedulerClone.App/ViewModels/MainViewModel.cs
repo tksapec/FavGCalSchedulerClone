@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
+using FavGCalSchedulerClone.App.Commands;
 using FavGCalSchedulerClone.App.Models;
 using FavGCalSchedulerClone.App.Services;
 using Microsoft.Win32;
@@ -115,15 +116,15 @@ public sealed class MainViewModel : ObservableObject
     public AsyncRelayCommand SaveTagsCommand { get; }
 
     public string MonthTitle => CurrentMonth.ToString("yyyy/MM", CultureInfo.InvariantCulture);
-    public string JapaneseMonthTitle => $"{CurrentMonth:yyyy}年（{FormatJapaneseEra(CurrentMonth)}） {CurrentMonth.Month}月";
+    public string JapaneseMonthTitle => CalendarStatusFormatter.FormatJapaneseMonthTitle(CurrentMonth);
     public string CurrentPeriodTitle => CurrentViewMode switch
     {
         CalendarViewMode.Month => JapaneseMonthTitle,
-        CalendarViewMode.Week => FormatWeekTitle(SelectedDay?.Date ?? DateTime.Today),
-        CalendarViewMode.Day => FormatDayTitle(SelectedDay?.Date ?? DateTime.Today),
+        CalendarViewMode.Week => CalendarStatusFormatter.FormatWeekTitle(SelectedDay?.Date ?? DateTime.Today, _settings.WeekStartsOnMonday),
+        CalendarViewMode.Day => CalendarStatusFormatter.FormatDayTitle(SelectedDay?.Date ?? DateTime.Today),
         _ => JapaneseMonthTitle
     };
-    public string CalendarStatusText => FormatCalendarStatus(SelectedDay?.Date ?? DateTime.Today);
+    public string CalendarStatusText => CalendarStatusFormatter.FormatCalendarStatus(SelectedDay?.Date ?? DateTime.Today);
     public bool IsMonthView => CurrentViewMode == CalendarViewMode.Month;
     public bool IsWeekView => CurrentViewMode == CalendarViewMode.Week;
     public bool IsDayView => CurrentViewMode == CalendarViewMode.Day;
@@ -325,7 +326,7 @@ public sealed class MainViewModel : ObservableObject
     public int SelectedTabIndex
     {
         get => _selectedTabIndex;
-        set => SetProperty(ref _selectedTabIndex, NormalizeTabIndex(value));
+        set => SetProperty(ref _selectedTabIndex, AppSettingsNormalizer.NormalizeTabIndex(value));
     }
 
     public int SelectedTodoTabIndex
@@ -345,7 +346,7 @@ public sealed class MainViewModel : ObservableObject
     public double CalendarLabelFontSize => _settings.CalendarLabelFontSizeIndex + 9;
     public double SideListFontSize => _settings.SideListFontSizeIndex + 10;
     public double WindowOpacity => _settings.WindowOpacity / 255.0;
-    public IReadOnlyList<string> WeekdayHeaders => CreateWeekdayHeaders();
+    public IReadOnlyList<string> WeekdayHeaders => CalendarStatusFormatter.CreateWeekdayHeaders(_settings.WeekdayDisplayType, _settings.WeekStartsOnMonday);
     public IReadOnlyList<string> ScheduleTitleHistory => _scheduleTitleHistory;
     public IReadOnlyList<string> ScheduleLocationHistory => _scheduleLocationHistory;
     public bool EnableReminderSound => _settings.EnableReminderSound;
@@ -357,7 +358,7 @@ public sealed class MainViewModel : ObservableObject
     public async Task InitializeAsync()
     {
         await _repository.InitializeAsync();
-        _settings = NormalizeSettings(await _repository.LoadSettingsAsync());
+        _settings = AppSettingsNormalizer.Normalize(await _repository.LoadSettingsAsync());
         OAuthClientJsonPath = _settings.OAuthClientJsonPath ?? "";
         OnPropertyChanged(nameof(CalendarLabelFontSize));
         OnPropertyChanged(nameof(SideListFontSize));
@@ -647,7 +648,7 @@ public sealed class MainViewModel : ObservableObject
         bool defaultNewEventIsAllDay,
         bool useWindowsToastNotifications)
     {
-        _settings.StartupTabIndex = NormalizeTabIndex(startupTabIndex);
+        _settings.StartupTabIndex = AppSettingsNormalizer.NormalizeTabIndex(startupTabIndex);
         _settings.ConfirmBeforeDelete = confirmBeforeDelete;
         _settings.CloseButtonExitsApplication = closeButtonExitsApplication;
         _settings.DefaultNewEventIsAllDay = defaultNewEventIsAllDay;
@@ -662,7 +663,7 @@ public sealed class MainViewModel : ObservableObject
 
     public async Task SaveApplicationSettingsAsync(AppSettings settings)
     {
-        _settings = NormalizeSettings(settings);
+        _settings = AppSettingsNormalizer.Normalize(settings);
         SelectedTabIndex = _settings.StartupTabIndex;
         SelectedTodoTabIndex = _settings.StartupTodoTabIndex;
         CurrentViewMode = _settings.StartupCalendarViewMode;
@@ -1033,7 +1034,7 @@ public sealed class MainViewModel : ObservableObject
         ApplyDisplayColors(events);
 
         foreach (var item in events
-                     .Where(item => !item.IsTodoDone && IsWithinTodoDisplayPeriod(item, _settings.IncompleteTodoDisplayPeriodMonths))
+                     .Where(item => !item.IsTodoDone && TodoDisplayFilter.IsWithinDisplayPeriod(item, _settings.IncompleteTodoDisplayPeriodMonths, DateTime.Today))
                      .OrderBy(item => item.Start)
                      .ThenBy(item => item.TodoPriority)
                      .Take(100))
@@ -1042,7 +1043,7 @@ public sealed class MainViewModel : ObservableObject
         }
 
         foreach (var item in events
-                     .Where(item => item.IsTodoDone && IsWithinTodoDisplayPeriod(item, _settings.CompletedTodoDisplayPeriodMonths))
+                     .Where(item => item.IsTodoDone && TodoDisplayFilter.IsWithinDisplayPeriod(item, _settings.CompletedTodoDisplayPeriodMonths, DateTime.Today))
                      .OrderBy(item => item.Start)
                      .ThenBy(item => item.TodoPriority)
                      .Take(100))
@@ -1063,11 +1064,6 @@ public sealed class MainViewModel : ObservableObject
         _scheduleLocationHistory = AddHistoryValue(_scheduleLocationHistory, calendarEvent.Location);
         await _repository.SaveSettingValueAsync(ScheduleTitleHistoryKey, JsonSerializer.Serialize(_scheduleTitleHistory));
         await _repository.SaveSettingValueAsync(ScheduleLocationHistoryKey, JsonSerializer.Serialize(_scheduleLocationHistory));
-    }
-
-    private static bool IsWithinTodoDisplayPeriod(CalendarEvent calendarEvent, int months)
-    {
-        return months == 0 || calendarEvent.Start.Date >= DateTime.Today.AddMonths(-months);
     }
 
     private void ApplyDisplayColors(IEnumerable<CalendarEvent> events)
@@ -1131,43 +1127,15 @@ public sealed class MainViewModel : ObservableObject
     {
         VisibleCalendarDays.Clear();
 
-        IEnumerable<CalendarDay> days = CurrentViewMode switch
-        {
-            CalendarViewMode.Month => CalendarDays,
-            CalendarViewMode.Week => GetWeekDays(anchorDate),
-            CalendarViewMode.Day => GetDayDays(anchorDate),
-            _ => CalendarDays
-        };
+        var anchor = anchorDate?.Date ?? SelectedDay?.Date ?? CurrentMonth;
+        IEnumerable<CalendarDay> days = CalendarVisibleRangeService
+            .GetVisibleDates(CurrentViewMode, CalendarDays, anchor, _settings.WeekStartsOnMonday)
+            .Select(FindOrCreateCalendarDay);
 
         foreach (var day in days)
         {
             VisibleCalendarDays.Add(day);
         }
-    }
-
-    private IEnumerable<CalendarDay> GetWeekDays(DateTime? anchorDate = null)
-    {
-        if (CalendarDays.Count == 0)
-        {
-            return [];
-        }
-
-        var anchor = anchorDate?.Date ?? SelectedDay?.Date ?? CurrentMonth;
-        var offset = _settings.WeekStartsOnMonday
-            ? ((int)anchor.DayOfWeek + 6) % 7
-            : (int)anchor.DayOfWeek;
-        var start = anchor.Date.AddDays(-offset);
-        return Enumerable.Range(0, 7).Select(offset => FindOrCreateCalendarDay(start.AddDays(offset)));
-    }
-
-    private IEnumerable<CalendarDay> GetDayDays(DateTime? anchorDate = null)
-    {
-        if (CalendarDays.Count == 0)
-        {
-            return [];
-        }
-
-        return [FindOrCreateCalendarDay((anchorDate?.Date ?? SelectedDay?.Date ?? CurrentMonth).Date)];
     }
 
     private CalendarDay FindOrCreateCalendarDay(DateTime date)
@@ -1201,39 +1169,6 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(MonthTitle));
         OnPropertyChanged(nameof(JapaneseMonthTitle));
         OnPropertyChanged(nameof(CurrentPeriodTitle));
-    }
-
-    private static string FormatJapaneseEra(DateTime date)
-    {
-        var culture = new CultureInfo("ja-JP", false);
-        culture.DateTimeFormat.Calendar = new JapaneseCalendar();
-        var eraName = culture.DateTimeFormat.GetEraName(culture.DateTimeFormat.Calendar.GetEra(date));
-        var year = culture.DateTimeFormat.Calendar.GetYear(date);
-        return $"{eraName}{year}年";
-    }
-
-    private static string FormatCalendarStatus(DateTime date)
-    {
-        var weekOfMonth = ((date.Day - 1) / 7) + 1;
-        var elapsedDays = date.DayOfYear;
-        var weekOfYear = ((elapsedDays - 1) / 7) + 1;
-        var dayOfWeek = date.ToString("dddd", new CultureInfo("ja-JP"));
-        return $"{date:yyyy}年({FormatJapaneseEra(date)}){date:MM月dd日} 第{weekOfMonth}{dayOfWeek} {weekOfYear}週目 経過日数 {elapsedDays}日";
-    }
-
-    private string FormatWeekTitle(DateTime date)
-    {
-        var offset = _settings.WeekStartsOnMonday
-            ? ((int)date.DayOfWeek + 6) % 7
-            : (int)date.DayOfWeek;
-        var start = date.Date.AddDays(-offset);
-        var end = start.AddDays(6);
-        return $"{start:yyyy/M/d} - {end:yyyy/M/d}";
-    }
-
-    private static string FormatDayTitle(DateTime date)
-    {
-        return date.ToString("yyyy/M/d (ddd)", new CultureInfo("ja-JP"));
     }
 
     private void LoadEditor(CalendarEvent? calendarEvent)
@@ -1931,12 +1866,12 @@ public sealed class MainViewModel : ObservableObject
 
         if (values.TryGetValue("ToDoRunLimitMonthCount", out var runningLimit) && int.TryParse(runningLimit, out var runningMonths))
         {
-            _settings.IncompleteTodoDisplayPeriodMonths = NormalizeTodoMonths(runningMonths);
+            _settings.IncompleteTodoDisplayPeriodMonths = AppSettingsNormalizer.NormalizeTodoMonths(runningMonths);
         }
 
         if (values.TryGetValue("ToDoCompLimitMonthCount", out var completedLimit) && int.TryParse(completedLimit, out var completedMonths))
         {
-            _settings.CompletedTodoDisplayPeriodMonths = NormalizeTodoMonths(completedMonths);
+            _settings.CompletedTodoDisplayPeriodMonths = AppSettingsNormalizer.NormalizeTodoMonths(completedMonths);
         }
 
         if (values.TryGetValue("CreateScheduleNoHistory", out var noHistory))
@@ -2046,49 +1981,6 @@ public sealed class MainViewModel : ObservableObject
         return string.IsNullOrWhiteSpace(_settings.ActiveCalendarId) ? GoogleCalendarDefaults.PrimaryCalendarId : _settings.ActiveCalendarId;
     }
 
-    private static AppSettings NormalizeSettings(AppSettings settings)
-    {
-        settings.StartupTabIndex = NormalizeTabIndex(settings.StartupTabIndex);
-        settings.StartupTodoTabIndex = Math.Clamp(settings.StartupTodoTabIndex, 0, 1);
-        settings.CalendarLabelFontSizeIndex = Math.Clamp(settings.CalendarLabelFontSizeIndex, 1, 3);
-        settings.SideListFontSizeIndex = Math.Clamp(settings.SideListFontSizeIndex, 1, 3);
-        settings.WindowOpacity = Math.Clamp(settings.WindowOpacity, 64, 255);
-        settings.ReminderSoundVolume = Math.Clamp(settings.ReminderSoundVolume, 0, 100);
-        settings.IncompleteTodoDisplayPeriodMonths = NormalizeTodoMonths(settings.IncompleteTodoDisplayPeriodMonths);
-        settings.CompletedTodoDisplayPeriodMonths = NormalizeTodoMonths(settings.CompletedTodoDisplayPeriodMonths);
-        settings.AutomaticSyncIntervalMinutes = settings.AutomaticSyncIntervalMinutes is int interval
-            && new[] { 30, 60, 120, 360 }.Contains(interval)
-                ? interval
-                : null;
-        settings.VisibleCalendarIds = settings.VisibleCalendarIds
-            .Where(id => !string.IsNullOrWhiteSpace(id))
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-        if (settings.VisibleCalendarIds.Count == 0)
-        {
-            settings.VisibleCalendarIds.Add(string.IsNullOrWhiteSpace(settings.ActiveCalendarId) ? GoogleCalendarDefaults.PrimaryCalendarId : settings.ActiveCalendarId);
-        }
-
-        settings.ActiveCalendarId = string.IsNullOrWhiteSpace(settings.ActiveCalendarId)
-            ? settings.VisibleCalendarIds[0]
-            : settings.ActiveCalendarId;
-        return settings;
-    }
-
-    private IReadOnlyList<string> CreateWeekdayHeaders()
-    {
-        var headers = _settings.WeekdayDisplayType switch
-        {
-            WeekdayDisplayType.EnglishFull => new[] { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" },
-            WeekdayDisplayType.JapaneseShort => new[] { "日", "月", "火", "水", "木", "金", "土" },
-            _ => new[] { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" }
-        };
-
-        return _settings.WeekStartsOnMonday
-            ? headers.Skip(1).Concat(headers.Take(1)).ToArray()
-            : headers;
-    }
-
     private static IReadOnlyList<string> DeserializeHistory(string? json)
     {
         return string.IsNullOrWhiteSpace(json)
@@ -2109,12 +2001,6 @@ public sealed class MainViewModel : ObservableObject
             .ToArray();
     }
 
-    private static int NormalizeTodoMonths(int months)
-    {
-        return new[] { 0, 1, 3, 6, 12 }.Contains(months) ? months : 0;
-    }
-
-    private static int NormalizeTabIndex(int tabIndex) => Math.Clamp(tabIndex, 0, 4);
 }
 
 public sealed record EventColorSelectionItem(string? Id, string Label, string Background, string Foreground);

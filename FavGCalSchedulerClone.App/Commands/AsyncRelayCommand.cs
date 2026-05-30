@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Windows.Input;
 
-namespace FavGCalSchedulerClone.App.ViewModels;
+namespace FavGCalSchedulerClone.App.Commands;
 
 public sealed class AsyncRelayCommand : ICommand
 {
