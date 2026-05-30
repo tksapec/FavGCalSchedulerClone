@@ -31,6 +31,8 @@ public sealed class CalendarRepositoryTests
         Assert.Equal(2, settings.SideListFontSizeIndex);
         Assert.Equal(255, settings.WindowOpacity);
         Assert.False(settings.SyncAfterLocalChange);
+        Assert.Null(settings.LastManualSyncAt);
+        Assert.Null(settings.LastAutomaticSyncAt);
         Assert.False(settings.ShowSyncPreviewBeforeManualSync);
         Assert.False(settings.EnableSyncDiagnostics);
         Assert.Equal(SyncConflictPolicy.SkipLocalDirty, settings.SyncConflictPolicy);
@@ -71,6 +73,8 @@ public sealed class CalendarRepositoryTests
             ReminderSoundVolume = 40,
             SyncAfterLocalChange = true,
             AutomaticSyncIntervalMinutes = 120,
+            LastManualSyncAt = new DateTimeOffset(2026, 5, 18, 12, 0, 0, TimeSpan.FromHours(9)),
+            LastAutomaticSyncAt = new DateTimeOffset(2026, 5, 18, 13, 0, 0, TimeSpan.FromHours(9)),
             ShowSyncPreviewBeforeManualSync = true,
             EnableSyncDiagnostics = true,
             SyncConflictPolicy = SyncConflictPolicy.PreferGoogle
@@ -103,6 +107,8 @@ public sealed class CalendarRepositoryTests
         Assert.Equal(40, settings.ReminderSoundVolume);
         Assert.True(settings.SyncAfterLocalChange);
         Assert.Equal(120, settings.AutomaticSyncIntervalMinutes);
+        Assert.Equal(new DateTimeOffset(2026, 5, 18, 12, 0, 0, TimeSpan.FromHours(9)), settings.LastManualSyncAt);
+        Assert.Equal(new DateTimeOffset(2026, 5, 18, 13, 0, 0, TimeSpan.FromHours(9)), settings.LastAutomaticSyncAt);
         Assert.True(settings.ShowSyncPreviewBeforeManualSync);
         Assert.True(settings.EnableSyncDiagnostics);
         Assert.Equal(SyncConflictPolicy.PreferGoogle, settings.SyncConflictPolicy);

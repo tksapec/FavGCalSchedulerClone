@@ -8,7 +8,7 @@ public sealed class TagServiceTests
     [Fact]
     public void ExtractTags_UsesOnlyStandaloneDescriptionLines()
     {
-        var tags = TagService.ExtractTags("#important", "memo #work\n #holiday \n#workday\n今日は#private");
+        var tags = TagService.ExtractTags("#important", "memo #work\n #holiday \n#workday\n今日は#private\n#important\n#work\n#private");
 
         Assert.Equal(["#holiday", "#workday"], tags);
     }
@@ -231,14 +231,14 @@ public sealed class TagServiceTests
     }
 
     [Fact]
-    public void RetiredDayTag_IsNotADirectiveOrConfiguredVisibilityTag()
+    public void RetiredDayTags_ArePlainTextAndNotDirectives()
     {
         var item = AllDayEvent(new DateTime(2026, 5, 18), "Ordinary description");
         item.Description = "#important";
-        var retiredTag = new CalendarTag { Name = "#important", Color = "#FDE68A", IsVisible = false };
 
         Assert.False(TagService.IsDayCellDirective(item));
-        Assert.Null(TagService.FindDisplayTag(item, [retiredTag]));
+        Assert.False(TagService.IsHoliday(item));
+        Assert.False(TagService.IsWorkday(item));
     }
 
     [Theory]

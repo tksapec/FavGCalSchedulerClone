@@ -38,6 +38,7 @@ public static partial class TagService
             .Split('\n')
             .Select(line => line.Trim())
             .Where(line => TagLineRegex().IsMatch(line))
+            .Where(IsSupportedDayDirectiveTag)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -138,16 +139,6 @@ public static partial class TagService
         return body;
     }
 
-    public static CalendarTag? FindDisplayTag(CalendarEvent calendarEvent, IEnumerable<CalendarTag> tags)
-    {
-        var eventTags = ExtractTags(null, calendarEvent.Description);
-        return tags
-            .Where(t => !IsRetiredDayTag(t.Name)
-                && eventTags.Any(et => string.Equals(et, t.Name, StringComparison.OrdinalIgnoreCase)))
-            .OrderByDescending(t => t.Priority)
-            .FirstOrDefault();
-    }
-
     public static EventDisplayColors ResolveDisplayColors(
         CalendarEvent calendarEvent,
         IReadOnlyDictionary<string, EventDisplayColors>? eventColorPalette = null)
@@ -208,12 +199,9 @@ public static partial class TagService
         return false;
     }
 
-    private static bool IsRetiredDayTag(string tagName)
-    {
-        return tagName.Equals("#important", StringComparison.OrdinalIgnoreCase)
-            || tagName.Equals("#work", StringComparison.OrdinalIgnoreCase)
-            || tagName.Equals("#private", StringComparison.OrdinalIgnoreCase);
-    }
+    private static bool IsSupportedDayDirectiveTag(string tagName) =>
+        tagName.Equals("#holiday", StringComparison.OrdinalIgnoreCase)
+        || tagName.Equals("#workday", StringComparison.OrdinalIgnoreCase);
 
     [GeneratedRegex(@"^#[\p{L}\p{N}_%-]+$", RegexOptions.Compiled)]
     private static partial Regex TagLineRegex();

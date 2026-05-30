@@ -58,20 +58,30 @@ public sealed class MainViewModel : ObservableObject
         NextMonthCommand = new RelayCommand(() => NavigatePrimary(1));
         PreviousYearCommand = new RelayCommand(() => NavigateSecondary(-1));
         NextYearCommand = new RelayCommand(() => NavigateSecondary(1));
-        TodayCommand = new AsyncRelayCommand(GoToTodayAsync);
+        TodayCommand = CreateAsyncCommand(GoToTodayAsync);
         ShowMonthViewCommand = new RelayCommand(() => CurrentViewMode = CalendarViewMode.Month);
         ShowWeekViewCommand = new RelayCommand(() => CurrentViewMode = CalendarViewMode.Week);
         ShowDayViewCommand = new RelayCommand(() => CurrentViewMode = CalendarViewMode.Day);
         NewEventCommand = new RelayCommand(NewEvent);
-        SaveEventCommand = new AsyncRelayCommand(() => SaveEventWithRecurrenceAsync(null));
-        DeleteEventCommand = new AsyncRelayCommand(() => DeleteEventWithRecurrenceAsync(null), () => SelectedEvent is not null);
-        MarkSelectedTodoDoneCommand = new AsyncRelayCommand(MarkSelectedTodoDoneAsync, () => SelectedEvent?.IsTodoLike == true && !SelectedEvent.IsTodoDone);
-        SyncCommand = new AsyncRelayCommand(SynchronizeManuallyWithPreviewAsync);
-        ReloadCalendarListCommand = new AsyncRelayCommand(ReloadAvailableCalendarsAsync);
-        BrowseOAuthClientCommand = new AsyncRelayCommand(BrowseOAuthClientAsync);
-        AuthorizeCommand = new AsyncRelayCommand(AuthorizeAsync);
-        ClearTokensCommand = new AsyncRelayCommand(ClearTokensAsync);
-        SaveTagsCommand = new AsyncRelayCommand(SaveTagsAsync);
+        SaveEventCommand = CreateAsyncCommand(() => SaveEventWithRecurrenceAsync(null));
+        DeleteEventCommand = CreateAsyncCommand(() => DeleteEventWithRecurrenceAsync(null), () => SelectedEvent is not null);
+        MarkSelectedTodoDoneCommand = CreateAsyncCommand(MarkSelectedTodoDoneAsync, () => SelectedEvent?.IsTodoLike == true && !SelectedEvent.IsTodoDone);
+        SyncCommand = CreateAsyncCommand(SynchronizeManuallyWithPreviewAsync);
+        ReloadCalendarListCommand = CreateAsyncCommand(ReloadAvailableCalendarsAsync);
+        BrowseOAuthClientCommand = CreateAsyncCommand(BrowseOAuthClientAsync);
+        AuthorizeCommand = CreateAsyncCommand(AuthorizeAsync);
+        ClearTokensCommand = CreateAsyncCommand(ClearTokensAsync);
+        SaveTagsCommand = CreateAsyncCommand(SaveTagsAsync);
+    }
+
+    private AsyncRelayCommand CreateAsyncCommand(Func<Task> execute, Func<bool>? canExecute = null) =>
+        new(execute, canExecute, HandleCommandExceptionAsync);
+
+    private Task HandleCommandExceptionAsync(Exception exception)
+    {
+        Debug.WriteLine(exception);
+        Status = $"操作に失敗しました: {exception.Message}";
+        return Task.CompletedTask;
     }
 
     public ObservableCollection<CalendarDay> CalendarDays { get; } = [];
@@ -825,7 +835,7 @@ public sealed class MainViewModel : ObservableObject
 
     public async Task<SyncResult?> SynchronizeManuallyAsync()
     {
-        return await SynchronizeAsync(reportErrors: true);
+        return await SynchronizeAsync(reportErrors: true, SyncInvocationKind.Manual);
     }
 
     public void SetManualSyncPreviewConfirmation(Func<SyncPreview, Task<bool>>? confirmManualSyncPreviewAsync)
@@ -870,7 +880,7 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        await SynchronizeAsync(reportErrors: false);
+        await SynchronizeAsync(reportErrors: false, SyncInvocationKind.Automatic);
     }
 
     private async Task ReloadTagsAsync()
@@ -1076,10 +1086,8 @@ public sealed class MainViewModel : ObservableObject
 
     private bool IsVisible(CalendarEvent calendarEvent)
     {
-        var displayTag = TagService.FindDisplayTag(calendarEvent, Tags);
         return IsInVisibleCalendar(calendarEvent)
-            && !TagService.IsDayCellDirective(calendarEvent)
-            && (displayTag?.IsVisible ?? true);
+            && !TagService.IsDayCellDirective(calendarEvent);
     }
 
     private bool IsInVisibleCalendar(CalendarEvent calendarEvent) =>
@@ -1738,7 +1746,7 @@ public sealed class MainViewModel : ObservableObject
     {
         if (_settings.SyncAfterLocalChange && CanSynchronize())
         {
-            await SynchronizeAsync(reportErrors: false);
+            await SynchronizeAsync(reportErrors: false, SyncInvocationKind.LocalChange);
         }
     }
 
@@ -1748,7 +1756,7 @@ public sealed class MainViewModel : ObservableObject
             && File.Exists(_settings.OAuthClientJsonPath);
     }
 
-    private async Task<SyncResult?> SynchronizeAsync(bool reportErrors)
+    private async Task<SyncResult?> SynchronizeAsync(bool reportErrors, SyncInvocationKind invocationKind)
     {
         if (Interlocked.Exchange(ref _syncInProgress, 1) != 0)
         {
@@ -1770,7 +1778,16 @@ public sealed class MainViewModel : ObservableObject
 
             Status = "Googleカレンダーと同期中...";
             var result = await _syncService.SyncAsync(_settings);
-            _settings.LastAutomaticSyncAt = DateTimeOffset.Now;
+            var finishedAt = DateTimeOffset.Now;
+            if (invocationKind == SyncInvocationKind.Manual)
+            {
+                _settings.LastManualSyncAt = finishedAt;
+            }
+            else if (invocationKind == SyncInvocationKind.Automatic)
+            {
+                _settings.LastAutomaticSyncAt = finishedAt;
+            }
+
             await _repository.SaveSettingsAsync(_settings);
             _eventColorPalette = await _syncService.RefreshEventColorPaletteAsync();
             await ReloadAvailableCalendarsAsync();
@@ -1788,7 +1805,8 @@ public sealed class MainViewModel : ObservableObject
         {
             Debug.WriteLine(ex);
             await _syncService.RecordFailedSyncAsync(ex.Message, _settings.EnableSyncDiagnostics);
-            Status = $"自動同期に失敗しました。未同期の変更は保持されています: {ex.Message}";
+            var operation = invocationKind == SyncInvocationKind.Automatic ? "自動同期" : "変更後同期";
+            Status = $"{operation}に失敗しました。未同期の変更は保持されています: {ex.Message}";
             return null;
         }
         finally
@@ -1801,6 +1819,13 @@ public sealed class MainViewModel : ObservableObject
     {
         await _syncService.ClearTokensAsync();
         Status = "保存済みGoogleトークンを削除しました。";
+    }
+
+    private enum SyncInvocationKind
+    {
+        Manual,
+        Automatic,
+        LocalChange
     }
 
     private async Task SaveOAuthPathAsync()

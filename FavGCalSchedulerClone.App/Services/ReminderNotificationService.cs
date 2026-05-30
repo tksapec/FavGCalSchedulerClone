@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using FavGCalSchedulerClone.App.Models;
 
@@ -19,7 +20,7 @@ public sealed class ReminderNotificationService : IDisposable
     {
         _repository = repository;
         _notifier = notifier;
-        _timer = new Timer(async _ => await CheckDueRemindersAsync(), null, Timeout.Infinite, Timeout.Infinite);
+        _timer = new Timer(_ => _ = CheckDueRemindersAsync(), null, Timeout.Infinite, Timeout.Infinite);
     }
 
     public event Func<ReminderNotification, Task>? ReminderTriggered;
@@ -41,6 +42,24 @@ public sealed class ReminderNotificationService : IDisposable
     }
 
     public async Task CheckDueRemindersAsync(DateTimeOffset? now = null, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await CheckDueRemindersCoreAsync(now, cancellationToken);
+        }
+        catch (ObjectDisposedException) when (_disposed)
+        {
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(ex);
+        }
+    }
+
+    private async Task CheckDueRemindersCoreAsync(DateTimeOffset? now = null, CancellationToken cancellationToken = default)
     {
         if (_disposed)
         {
@@ -118,7 +137,15 @@ public sealed class ReminderNotificationService : IDisposable
             return [];
         }
 
-        return JsonSerializer.Deserialize<List<ReminderHistoryItem>>(json) ?? [];
+        try
+        {
+            return JsonSerializer.Deserialize<List<ReminderHistoryItem>>(json) ?? [];
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            Debug.WriteLine(ex);
+            return [];
+        }
     }
 
     public void Dispose()
@@ -230,7 +257,16 @@ public sealed class ReminderNotificationService : IDisposable
             return new Dictionary<string, string>(StringComparer.Ordinal);
         }
 
-        return JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? new Dictionary<string, string>(StringComparer.Ordinal);
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(json)
+                ?? new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            Debug.WriteLine(ex);
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
     }
 
     private async Task SaveStringDictionaryAsync(string key, Dictionary<string, string> values)

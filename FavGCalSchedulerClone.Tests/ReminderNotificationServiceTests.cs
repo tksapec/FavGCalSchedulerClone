@@ -156,6 +156,67 @@ public sealed class ReminderNotificationServiceTests
         Assert.Equal(now, notification.RemindAt);
     }
 
+    [Fact]
+    public async Task LoadHistoryAsync_ReturnsEmptyWhenStoredJsonIsCorrupt()
+    {
+        var repository = await CreateRepositoryAsync();
+        await repository.SaveSettingValueAsync("reminder:history", "{not-json");
+        var service = new ReminderNotificationService(repository);
+
+        var history = await service.LoadHistoryAsync();
+
+        Assert.Empty(history);
+    }
+
+    [Fact]
+    public async Task CheckDueRemindersAsync_RecoversFromCorruptStateJson()
+    {
+        var repository = await CreateRepositoryAsync();
+        await repository.SaveSettingValueAsync("reminder:fired", "{not-json");
+        await repository.SaveSettingValueAsync("reminder:snoozed", "{not-json");
+        var service = new ReminderNotificationService(repository);
+        var notifications = new List<ReminderNotification>();
+        service.ReminderTriggered += notification =>
+        {
+            notifications.Add(notification);
+            return Task.CompletedTask;
+        };
+
+        var start = new DateTimeOffset(2026, 5, 17, 10, 0, 0, TimeSpan.FromHours(9));
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "Recovered",
+            CalendarId = "primary",
+            Start = start,
+            End = start.AddHours(1),
+            ReminderMinutesBeforeStart = 0
+        });
+
+        await service.CheckDueRemindersAsync(start);
+
+        Assert.Single(notifications);
+    }
+
+    [Fact]
+    public async Task CheckDueRemindersAsync_DoesNotThrowWhenNotificationDispatchFails()
+    {
+        var repository = await CreateRepositoryAsync();
+        var service = new ReminderNotificationService(repository);
+        service.ReminderTriggered += _ => throw new InvalidOperationException("notification failed");
+
+        var start = new DateTimeOffset(2026, 5, 17, 11, 0, 0, TimeSpan.FromHours(9));
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "Throwing handler",
+            CalendarId = "primary",
+            Start = start,
+            End = start.AddHours(1),
+            ReminderMinutesBeforeStart = 0
+        });
+
+        await service.CheckDueRemindersAsync(start);
+    }
+
     private static async Task<CalendarRepository> CreateRepositoryAsync()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");

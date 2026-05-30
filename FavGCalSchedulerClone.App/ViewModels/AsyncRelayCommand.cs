@@ -39,7 +39,14 @@ public sealed class AsyncRelayCommand : ICommand
             Debug.WriteLine(ex);
             if (_onException is not null)
             {
-                await _onException(ex);
+                try
+                {
+                    await _onException(ex);
+                }
+                catch (Exception handlerException)
+                {
+                    Debug.WriteLine(handlerException);
+                }
             }
         }
         finally

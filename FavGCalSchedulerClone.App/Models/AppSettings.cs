@@ -28,6 +28,7 @@ public sealed class AppSettings
     public bool UseWindowsToastNotifications { get; set; } = true;
     public bool SyncAfterLocalChange { get; set; }
     public int? AutomaticSyncIntervalMinutes { get; set; }
+    public DateTimeOffset? LastManualSyncAt { get; set; }
     public DateTimeOffset? LastAutomaticSyncAt { get; set; }
     public bool ShowSyncPreviewBeforeManualSync { get; set; }
     public bool EnableSyncDiagnostics { get; set; }

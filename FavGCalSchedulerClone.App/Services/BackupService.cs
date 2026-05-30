@@ -6,6 +6,8 @@ namespace FavGCalSchedulerClone.App.Services;
 
 public sealed class BackupService
 {
+    private const string ApplicationName = "FavGCalSchedulerClone";
+    private static readonly string[] RequiredTables = ["events", "settings", "tags"];
     public const string DatabaseEntryName = "calendar.db";
     public const string ManifestEntryName = "manifest.json";
     public const int FormatVersion = 1;
@@ -41,7 +43,7 @@ public sealed class BackupService
                 }
 
                 var manifest = new BackupManifest(
-                    "FavGCalSchedulerClone",
+                    ApplicationName,
                     FormatVersion,
                     DateTimeOffset.Now,
                     Path.GetFileName(databasePath));
@@ -95,6 +97,7 @@ public sealed class BackupService
                 await source.CopyToAsync(destination, cancellationToken);
             }
 
+            await ValidateRestoredDatabaseAsync(tempRestorePath, cancellationToken);
             SqliteConnection.ClearAllPools();
 
             if (File.Exists(databasePath))
@@ -108,12 +111,12 @@ public sealed class BackupService
         }
         catch
         {
+            SqliteConnection.ClearAllPools();
+
             if (File.Exists(tempRestorePath))
             {
                 File.Delete(tempRestorePath);
             }
-
-            SqliteConnection.ClearAllPools();
 
             if (currentMoved && !File.Exists(databasePath) && File.Exists(rollbackPath))
             {
@@ -131,6 +134,73 @@ public sealed class BackupService
         if (manifestEntry is null || dbEntry is null)
         {
             throw new InvalidDataException("The selected file is not a FavGCalSchedulerClone backup.");
+        }
+
+        BackupManifest? manifest;
+        try
+        {
+            using var manifestStream = manifestEntry.Open();
+            manifest = JsonSerializer.Deserialize<BackupManifest>(manifestStream);
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException("The backup manifest is invalid.", ex);
+        }
+
+        if (manifest is null
+            || !string.Equals(manifest.ApplicationName, ApplicationName, StringComparison.Ordinal)
+            || manifest.FormatVersion != FormatVersion)
+        {
+            throw new InvalidDataException("The backup format is not supported.");
+        }
+
+        if (dbEntry.Length <= 0)
+        {
+            throw new InvalidDataException("The backup database is empty.");
+        }
+    }
+
+    private static async Task ValidateRestoredDatabaseAsync(string databasePath, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var builder = new SqliteConnectionStringBuilder
+            {
+                DataSource = databasePath,
+                Mode = SqliteOpenMode.ReadOnly
+            };
+            await using var connection = new SqliteConnection(builder.ToString());
+            await connection.OpenAsync(cancellationToken);
+
+            await using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "PRAGMA integrity_check;";
+                var result = await command.ExecuteScalarAsync(cancellationToken) as string;
+                if (!string.Equals(result, "ok", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidDataException("The backup database failed SQLite integrity_check.");
+                }
+            }
+
+            foreach (var table in RequiredTables)
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = $name";
+                command.Parameters.AddWithValue("$name", table);
+                var count = (long)(await command.ExecuteScalarAsync(cancellationToken) ?? 0L);
+                if (count == 0)
+                {
+                    throw new InvalidDataException($"The backup database is missing required table '{table}'.");
+                }
+            }
+        }
+        catch (InvalidDataException)
+        {
+            throw;
+        }
+        catch (SqliteException ex)
+        {
+            throw new InvalidDataException("The backup database is not a valid SQLite database.", ex);
         }
     }
 

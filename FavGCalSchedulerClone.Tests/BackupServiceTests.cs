@@ -37,17 +37,25 @@ public sealed class BackupServiceTests
         var sourceDbPath = Path.Combine(directory, "source.db");
         var targetDbPath = Path.Combine(directory, "calendar.db");
         var zipPath = Path.Combine(directory, "backup.zip");
-        await File.WriteAllTextAsync(sourceDbPath, "restored-db");
-        await File.WriteAllTextAsync(targetDbPath, "current-db");
+        var sourceRepository = new CalendarRepository(sourceDbPath);
+        await sourceRepository.InitializeAsync();
+        await sourceRepository.SaveSettingsAsync(new AppSettings { StartupTabIndex = 2 });
+        var targetRepository = new CalendarRepository(targetDbPath);
+        await targetRepository.InitializeAsync();
+        await targetRepository.SaveSettingsAsync(new AppSettings { StartupTabIndex = 1 });
         var service = new BackupService();
         await service.CreateBackupAsync(sourceDbPath, zipPath);
 
         var result = await service.RestoreBackupAsync(zipPath, targetDbPath);
+        var restoredRepository = new CalendarRepository(targetDbPath);
+        var restoredSettings = await restoredRepository.LoadSettingsAsync();
 
-        Assert.Equal("restored-db", await File.ReadAllTextAsync(targetDbPath));
+        Assert.Equal(2, restoredSettings.StartupTabIndex);
         Assert.False(string.IsNullOrWhiteSpace(result.PreviousDatabaseBackupPath));
         Assert.True(File.Exists(result.PreviousDatabaseBackupPath));
-        Assert.Equal("current-db", await File.ReadAllTextAsync(result.PreviousDatabaseBackupPath!));
+        var rollbackRepository = new CalendarRepository(result.PreviousDatabaseBackupPath);
+        var rollbackSettings = await rollbackRepository.LoadSettingsAsync();
+        Assert.Equal(1, rollbackSettings.StartupTabIndex);
     }
 
     [Fact]
@@ -59,6 +67,64 @@ public sealed class BackupServiceTests
         using (ZipFile.Open(zipPath, ZipArchiveMode.Create))
         {
         }
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => new BackupService().RestoreBackupAsync(zipPath, targetDbPath));
+    }
+
+    [Fact]
+    public async Task RestoreBackupAsync_RejectsUnsupportedManifestWithoutReplacingCurrentDatabase()
+    {
+        var directory = CreateTempDirectory();
+        var zipPath = Path.Combine(directory, "wrong-app.zip");
+        var targetDbPath = Path.Combine(directory, "calendar.db");
+        var targetRepository = new CalendarRepository(targetDbPath);
+        await targetRepository.InitializeAsync();
+        await targetRepository.SaveSettingsAsync(new AppSettings { StartupTabIndex = 4 });
+        await CreateBackupZipAsync(zipPath, targetDbPath, new BackupManifest("OtherApp", BackupService.FormatVersion, DateTimeOffset.Now, "calendar.db"));
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => new BackupService().RestoreBackupAsync(zipPath, targetDbPath));
+
+        var settings = await new CalendarRepository(targetDbPath).LoadSettingsAsync();
+        Assert.Equal(4, settings.StartupTabIndex);
+    }
+
+    [Fact]
+    public async Task RestoreBackupAsync_RejectsInvalidSqliteWithoutReplacingCurrentDatabase()
+    {
+        var directory = CreateTempDirectory();
+        var zipPath = Path.Combine(directory, "invalid-db.zip");
+        var targetDbPath = Path.Combine(directory, "calendar.db");
+        var invalidDbPath = Path.Combine(directory, "not-sqlite.db");
+        await File.WriteAllTextAsync(invalidDbPath, "not sqlite");
+        var targetRepository = new CalendarRepository(targetDbPath);
+        await targetRepository.InitializeAsync();
+        await targetRepository.SaveSettingsAsync(new AppSettings { StartupTabIndex = 5 });
+        await CreateBackupZipAsync(zipPath, invalidDbPath, new BackupManifest("FavGCalSchedulerClone", BackupService.FormatVersion, DateTimeOffset.Now, "not-sqlite.db"));
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => new BackupService().RestoreBackupAsync(zipPath, targetDbPath));
+
+        var settings = await new CalendarRepository(targetDbPath).LoadSettingsAsync();
+        Assert.Equal(5, settings.StartupTabIndex);
+    }
+
+    [Fact]
+    public async Task RestoreBackupAsync_RejectsDatabaseMissingRequiredTables()
+    {
+        var directory = CreateTempDirectory();
+        var zipPath = Path.Combine(directory, "missing-tables.zip");
+        var targetDbPath = Path.Combine(directory, "calendar.db");
+        var incompleteDbPath = Path.Combine(directory, "incomplete.db");
+        await using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={incompleteDbPath}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "CREATE TABLE events (id TEXT PRIMARY KEY);";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var targetRepository = new CalendarRepository(targetDbPath);
+        await targetRepository.InitializeAsync();
+        await CreateBackupZipAsync(zipPath, incompleteDbPath, new BackupManifest("FavGCalSchedulerClone", BackupService.FormatVersion, DateTimeOffset.Now, "incomplete.db"));
 
         await Assert.ThrowsAsync<InvalidDataException>(() => new BackupService().RestoreBackupAsync(zipPath, targetDbPath));
     }
@@ -102,5 +168,20 @@ public sealed class BackupServiceTests
         var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         return directory;
+    }
+
+    private static async Task CreateBackupZipAsync(string zipPath, string databasePath, BackupManifest manifest)
+    {
+        using var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create);
+        var dbEntry = archive.CreateEntry(BackupService.DatabaseEntryName);
+        await using (var source = new FileStream(databasePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        await using (var destination = dbEntry.Open())
+        {
+            await source.CopyToAsync(destination);
+        }
+
+        var manifestEntry = archive.CreateEntry(BackupService.ManifestEntryName);
+        await using var manifestStream = manifestEntry.Open();
+        await JsonSerializer.SerializeAsync(manifestStream, manifest);
     }
 }
