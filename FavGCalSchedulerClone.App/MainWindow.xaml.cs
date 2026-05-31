@@ -839,139 +839,47 @@ public partial class MainWindow : Window
     }
     private async Task ShowFavGCalSchedulerImportDialogAsync()
     {
-        var window = CreateOwnedDialog("FavGCalSchedulerデータ移行", 720, 560);
-        window.ResizeMode = ResizeMode.CanResize;
-        var root = CreateDialogRoot();
-        window.Content = root;
-
-        var sourceFolder = new TextBox { Text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "FavGCalScheduler") };
-        var oauthPath = new TextBox { Text = _viewModel.OAuthClientJsonPath };
-        var comparisonZip = new TextBox { Text = "" };
-        var targetCalendar = new ComboBox
-        {
-            ItemsSource = _viewModel.AvailableCalendars,
-            DisplayMemberPath = nameof(GoogleCalendarSelectionItem.Summary),
-            SelectedValuePath = nameof(GoogleCalendarSelectionItem.Id),
-            SelectedValue = _viewModel.EditorCalendarId
-        };
-        var importSettings = new CheckBox { Content = "旧アプリ設定の一部を反映する", IsChecked = true };
-        var skipDuplicates = new CheckBox { Content = "重複予定をスキップする", IsChecked = true };
-        var repairExistingColors = new CheckBox { Content = "既存予定のラベル色を元データで修復する", IsChecked = false };
-        var repairExistingTodoDescriptions = new CheckBox { Content = "既存ToDoの内容を元データで修復する", IsChecked = false };
-        var verifyGoogle = new CheckBox { Content = "取り込み前にGoogle予定を取得して照合する", IsChecked = true };
-        var analysisText = new TextBox
-        {
-            IsReadOnly = true,
-            AcceptsReturn = true,
-            TextWrapping = TextWrapping.Wrap,
-            Height = 150,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto
-        };
-        FavGCalImportAnalysis? analysis = null;
-
         void ShowImportError(string operation, Exception ex)
         {
             var message = $"{operation}に失敗しました。\n\n{ex.Message}";
-            analysisText.Text = message;
             MessageBox.Show(this, message, "FavGCalScheduler データ移行エラー", MessageBoxButton.OK, MessageBoxImage.Error);
         }
 
-        var oauthButtons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        var browseOAuth = new Button { Content = "OAuth JSON選択", MinWidth = 120 };
-        var authorize = new Button { Content = "Google認証", MinWidth = 110 };
-        oauthButtons.Children.Add(browseOAuth);
-        oauthButtons.Children.Add(authorize);
-
-        browseOAuth.Click += async (_, _) =>
-        {
-            var dialog = new OpenFileDialog
+        var dialogResult = FavGCalImportDialog.Show(DialogUi, new FavGCalImportDialogRequest(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "FavGCalScheduler"),
+            _viewModel.OAuthClientJsonPath,
+            _viewModel.AvailableCalendars,
+            _viewModel.EditorCalendarId,
+            _viewModel.SetOAuthClientJsonPathAsync,
+            async path =>
             {
-                Filter = "Google OAuth client JSON (*.json)|*.json|All files (*.*)|*.*",
-                Title = "デバッグ用 OAuth client JSON を選択"
-            };
-            if (dialog.ShowDialog(this) == true)
-            {
-                try
-                {
-                    oauthPath.Text = dialog.FileName;
-                    await _viewModel.SetOAuthClientJsonPathAsync(dialog.FileName);
-                }
-                catch (Exception ex)
-                {
-                    ShowImportError("OAuth JSON の設定", ex);
-                }
-            }
-        };
-        authorize.Click += async (_, _) =>
-        {
-            try
-            {
-                await _viewModel.SetOAuthClientJsonPathAsync(oauthPath.Text);
+                await _viewModel.SetOAuthClientJsonPathAsync(path);
                 await _viewModel.AuthorizeGoogleAsync();
-                targetCalendar.ItemsSource = _viewModel.AvailableCalendars;
-            }
-            catch (Exception ex)
-            {
-                ShowImportError("Google 認証", ex);
-                return;
-            }
-            analysisText.Text = "Google認証とカレンダー一覧取得が完了しました。";
-        };
-
-        var analyze = new Button { Content = "解析", MinWidth = 96 };
-        analyze.Click += async (_, _) =>
-        {
-            try
-            {
-                analysis = await _viewModel.AnalyzeFavGCalSchedulerImportAsync(sourceFolder.Text);
-                analysisText.Text = FormatFavGCalAnalysis(analysis);
-            }
-            catch (Exception ex)
-            {
-                analysis = null;
-                ShowImportError("解析", ex);
-            }
-        };
-
-        root.Children.Add(SectionHeader("移行元"));
-        root.Children.Add(WideField("FavGCalSchedulerフォルダ", sourceFolder));
-        root.Children.Add(SectionHeader("デバッグ用 Google 連携"));
-        root.Children.Add(WideField("OAuth client JSON", oauthPath));
-        root.Children.Add(oauthButtons);
-        root.Children.Add(SectionHeader("照合"));
-        root.Children.Add(WideField("Google エクスポート ZIP", comparisonZip));
-        root.Children.Add(SectionHeader("取り込み"));
-        root.Children.Add(FormGrid(("既定の取り込み先", targetCalendar, "", analyze)));
-        root.Children.Add(importSettings);
-        root.Children.Add(skipDuplicates);
-        root.Children.Add(repairExistingColors);
-        root.Children.Add(repairExistingTodoDescriptions);
-        root.Children.Add(verifyGoogle);
-        root.Children.Add(WideField("解析結果", analysisText));
-        root.Children.Add(DialogButtons(window, "取り込み", "キャンセル"));
-
-        if (window.ShowDialog() != true)
+                return _viewModel.AvailableCalendars.ToArray();
+            },
+            _viewModel.AnalyzeFavGCalSchedulerImportAsync));
+        if (dialogResult is null)
         {
             return;
         }
 
         try
         {
-            await _viewModel.SetOAuthClientJsonPathAsync(oauthPath.Text);
-            analysis ??= await _viewModel.AnalyzeFavGCalSchedulerImportAsync(sourceFolder.Text);
-            var defaultTarget = targetCalendar.SelectedValue?.ToString() ?? _viewModel.EditorCalendarId;
+            await _viewModel.SetOAuthClientJsonPathAsync(dialogResult.OAuthClientJsonPath);
+            var analysis = dialogResult.Analysis ?? await _viewModel.AnalyzeFavGCalSchedulerImportAsync(dialogResult.SourceFolder);
+            var defaultTarget = dialogResult.TargetCalendarId;
             var mappings = analysis.Calendars.ToDictionary(calendar => calendar.CalendarKey, _ => defaultTarget);
             var result = await _viewModel.ImportFavGCalSchedulerAsync(new FavGCalImportOptions(
-                sourceFolder.Text,
+                dialogResult.SourceFolder,
                 mappings,
-                ImportSettings: importSettings.IsChecked == true,
-                SkipDuplicates: skipDuplicates.IsChecked == true,
-                VerifyGoogleEventsBeforeImport: verifyGoogle.IsChecked == true,
+                ImportSettings: dialogResult.ImportSettings,
+                SkipDuplicates: dialogResult.SkipDuplicates,
+                VerifyGoogleEventsBeforeImport: dialogResult.VerifyGoogleEventsBeforeImport,
                 MarkImportedEventsDirty: true,
                 DefaultTargetCalendarId: defaultTarget,
-                ComparisonZipPath: string.IsNullOrWhiteSpace(comparisonZip.Text) ? null : comparisonZip.Text,
-                RepairExistingColors: repairExistingColors.IsChecked == true,
-                RepairExistingTodoDescriptions: repairExistingTodoDescriptions.IsChecked == true));
+                ComparisonZipPath: string.IsNullOrWhiteSpace(dialogResult.ComparisonZipPath) ? null : dialogResult.ComparisonZipPath,
+                RepairExistingColors: dialogResult.RepairExistingColors,
+                RepairExistingTodoDescriptions: dialogResult.RepairExistingTodoDescriptions));
 
             var comparisonText = result.ComparisonSummary is null
                 ? ""
@@ -992,78 +900,29 @@ public partial class MainWindow : Window
 
     private async Task ShowSearchDialogAsync()
     {
-        var window = CreateOwnedDialog("スケジュール検索", 520, 320);
-        var root = CreateDialogRoot();
-        window.Content = root;
-
-        var start = new DatePicker { SelectedDate = new DateTime(_viewModel.CurrentMonth.Year, 1, 1), IsEnabled = false };
-        var end = new DatePicker { SelectedDate = new DateTime(_viewModel.CurrentMonth.Year, 12, 31), IsEnabled = false };
-        var query = new TextBox();
-
-        root.Children.Add(SectionHeader("検索範囲"));
-        root.Children.Add(FormGrid(("開始", start, "終了", end)));
-        root.Children.Add(SectionHeader("条件"));
-        root.Children.Add(WideField("検索文字列", query));
-        root.Children.Add(DialogButtons(window, "検索", "キャンセル"));
-
-        if (window.ShowDialog() == true)
+        var result = SearchDialog.Show(DialogUi, new SearchDialogRequest(
+            new DateTime(_viewModel.CurrentMonth.Year, 1, 1),
+            new DateTime(_viewModel.CurrentMonth.Year, 12, 31)));
+        if (result is not null)
         {
-            await ShowEventListDialogAsync("スケジュール一覧", query.Text);
+            await ShowEventListDialogAsync("スケジュール一覧", result.Query);
         }
     }
 
     private async Task ShowEventListDialogAsync(string title, string query)
     {
-        var events = string.IsNullOrWhiteSpace(query)
-            ? await _viewModel.LoadYearEventsAsync(_viewModel.CurrentMonth)
-            : await _viewModel.SearchYearEventsAsync(_viewModel.CurrentMonth, query);
-        var eventItems = new ObservableCollection<CalendarEvent>(events);
-
-        var window = CreateOwnedDialog(title, 840, 540);
-        var panel = new DockPanel { Margin = new Thickness(12), LastChildFill = true };
-        window.Content = panel;
-
-        var close = new Button { Content = "閉じる", MinWidth = 96, Height = 28 };
-        close.Click += (_, _) => window.Close();
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0) };
-        buttons.Children.Add(close);
-        DockPanel.SetDock(buttons, Dock.Bottom);
-        panel.Children.Add(buttons);
-
-        var grid = new DataGrid
+        async Task<IReadOnlyList<CalendarEvent>> LoadEventsAsync()
         {
-            ItemsSource = eventItems,
-            AutoGenerateColumns = false,
-            CanUserAddRows = false,
-            IsReadOnly = true,
-            HeadersVisibility = DataGridHeadersVisibility.Column,
-            RowHeight = 24
-        };
-        grid.MouseDoubleClick += async (_, e) =>
-        {
-            var calendarEvent = DataGridDoubleClickHelper.GetEditableRowItem<CalendarEvent>(e.OriginalSource);
-            if (calendarEvent is null)
-            {
-                return;
-            }
-
-            await OpenGridEventEditorAsync(calendarEvent);
-
-            eventItems.Clear();
-            var refreshedEvents = string.IsNullOrWhiteSpace(query)
+            return string.IsNullOrWhiteSpace(query)
                 ? await _viewModel.LoadYearEventsAsync(_viewModel.CurrentMonth)
                 : await _viewModel.SearchYearEventsAsync(_viewModel.CurrentMonth, query);
-            foreach (var refreshedEvent in refreshedEvents)
-            {
-                eventItems.Add(refreshedEvent);
-            }
-        };
-        grid.Columns.Add(new DataGridTextColumn { Header = "日時", Binding = new Binding(nameof(CalendarEvent.DateDisplayText)), Width = 150 });
-        grid.Columns.Add(new DataGridTextColumn { Header = "カレンダー", Binding = new Binding(nameof(CalendarEvent.CalendarId)), Width = 150 });
-        grid.Columns.Add(DialogUi.CreateColoredTitleColumn(new DataGridLength(1, DataGridLengthUnitType.Star)));
-        panel.Children.Add(grid);
+        }
 
-        window.ShowDialog();
+        EventListDialog.Show(DialogUi, new EventListDialogRequest(
+            title,
+            await LoadEventsAsync(),
+            LoadEventsAsync,
+            OpenGridEventEditorAsync));
     }
 
     private async Task ShowReminderHistoryDialogAsync()
@@ -1185,39 +1044,7 @@ public partial class MainWindow : Window
 
     private RecurrenceEditScope? PromptRecurrenceScope(bool isDelete)
     {
-        var window = CreateOwnedDialog(isDelete ? "削除対象" : "編集対象", 420, 220);
-        var root = CreateDialogRoot();
-        window.Content = root;
-
-        root.Children.Add(SectionHeader(isDelete ? "どこまで削除するか選択してください。" : "どこまで反映するか選択してください。"));
-
-        RecurrenceEditScope? selected = null;
-        root.Children.Add(CreateScopeButton(window, "この予定のみ", RecurrenceEditScope.ThisOccurrence, value => selected = value));
-        root.Children.Add(CreateScopeButton(window, "この予定以降", RecurrenceEditScope.ThisAndFollowing, value => selected = value));
-        root.Children.Add(CreateScopeButton(window, "すべての予定", RecurrenceEditScope.AllEvents, value => selected = value));
-
-        var cancel = new Button { Content = "キャンセル", MinWidth = 96, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
-        cancel.Click += (_, _) => window.DialogResult = false;
-        root.Children.Add(cancel);
-
-        return window.ShowDialog() == true ? selected : null;
-    }
-
-    private static Button CreateScopeButton(Window window, string text, RecurrenceEditScope scope, Action<RecurrenceEditScope> setSelected)
-    {
-        var button = new Button
-        {
-            Content = text,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            Margin = new Thickness(0, 0, 0, 8),
-            Height = 34
-        };
-        button.Click += (_, _) =>
-        {
-            setSelected(scope);
-            window.DialogResult = true;
-        };
-        return button;
+        return RecurrenceScopeDialog.Show(DialogUi, new RecurrenceScopeDialogRequest(isDelete));
     }
 
     private static string FormatImportErrors(IReadOnlyList<CalendarCsvImportError> errors)
@@ -1225,127 +1052,4 @@ public partial class MainWindow : Window
         return string.Join(Environment.NewLine, errors.Select(error => $"行 {error.RowNumber}: {error.Message}"));
     }
 
-    private static string FormatFavGCalAnalysis(FavGCalImportAnalysis analysis)
-    {
-        var lines = new List<string>
-        {
-            $"移行元: {analysis.SourceFolder}",
-            $"対象カレンダー: {analysis.Calendars.Count} 件",
-            $"検出予定: {analysis.TotalEventCount} 件",
-            $"解析エラー: {analysis.ParseErrorCount} 件",
-            $"復元不能ToDo: {analysis.UnrestoredTodoCount} 件",
-            ""
-        };
-        lines.AddRange(analysis.Calendars.Select(calendar =>
-            $"{Path.GetFileName(calendar.SourcePath)} / {calendar.DisplayName} / {calendar.EventCount} 件 / 旧ID: {calendar.CalendarKey}"));
-        if (analysis.Warnings.Count > 0)
-        {
-            lines.Add("");
-            lines.AddRange(analysis.Warnings);
-        }
-
-        return string.Join(Environment.NewLine, lines);
-    }
-
-    private Window CreateOwnedDialog(string title, double width, double height)
-    {
-        return new Window
-        {
-            Owner = this,
-            Title = title,
-            Width = width,
-            Height = height,
-            MinWidth = width,
-            MinHeight = height,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            ResizeMode = ResizeMode.NoResize,
-            Background = System.Windows.Media.Brushes.White
-        };
-    }
-
-    private static StackPanel CreateDialogRoot()
-    {
-        return new StackPanel
-        {
-            Margin = new Thickness(16),
-            Orientation = Orientation.Vertical
-        };
-    }
-
-    private static TextBlock SectionHeader(string text)
-    {
-        return new TextBlock
-        {
-            Text = text,
-            FontSize = 13,
-            FontWeight = FontWeights.SemiBold,
-            Margin = new Thickness(0, 0, 0, 8)
-        };
-    }
-
-    private static Grid FormGrid(params (string LeftLabel, FrameworkElement LeftInput, string RightLabel, FrameworkElement RightInput)[] rows)
-    {
-        var grid = new Grid { Margin = new Thickness(0, 0, 0, 12) };
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-        for (var rowIndex = 0; rowIndex < rows.Length; rowIndex++)
-        {
-            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            AddFormCell(grid, rows[rowIndex].LeftLabel, rows[rowIndex].LeftInput, rowIndex, 0);
-            AddFormCell(grid, rows[rowIndex].RightLabel, rows[rowIndex].RightInput, rowIndex, 2);
-        }
-
-        return grid;
-    }
-
-    private static void AddFormCell(Grid grid, string label, FrameworkElement input, int row, int column)
-    {
-        if (!string.IsNullOrWhiteSpace(label))
-        {
-            var text = new TextBlock
-            {
-                Text = label,
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(0, 0, 8, 8)
-            };
-            Grid.SetRow(text, row);
-            Grid.SetColumn(text, column);
-            grid.Children.Add(text);
-        }
-
-        input.Margin = new Thickness(0, 0, 12, 8);
-        Grid.SetRow(input, row);
-        Grid.SetColumn(input, column + 1);
-        grid.Children.Add(input);
-    }
-
-    private static FrameworkElement WideField(string label, FrameworkElement input)
-    {
-        var panel = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
-        panel.Children.Add(new TextBlock { Text = label, Margin = new Thickness(0, 0, 0, 6) });
-        panel.Children.Add(input);
-        return panel;
-    }
-
-    private static StackPanel DialogButtons(Window window, string okText, string cancelText)
-    {
-        var panel = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Margin = new Thickness(0, 8, 0, 0)
-        };
-
-        var ok = new Button { Content = okText, MinWidth = 96 };
-        ok.Click += (_, _) => window.DialogResult = true;
-        var cancel = new Button { Content = cancelText, MinWidth = 96 };
-        cancel.Click += (_, _) => window.DialogResult = false;
-
-        panel.Children.Add(ok);
-        panel.Children.Add(cancel);
-        return panel;
-    }
 }

@@ -1,4 +1,5 @@
 using FavGCalSchedulerClone.App.Models;
+using FavGCalSchedulerClone.App.Services;
 using FavGCalSchedulerClone.App.Views.Dialogs;
 
 namespace FavGCalSchedulerClone.Tests;
@@ -79,5 +80,62 @@ public sealed class DialogDtoTests
         Assert.True(result.Settings.EnableSyncDiagnostics);
         Assert.Equal(SyncConflictPolicy.PreferLocal, result.Settings.SyncConflictPolicy);
         Assert.Equal(@"C:\temp\client_secret.json", result.OAuthClientJsonPath);
+    }
+
+    [Fact]
+    public void FavGCalImportDialogResult_PreservesImportSelections()
+    {
+        var analysis = new FavGCalImportAnalysis(
+            @"C:\Users\user\Documents\FavGCalScheduler",
+            [new FavGCalSourceCalendar(@"C:\data\work.favcal", "legacy-work", "Work", null) { EventCount = 12 }],
+            12,
+            1,
+            2,
+            ["warning"]);
+
+        var result = new FavGCalImportDialogResult(
+            analysis.SourceFolder,
+            @"C:\oauth\client.json",
+            @"C:\compare\google.zip",
+            "primary",
+            ImportSettings: true,
+            SkipDuplicates: false,
+            VerifyGoogleEventsBeforeImport: true,
+            RepairExistingColors: true,
+            RepairExistingTodoDescriptions: true,
+            analysis);
+
+        Assert.Equal(analysis.SourceFolder, result.SourceFolder);
+        Assert.Equal(@"C:\oauth\client.json", result.OAuthClientJsonPath);
+        Assert.Equal(@"C:\compare\google.zip", result.ComparisonZipPath);
+        Assert.Equal("primary", result.TargetCalendarId);
+        Assert.True(result.ImportSettings);
+        Assert.False(result.SkipDuplicates);
+        Assert.True(result.VerifyGoogleEventsBeforeImport);
+        Assert.True(result.RepairExistingColors);
+        Assert.True(result.RepairExistingTodoDescriptions);
+        Assert.Same(analysis, result.Analysis);
+    }
+
+    [Fact]
+    public void SearchDialogResult_PreservesQuery()
+    {
+        var result = new SearchDialogResult("NHP来日");
+
+        Assert.Equal("NHP来日", result.Query);
+    }
+
+    [Theory]
+    [InlineData(RecurrenceEditScope.ThisOccurrence)]
+    [InlineData(RecurrenceEditScope.ThisAndFollowing)]
+    [InlineData(RecurrenceEditScope.AllEvents)]
+    public void RecurrenceScopeDialogRequest_CanRepresentScopeDialogMode(RecurrenceEditScope scope)
+    {
+        var editRequest = new RecurrenceScopeDialogRequest(IsDelete: false);
+        var deleteRequest = new RecurrenceScopeDialogRequest(IsDelete: true);
+
+        Assert.False(editRequest.IsDelete);
+        Assert.True(deleteRequest.IsDelete);
+        Assert.Contains(scope, Enum.GetValues<RecurrenceEditScope>());
     }
 }

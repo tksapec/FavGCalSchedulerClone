@@ -65,6 +65,22 @@ public sealed partial class MainWindowMenuTests
         Assert.DoesNotContain("CreateEditorDialogRoot(", codeBehind);
     }
 
+    [Fact]
+    public async Task MainWindow_CodeBehindDelegatesRemainingDialogs()
+    {
+        var codeBehindPath = Path.ChangeExtension(MainWindowXamlPath, ".xaml.cs");
+        var codeBehind = await File.ReadAllTextAsync(codeBehindPath);
+
+        Assert.Contains("FavGCalImportDialog.Show(", codeBehind);
+        Assert.Contains("SearchDialog.Show(", codeBehind);
+        Assert.Contains("EventListDialog.Show(", codeBehind);
+        Assert.Contains("RecurrenceScopeDialog.Show(", codeBehind);
+        Assert.DoesNotContain("FormatFavGCalAnalysis", codeBehind);
+        Assert.DoesNotContain("CreateScopeButton(", codeBehind);
+        Assert.DoesNotContain("FormGrid(", codeBehind);
+        Assert.DoesNotContain("WideField(", codeBehind);
+    }
+
     [GeneratedRegex("Click=\"([^\"]+)\"")]
     private static partial Regex ClickHandlerRegex();
 }
