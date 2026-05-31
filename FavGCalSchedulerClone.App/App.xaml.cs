@@ -1,6 +1,10 @@
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Threading;
+using FavGCalSchedulerClone.App.Repositories;
+using FavGCalSchedulerClone.App.Services;
+using FavGCalSchedulerClone.App.ViewModels;
+using Microsoft.Extensions.DependencyInjection;
 using Drawing = System.Drawing;
 using Forms = System.Windows.Forms;
 
@@ -15,6 +19,7 @@ public partial class App : System.Windows.Application
     private DispatcherTimer? _trayDateTimer;
     private DateTime _trayIconDate;
     private bool _isExiting;
+    private ServiceProvider? _serviceProvider;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -29,10 +34,14 @@ public partial class App : System.Windows.Application
         _ownsInstanceMutex = true;
         base.OnStartup(e);
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        _serviceProvider = CreateServiceProvider();
         CreateTrayIcon();
 
-        MainWindow = new MainWindow();
+        var mainWindow = _serviceProvider.GetRequiredService<MainWindow>();
+        MainWindow = mainWindow;
         MainWindow.Show();
+        _ = _serviceProvider.GetRequiredService<IApplicationStartupService>()
+            .InitializeAsync(mainWindow, mainWindow.CreateReminderNotifier());
     }
 
     protected override void OnExit(ExitEventArgs e)
@@ -45,12 +54,39 @@ public partial class App : System.Windows.Application
             _trayIcon.Dispose();
         }
 
+        _serviceProvider?.Dispose();
         if (_ownsInstanceMutex)
         {
             _instanceMutex?.ReleaseMutex();
         }
         _instanceMutex?.Dispose();
         base.OnExit(e);
+    }
+
+    private static ServiceProvider CreateServiceProvider()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<CalendarRepository>();
+        services.AddSingleton<IEventRepository>(provider => provider.GetRequiredService<CalendarRepository>());
+        services.AddSingleton<ISettingsRepository>(provider => provider.GetRequiredService<CalendarRepository>());
+        services.AddSingleton<ITagRepository>(provider => provider.GetRequiredService<CalendarRepository>());
+        services.AddSingleton<ISyncStateRepository>(provider => provider.GetRequiredService<CalendarRepository>());
+        services.AddSingleton<GoogleCalendarSyncService>();
+        services.AddSingleton<IGoogleCalendarApi, GoogleCalendarApi>();
+        services.AddSingleton<ReminderNotificationService>();
+        services.AddSingleton<BackupService>();
+        services.AddSingleton<CalendarCsvService>();
+        services.AddSingleton<FavGCalSchedulerImportService>();
+        services.AddSingleton<IApplicationStartupService, ApplicationStartupService>();
+        services.AddSingleton<MainViewModel>();
+        services.AddTransient<MainWindow>();
+        services.AddTransient<CalendarViewModel>();
+        services.AddTransient<TodoViewModel>();
+        services.AddTransient<ScheduleSummaryViewModel>();
+        services.AddTransient<SettingsViewModel>();
+        services.AddTransient<SyncViewModel>();
+        services.AddTransient<ReminderHistoryViewModel>();
+        return services.BuildServiceProvider();
     }
 
     private void CreateTrayIcon()

@@ -44,6 +44,20 @@ public sealed class CalendarEvent
     }
 
     public string DateDisplayText => IsAllDay ? Start.ToString("yyyy/MM/dd") : Start.ToString("yyyy/MM/dd HH:mm");
+    public string ListStartText => IsAllDay ? $"{Start:yyyy/MM/dd} [終日]" : Start.ToString("yyyy/MM/dd HH:mm");
+    public string ListEndText => IsAllDay ? $"{End:yyyy/MM/dd} [終日]" : End.ToString("yyyy/MM/dd HH:mm");
+    public string ReminderDisplayText => ReminderMinutesBeforeStart switch
+    {
+        null => "",
+        0 => "時刻",
+        < 60 => $"{ReminderMinutesBeforeStart}分前",
+        _ when ReminderMinutesBeforeStart % 60 == 0 => $"{ReminderMinutesBeforeStart / 60}時間前",
+        _ => $"{ReminderMinutesBeforeStart}分前"
+    };
+    public string DescriptionPreview => SingleLine(Description);
+    public string SummaryDisplayText => IsAllDay
+        ? $"{Start:yyyy年MM月dd日(00:00)}〜{End:yyyy年MM月dd日(00:00)}の予定。"
+        : $"{Start:yyyy年MM月dd日(HH:mm)}〜{End:HH:mm}の予定。";
     public TodoMetadata? TodoMetadata => FavGCalSchedulerClone.App.Services.TagService.GetTodoMetadata(this);
     public string TodoPriority => TodoMetadata?.Priority ?? "";
     public int TodoProgress => TodoMetadata?.Progress ?? 0;
@@ -53,4 +67,14 @@ public sealed class CalendarEvent
     public bool IsOverdueTodo => IsTodoLike && !IsTodoDone && Start.Date < DateTime.Today;
     public bool IsRecurringMaster => !string.IsNullOrWhiteSpace(RecurrenceJson) && !IsRecurrenceException;
     public bool IsRecurringSeriesItem => IsRecurringMaster || IsRecurrenceException || IsGeneratedOccurrence || !string.IsNullOrWhiteSpace(RecurringEventId) || !string.IsNullOrWhiteSpace(RecurringParentId);
+
+    private static string SingleLine(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "";
+        }
+
+        return value.Replace("\r\n", " ").Replace('\r', ' ').Replace('\n', ' ').Trim();
+    }
 }

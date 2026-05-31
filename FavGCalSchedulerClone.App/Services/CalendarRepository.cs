@@ -1,10 +1,11 @@
 using System.Text.Json;
 using FavGCalSchedulerClone.App.Models;
+using FavGCalSchedulerClone.App.Repositories;
 using Microsoft.Data.Sqlite;
 
 namespace FavGCalSchedulerClone.App.Services;
 
-public sealed class CalendarRepository
+public sealed class CalendarRepository : IEventRepository, ISettingsRepository, ITagRepository, ISyncStateRepository
 {
     private readonly string _databasePath;
 

@@ -27,32 +27,38 @@ public partial class MainWindow : Window
     private CalendarDay? _dragOverDay;
     private DialogUiFactory DialogUi => new(this, _viewModel.EventColorOptions, _viewModel.SideListFontSize);
 
-    public MainWindow()
+    public MainWindow(MainViewModel viewModel, ReminderNotificationService reminderService)
     {
         InitializeComponent();
-        var repository = new CalendarRepository();
-        _viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
-        _reminderService = new ReminderNotificationService(repository);
+        _viewModel = viewModel;
+        _reminderService = reminderService;
         _automaticSyncTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
         _automaticSyncTimer.Tick += async (_, _) => await _viewModel.RunAutomaticSyncIfDueAsync();
         DataContext = _viewModel;
         _viewModel.SetManualSyncPreviewConfirmation(preview => Task.FromResult(SyncDialogs.ShowPreview(this, preview) == true));
+        _viewModel.SetWindowCommandHandlers(
+            ShowScheduleDialogAsync,
+            ShowTodoDialogAsync,
+            BackupAllCalendarsAsync,
+            RestoreAllCalendarsAsync,
+            ShowFavGCalSchedulerImportDialogAsync,
+            ImportCsvAsync,
+            ExportCsvAsync,
+            () => ShowEventListDialogAsync("スケジュール一覧", new EventListFilter(string.Empty, EventKindFilter.All, EventSearchRange.Year, _viewModel.CurrentMonth)),
+            ShowSearchDialogAsync,
+            ShowSyncDiagnosticsDialogAsync,
+            () =>
+            {
+                ShowSettingsDialog();
+                return Task.CompletedTask;
+            },
+            ShowReminderHistoryDialogAsync,
+            () =>
+            {
+                AboutDialog.Show(this);
+                return Task.CompletedTask;
+            });
         ToastNotificationManagerCompat.OnActivated += ToastNotificationManagerCompat_OnActivated;
-    }
-
-    private async void Window_Loaded(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            await _viewModel.InitializeAsync();
-            _reminderService.SetNotifier(CreateReminderNotifier());
-            await _reminderService.StartAsync();
-            _automaticSyncTimer.Start();
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, ex.Message, "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
     }
 
     private void Window_Closing(object? sender, CancelEventArgs e)
@@ -71,7 +77,7 @@ public partial class MainWindow : Window
         Hide();
     }
 
-    private IReminderNotifier CreateReminderNotifier()
+    public IReminderNotifier CreateReminderNotifier()
     {
         var fallback = new MessageBoxReminderNotifier(this);
         IReminderNotifier notifier = _viewModel.UseWindowsToastNotifications
@@ -386,7 +392,7 @@ public partial class MainWindow : Window
         menu.Items.Add(new Separator());
 
         var list = new MenuItem { Header = "スケジュール一覧" };
-        list.Click += async (_, _) => await ShowEventListDialogAsync("スケジュール一覧", string.Empty);
+        list.Click += async (_, _) => await ShowEventListDialogAsync("スケジュール一覧", new EventListFilter(string.Empty, EventKindFilter.All, EventSearchRange.Year, _viewModel.CurrentMonth));
         menu.Items.Add(list);
 
         menu.IsOpen = true;
@@ -402,7 +408,7 @@ public partial class MainWindow : Window
         await ShowTodoDialogAsync();
     }
 
-    private async void BackupAllCalendarsMenu_Click(object sender, RoutedEventArgs e)
+    private async Task BackupAllCalendarsAsync()
     {
         var dialog = new SaveFileDialog
         {
@@ -427,7 +433,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void RestoreAllCalendarsMenu_Click(object sender, RoutedEventArgs e)
+    private async Task RestoreAllCalendarsAsync()
     {
         var dialog = new OpenFileDialog
         {
@@ -466,7 +472,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void ImportCsvMenu_Click(object sender, RoutedEventArgs e)
+    private async Task ImportCsvAsync()
     {
         var dialog = new OpenFileDialog
         {
@@ -506,7 +512,7 @@ public partial class MainWindow : Window
         await ShowFavGCalSchedulerImportDialogAsync();
     }
 
-    private async void ExportCsvMenu_Click(object sender, RoutedEventArgs e)
+    private async Task ExportCsvAsync()
     {
         var dialog = new SaveFileDialog
         {
@@ -533,7 +539,7 @@ public partial class MainWindow : Window
 
     private async void ScheduleListMenu_Click(object sender, RoutedEventArgs e)
     {
-        await ShowEventListDialogAsync("スケジュール一覧", string.Empty);
+        await ShowEventListDialogAsync("スケジュール一覧", new EventListFilter(string.Empty, EventKindFilter.All, EventSearchRange.Year, _viewModel.CurrentMonth));
     }
 
     private async void SearchMenu_Click(object sender, RoutedEventArgs e)
@@ -905,22 +911,30 @@ public partial class MainWindow : Window
             new DateTime(_viewModel.CurrentMonth.Year, 12, 31)));
         if (result is not null)
         {
-            await ShowEventListDialogAsync("スケジュール一覧", result.Query);
+            await ShowEventListDialogAsync(
+                "スケジュール一覧",
+                new EventListFilter(
+                    result.Query,
+                    result.KindFilter,
+                    result.Range,
+                    result.StartDate ?? _viewModel.CurrentMonth,
+                    StartDate: result.StartDate,
+                    EndDate: result.EndDate));
         }
     }
 
-    private async Task ShowEventListDialogAsync(string title, string query)
+    private async Task ShowEventListDialogAsync(string title, EventListFilter filter)
     {
-        async Task<IReadOnlyList<CalendarEvent>> LoadEventsAsync()
+        async Task<IReadOnlyList<CalendarEvent>> LoadEventsAsync(EventListFilter requestFilter)
         {
-            return string.IsNullOrWhiteSpace(query)
-                ? await _viewModel.LoadYearEventsAsync(_viewModel.CurrentMonth)
-                : await _viewModel.SearchYearEventsAsync(_viewModel.CurrentMonth, query);
+            return await _viewModel.SearchEventsAsync(requestFilter);
         }
 
         EventListDialog.Show(DialogUi, new EventListDialogRequest(
             title,
-            await LoadEventsAsync(),
+            await LoadEventsAsync(filter),
+            filter,
+            _viewModel.CalendarNames.ToArray(),
             LoadEventsAsync,
             OpenGridEventEditorAsync));
     }

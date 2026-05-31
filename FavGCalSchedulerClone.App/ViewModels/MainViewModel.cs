@@ -15,8 +15,8 @@ public sealed class MainViewModel : ObservableObject
     private const string ScheduleLocationHistoryKey = "schedule:location-history";
     private readonly CalendarRepository _repository;
     private readonly GoogleCalendarSyncService _syncService;
-    private readonly BackupService _backupService = new();
-    private readonly CalendarCsvService _csvService = new();
+    private readonly BackupService _backupService;
+    private readonly CalendarCsvService _csvService;
     private readonly FavGCalSchedulerImportService _favGCalImportService;
     private IReadOnlyList<CalendarEvent> _storedEvents = [];
     private IReadOnlyList<CalendarEvent> _visibleEvents = [];
@@ -48,12 +48,37 @@ public sealed class MainViewModel : ObservableObject
     private IReadOnlyList<string> _scheduleLocationHistory = [];
     private int _syncInProgress;
     private Func<SyncPreview, Task<bool>>? _confirmManualSyncPreviewAsync;
+    private Func<Task>? _showAddScheduleAsync;
+    private Func<Task>? _showAddTodoAsync;
+    private Func<Task>? _backupAllCalendarsAsync;
+    private Func<Task>? _restoreAllCalendarsAsync;
+    private Func<Task>? _importFavGCalSchedulerAsync;
+    private Func<Task>? _importCsvAsync;
+    private Func<Task>? _exportCsvAsync;
+    private Func<Task>? _showScheduleListAsync;
+    private Func<Task>? _showSearchAsync;
+    private Func<Task>? _showSyncDiagnosticsAsync;
+    private Func<Task>? _showSettingsAsync;
+    private Func<Task>? _showReminderHistoryAsync;
+    private Func<Task>? _showAboutAsync;
 
     public MainViewModel(CalendarRepository repository, GoogleCalendarSyncService syncService)
+        : this(repository, syncService, new BackupService(), new CalendarCsvService(), new FavGCalSchedulerImportService(repository))
+    {
+    }
+
+    public MainViewModel(
+        CalendarRepository repository,
+        GoogleCalendarSyncService syncService,
+        BackupService backupService,
+        CalendarCsvService csvService,
+        FavGCalSchedulerImportService favGCalImportService)
     {
         _repository = repository;
         _syncService = syncService;
-        _favGCalImportService = new FavGCalSchedulerImportService(repository);
+        _backupService = backupService;
+        _csvService = csvService;
+        _favGCalImportService = favGCalImportService;
 
         PreviousMonthCommand = new RelayCommand(() => NavigatePrimary(-1));
         NextMonthCommand = new RelayCommand(() => NavigatePrimary(1));
@@ -73,6 +98,19 @@ public sealed class MainViewModel : ObservableObject
         AuthorizeCommand = CreateAsyncCommand(AuthorizeAsync);
         ClearTokensCommand = CreateAsyncCommand(ClearTokensAsync);
         SaveTagsCommand = CreateAsyncCommand(SaveTagsAsync);
+        AddScheduleCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_showAddScheduleAsync));
+        AddTodoCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_showAddTodoAsync));
+        BackupAllCalendarsCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_backupAllCalendarsAsync));
+        RestoreAllCalendarsCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_restoreAllCalendarsAsync));
+        ImportFavGCalSchedulerCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_importFavGCalSchedulerAsync));
+        ImportCsvCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_importCsvAsync));
+        ExportCsvCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_exportCsvAsync));
+        ShowScheduleListCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_showScheduleListAsync));
+        SearchCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_showSearchAsync));
+        ShowSyncDiagnosticsCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_showSyncDiagnosticsAsync));
+        ShowSettingsCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_showSettingsAsync));
+        ShowReminderHistoryCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_showReminderHistoryAsync));
+        ShowAboutCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_showAboutAsync));
     }
 
     private AsyncRelayCommand CreateAsyncCommand(Func<Task> execute, Func<bool>? canExecute = null) =>
@@ -114,6 +152,19 @@ public sealed class MainViewModel : ObservableObject
     public AsyncRelayCommand AuthorizeCommand { get; }
     public AsyncRelayCommand ClearTokensCommand { get; }
     public AsyncRelayCommand SaveTagsCommand { get; }
+    public AsyncRelayCommand AddScheduleCommand { get; }
+    public AsyncRelayCommand AddTodoCommand { get; }
+    public AsyncRelayCommand BackupAllCalendarsCommand { get; }
+    public AsyncRelayCommand RestoreAllCalendarsCommand { get; }
+    public AsyncRelayCommand ImportFavGCalSchedulerCommand { get; }
+    public AsyncRelayCommand ImportCsvCommand { get; }
+    public AsyncRelayCommand ExportCsvCommand { get; }
+    public AsyncRelayCommand ShowScheduleListCommand { get; }
+    public AsyncRelayCommand SearchCommand { get; }
+    public AsyncRelayCommand ShowSyncDiagnosticsCommand { get; }
+    public AsyncRelayCommand ShowSettingsCommand { get; }
+    public AsyncRelayCommand ShowReminderHistoryCommand { get; }
+    public AsyncRelayCommand ShowAboutCommand { get; }
 
     public string MonthTitle => CurrentMonth.ToString("yyyy/MM", CultureInfo.InvariantCulture);
     public string JapaneseMonthTitle => CalendarStatusFormatter.FormatJapaneseMonthTitle(CurrentMonth);
@@ -619,15 +670,63 @@ public sealed class MainViewModel : ObservableObject
 
     public async Task<IReadOnlyList<CalendarEvent>> SearchYearEventsAsync(DateTime yearInView, string query)
     {
-        var events = await LoadYearEventsAsync(yearInView);
-        if (string.IsNullOrWhiteSpace(query))
+        return await SearchEventsAsync(new EventListFilter(query, EventKindFilter.All, EventSearchRange.Year, yearInView));
+    }
+
+    public async Task<IReadOnlyList<CalendarEvent>> SearchEventsAsync(EventListFilter filter)
+    {
+        var (start, end) = ResolveSearchRange(filter);
+        var events = await _repository.LoadEventsAsync(new DateTimeOffset(start), new DateTimeOffset(end));
+        var expanded = RecurrenceExpansionService.ExpandForRange(events, new DateTimeOffset(start), new DateTimeOffset(end));
+        ApplyDisplayColors(expanded);
+        var visible = expanded.Where(IsVisible);
+        if (!string.IsNullOrWhiteSpace(filter.CalendarId))
         {
-            return events;
+            visible = visible.Where(e => string.Equals(e.CalendarId, filter.CalendarId, StringComparison.Ordinal));
         }
 
-        return events
+        visible = filter.KindFilter switch
+        {
+            EventKindFilter.Schedule => visible.Where(e => !e.IsTodoLike),
+            EventKindFilter.Todo => visible.Where(e => e.IsTodoLike),
+            _ => visible
+        };
+
+        var query = filter.Query.Trim();
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return visible.OrderBy(e => e.Start).ThenBy(e => e.Title).ToArray();
+        }
+
+        return visible
             .Where(e => e.SearchText.Contains(query.Trim(), StringComparison.CurrentCultureIgnoreCase))
+            .OrderBy(e => e.Start)
+            .ThenBy(e => e.Title)
             .ToArray();
+    }
+
+    private static (DateTime Start, DateTime End) ResolveSearchRange(EventListFilter filter)
+    {
+        var date = filter.ReferenceDate.Date;
+        if (filter.Range == EventSearchRange.Custom)
+        {
+            var start = (filter.StartDate ?? date).Date;
+            var end = (filter.EndDate ?? start).Date;
+            if (end < start)
+            {
+                (start, end) = (end, start);
+            }
+
+            return (start, end.AddDays(1));
+        }
+
+        return filter.Range switch
+        {
+            EventSearchRange.Day => (date, date.AddDays(1)),
+            EventSearchRange.Month => (new DateTime(date.Year, date.Month, 1), new DateTime(date.Year, date.Month, 1).AddMonths(1)),
+            EventSearchRange.All => (new DateTime(1900, 1, 1), new DateTime(2100, 1, 1)),
+            _ => (new DateTime(date.Year, 1, 1), new DateTime(date.Year + 1, 1, 1))
+        };
     }
 
     public async Task SaveTagsAsync()
@@ -843,6 +942,38 @@ public sealed class MainViewModel : ObservableObject
     {
         _confirmManualSyncPreviewAsync = confirmManualSyncPreviewAsync;
     }
+
+    public void SetWindowCommandHandlers(
+        Func<Task> showAddScheduleAsync,
+        Func<Task> showAddTodoAsync,
+        Func<Task> backupAllCalendarsAsync,
+        Func<Task> restoreAllCalendarsAsync,
+        Func<Task> importFavGCalSchedulerAsync,
+        Func<Task> importCsvAsync,
+        Func<Task> exportCsvAsync,
+        Func<Task> showScheduleListAsync,
+        Func<Task> showSearchAsync,
+        Func<Task> showSyncDiagnosticsAsync,
+        Func<Task> showSettingsAsync,
+        Func<Task> showReminderHistoryAsync,
+        Func<Task> showAboutAsync)
+    {
+        _showAddScheduleAsync = showAddScheduleAsync;
+        _showAddTodoAsync = showAddTodoAsync;
+        _backupAllCalendarsAsync = backupAllCalendarsAsync;
+        _restoreAllCalendarsAsync = restoreAllCalendarsAsync;
+        _importFavGCalSchedulerAsync = importFavGCalSchedulerAsync;
+        _importCsvAsync = importCsvAsync;
+        _exportCsvAsync = exportCsvAsync;
+        _showScheduleListAsync = showScheduleListAsync;
+        _showSearchAsync = showSearchAsync;
+        _showSyncDiagnosticsAsync = showSyncDiagnosticsAsync;
+        _showSettingsAsync = showSettingsAsync;
+        _showReminderHistoryAsync = showReminderHistoryAsync;
+        _showAboutAsync = showAboutAsync;
+    }
+
+    private static Task InvokeWindowCommandAsync(Func<Task>? handler) => handler?.Invoke() ?? Task.CompletedTask;
 
     public async Task<SyncResult?> SynchronizeManuallyWithPreviewAsync()
     {

@@ -1,5 +1,3 @@
-using System.Text.RegularExpressions;
-
 namespace FavGCalSchedulerClone.Tests;
 
 public sealed partial class MainWindowMenuTests
@@ -36,19 +34,40 @@ public sealed partial class MainWindowMenuTests
         Assert.Contains($"<KeyBinding Key=\"{key}\" Command=\"{{Binding {command}}}\" />", xaml);
     }
 
-    [Fact]
-    public async Task MainMenu_ClickHandlersExistInCodeBehind()
+    [Theory]
+    [InlineData("BackupAllCalendarsCommand")]
+    [InlineData("RestoreAllCalendarsCommand")]
+    [InlineData("ImportFavGCalSchedulerCommand")]
+    [InlineData("ImportCsvCommand")]
+    [InlineData("ExportCsvCommand")]
+    [InlineData("AddScheduleCommand")]
+    [InlineData("AddTodoCommand")]
+    [InlineData("ShowScheduleListCommand")]
+    [InlineData("SearchCommand")]
+    [InlineData("ShowSyncDiagnosticsCommand")]
+    [InlineData("ShowSettingsCommand")]
+    [InlineData("ShowReminderHistoryCommand")]
+    [InlineData("ShowAboutCommand")]
+    public async Task MainMenu_UsesCommandBindingsForCommandableItems(string command)
     {
         var xaml = await File.ReadAllTextAsync(MainWindowXamlPath);
-        var codeBehindPath = Path.ChangeExtension(MainWindowXamlPath, ".xaml.cs");
-        var codeBehind = await File.ReadAllTextAsync(codeBehindPath);
-        var handlers = ClickHandlerRegex()
-            .Matches(xaml)
-            .Select(match => match.Groups[1].Value)
-            .Distinct(StringComparer.Ordinal)
+        var viewModelPath = Path.Combine(Path.GetDirectoryName(MainWindowXamlPath)!, "ViewModels", "MainViewModel.cs");
+        var viewModel = await File.ReadAllTextAsync(viewModelPath);
+
+        Assert.Contains($"Command=\"{{Binding {command}}}\"", xaml);
+        Assert.Contains($"public AsyncRelayCommand {command} {{ get; }}", viewModel);
+    }
+
+    [Fact]
+    public async Task MainMenu_DoesNotUseClickHandlersForCommandableItems()
+    {
+        var xaml = await File.ReadAllTextAsync(MainWindowXamlPath);
+        var menuItemLines = xaml
+            .Split(Environment.NewLine)
+            .Where(line => line.Contains("<MenuItem ", StringComparison.Ordinal))
             .ToArray();
 
-        Assert.All(handlers, handler => Assert.Contains($"{handler}(", codeBehind));
+        Assert.DoesNotContain(menuItemLines, line => line.Contains(" Click=", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -81,6 +100,4 @@ public sealed partial class MainWindowMenuTests
         Assert.DoesNotContain("WideField(", codeBehind);
     }
 
-    [GeneratedRegex("Click=\"([^\"]+)\"")]
-    private static partial Regex ClickHandlerRegex();
 }

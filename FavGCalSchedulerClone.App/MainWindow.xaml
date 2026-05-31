@@ -7,7 +7,6 @@
         Title="FavGCalSchedulerClone" Height="760" Width="1180" MinHeight="720" MinWidth="1040"
         FontFamily="Meiryo UI" FontSize="12"
         Background="#EDF1F5" Opacity="{Binding WindowOpacity}"
-        Loaded="Window_Loaded"
         Closing="Window_Closing">
     <Window.InputBindings>
         <KeyBinding Key="F5" Command="{Binding ShowMonthViewCommand}" />
@@ -245,19 +244,19 @@
     <DockPanel Background="#EDF1F5">
         <Menu DockPanel.Dock="Top" Style="{StaticResource FlatMenuStyle}">
             <MenuItem Header="ファイル(_F)">
-                <MenuItem Header="全カレンダーのバックアップ(_B)" Click="BackupAllCalendarsMenu_Click" />
-                <MenuItem Header="全カレンダーのリストア(_R)" Click="RestoreAllCalendarsMenu_Click" />
+                <MenuItem Header="全カレンダーのバックアップ(_B)" Command="{Binding BackupAllCalendarsCommand}" />
+                <MenuItem Header="全カレンダーのリストア(_R)" Command="{Binding RestoreAllCalendarsCommand}" />
                 <Separator />
-                <MenuItem Header="FavGCalSchedulerデータ移行..." Click="ImportFavGCalSchedulerMenu_Click" />
+                <MenuItem Header="FavGCalSchedulerデータ移行..." Command="{Binding ImportFavGCalSchedulerCommand}" />
                 <Separator />
-                <MenuItem Header="インポート(_I)" Click="ImportCsvMenu_Click" />
-                <MenuItem Header="エクスポート(_E)" Click="ExportCsvMenu_Click" />
+                <MenuItem Header="インポート(_I)" Command="{Binding ImportCsvCommand}" />
+                <MenuItem Header="エクスポート(_E)" Command="{Binding ExportCsvCommand}" />
             </MenuItem>
             <MenuItem Header="編集(_E)">
-                <MenuItem Header="スケジュールの追加(_A)" Click="AddScheduleMenu_Click" />
-                <MenuItem Header="ToDoの追加(_D)" Click="AddTodoMenu_Click" />
+                <MenuItem Header="スケジュールの追加(_A)" Command="{Binding AddScheduleCommand}" />
+                <MenuItem Header="ToDoの追加(_D)" Command="{Binding AddTodoCommand}" />
                 <Separator />
-                <MenuItem Header="スケジュール一覧(_L)" Click="ScheduleListMenu_Click" />
+                <MenuItem Header="スケジュール一覧(_L)" Command="{Binding ShowScheduleListCommand}" />
             </MenuItem>
             <MenuItem Header="表示(_V)">
                 <MenuItem Header="月表示(_M)" InputGestureText="F5" Command="{Binding ShowMonthViewCommand}" />
@@ -273,24 +272,24 @@
                 <MenuItem Header="大きく前へ(_-)" Command="{Binding PreviousYearCommand}" />
                 <MenuItem Header="大きく次へ(_+)" Command="{Binding NextYearCommand}" />
             </MenuItem>
-            <MenuItem Header="検索(_S)" Click="SearchMenu_Click" />
+            <MenuItem Header="検索(_S)" Command="{Binding SearchCommand}" />
             <MenuItem Header="Googleカレンダー(_G)">
                 <MenuItem Header="OAuth JSONを選択..." Command="{Binding BrowseOAuthClientCommand}" />
                 <MenuItem Header="Google認証" Command="{Binding AuthorizeCommand}" />
                 <MenuItem Header="トークン削除" Command="{Binding ClearTokensCommand}" />
                 <Separator />
-                <MenuItem Header="同期する" InputGestureText="F8" Click="SyncMenu_Click" />
-                <MenuItem Header="同期診断..." Click="SyncDiagnosticsMenu_Click" />
+                <MenuItem Header="同期する" InputGestureText="F8" Command="{Binding SyncCommand}" />
+                <MenuItem Header="同期診断..." Command="{Binding ShowSyncDiagnosticsCommand}" />
                 <MenuItem Header="カレンダー一覧を更新" Command="{Binding ReloadCalendarListCommand}" />
                 <Separator />
                 <MenuItem Header="表示カレンダー" ItemsSource="{Binding AvailableCalendars}" ItemContainerStyle="{StaticResource CalendarMenuItemStyle}" />
             </MenuItem>
             <MenuItem Header="設定(_C)">
-                <MenuItem Header="アプリ設定(_A)" Click="SettingsMenu_Click" />
-                <MenuItem Header="通知一覧..." Click="ReminderHistoryMenu_Click" />
+                <MenuItem Header="アプリ設定(_A)" Command="{Binding ShowSettingsCommand}" />
+                <MenuItem Header="通知一覧..." Command="{Binding ShowReminderHistoryCommand}" />
             </MenuItem>
             <MenuItem Header="ヘルプ(_H)">
-                <MenuItem Header="バージョン情報(_A)..." Click="AboutMenu_Click" />
+                <MenuItem Header="バージョン情報(_A)..." Command="{Binding ShowAboutCommand}" />
             </MenuItem>
         </Menu>
 
