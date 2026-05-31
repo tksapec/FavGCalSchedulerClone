@@ -51,6 +51,20 @@ public sealed partial class MainWindowMenuTests
         Assert.All(handlers, handler => Assert.Contains($"{handler}(", codeBehind));
     }
 
+    [Fact]
+    public async Task MainWindow_CodeBehindDelegatesEditorDialogs()
+    {
+        var codeBehindPath = Path.ChangeExtension(MainWindowXamlPath, ".xaml.cs");
+        var codeBehind = await File.ReadAllTextAsync(codeBehindPath);
+
+        Assert.Contains("ScheduleEditorDialog.Show(", codeBehind);
+        Assert.Contains("TodoEditorDialog.Show(", codeBehind);
+        Assert.Contains("SettingsDialog.ShowAsync(", codeBehind);
+        Assert.DoesNotContain("AddTodoEditorLayout(", codeBehind);
+        Assert.DoesNotContain("CreateColorComboBox(", codeBehind);
+        Assert.DoesNotContain("CreateEditorDialogRoot(", codeBehind);
+    }
+
     [GeneratedRegex("Click=\"([^\"]+)\"")]
     private static partial Regex ClickHandlerRegex();
 }
