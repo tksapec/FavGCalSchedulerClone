@@ -14,20 +14,32 @@ internal static class TodoEditorDialog
         var root = ui.CreateEditorDialogRoot();
         window.Content = root;
 
-        var dueDate = new DatePicker { SelectedDate = request.DueDate };
+        var dueDate = ui.CreateDatePickerWithTodayButton(request.DueDate, out var dueDateEditor);
         var priority = new ComboBox { SelectedIndex = 0, ItemsSource = PriorityItems };
         priority.SelectedItem = string.IsNullOrWhiteSpace(request.Priority) ? "A" : request.Priority;
         FrameworkElement progressInput;
         FrameworkElement progressValue;
         Func<int> getProgress;
+        var complete = new CheckBox
+        {
+            Content = "完了",
+            IsChecked = request.Progress >= 100,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(14, 0, 0, 0)
+        };
         if (request.IsNew)
         {
             var done = new CheckBox { Content = "進捗(0%)", VerticalAlignment = VerticalAlignment.Center };
             done.Checked += (_, _) => done.Content = "進捗(100%)";
             done.Unchecked += (_, _) => done.Content = "進捗(0%)";
+            done.IsChecked = request.Progress >= 100;
+            complete.Checked += (_, _) => done.IsChecked = true;
+            complete.Unchecked += (_, _) => done.IsChecked = false;
+            done.Checked += (_, _) => complete.IsChecked = true;
+            done.Unchecked += (_, _) => complete.IsChecked = false;
             progressInput = done;
             progressValue = new TextBlock();
-            getProgress = () => done.IsChecked == true ? 100 : 0;
+            getProgress = () => complete.IsChecked == true || done.IsChecked == true ? 100 : 0;
         }
         else
         {
@@ -45,9 +57,26 @@ internal static class TodoEditorDialog
             };
             var progressLabel = new TextBlock { Text = $"進捗 {request.Progress}%", VerticalAlignment = VerticalAlignment.Center };
             slider.ValueChanged += (_, _) => progressLabel.Text = $"進捗 {(int)slider.Value}%";
+            complete.Checked += (_, _) =>
+            {
+                slider.Value = 100;
+                slider.IsEnabled = false;
+            };
+            complete.Unchecked += (_, _) =>
+            {
+                slider.IsEnabled = true;
+                if ((int)slider.Value >= 100)
+                {
+                    slider.Value = Math.Min(90, Math.Max(0, request.Progress));
+                }
+            };
+            if (complete.IsChecked == true)
+            {
+                slider.IsEnabled = false;
+            }
             progressInput = slider;
             progressValue = progressLabel;
-            getProgress = () => (int)slider.Value;
+            getProgress = () => complete.IsChecked == true ? 100 : (int)slider.Value;
         }
 
         var calendar = new ComboBox
@@ -70,7 +99,7 @@ internal static class TodoEditorDialog
             VerticalContentAlignment = VerticalAlignment.Top
         };
 
-        AddTodoEditorLayout(ui, root, window, dueDate, priority, progressInput, progressValue, color, calendar, title, description);
+        AddTodoEditorLayout(ui, root, window, dueDateEditor, priority, progressInput, progressValue, complete, color, calendar, title, description);
         if (window.ShowDialog() != true)
         {
             return null;
@@ -90,10 +119,11 @@ internal static class TodoEditorDialog
         DialogUiFactory ui,
         Grid root,
         Window window,
-        DatePicker dueDate,
+        FrameworkElement dueDate,
         ComboBox priority,
         FrameworkElement progressInput,
         FrameworkElement progressValue,
+        CheckBox complete,
         ComboBox color,
         ComboBox calendar,
         TextBox title,
@@ -108,6 +138,7 @@ internal static class TodoEditorDialog
         ui.AddLabeledField(dueGrid, 0, 0, "期限", dueDate);
         var progressPanel = new StackPanel { Orientation = Orientation.Horizontal };
         progressPanel.Children.Add(progressInput);
+        progressPanel.Children.Add(complete);
         if (progressValue is TextBlock text && !string.IsNullOrWhiteSpace(text.Text))
         {
             progressPanel.Children.Add(progressValue);

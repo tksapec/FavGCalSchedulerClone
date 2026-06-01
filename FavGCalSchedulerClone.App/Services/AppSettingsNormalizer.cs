@@ -25,6 +25,22 @@ internal static class AppSettingsNormalizer
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Distinct(StringComparer.Ordinal)
             .ToList();
+        settings.EventColorSettings = settings.EventColorSettings
+            .Where(setting => !string.IsNullOrWhiteSpace(setting.ColorId))
+            .GroupBy(setting => setting.ColorId.Trim(), StringComparer.Ordinal)
+            .Select(group =>
+            {
+                var setting = group.Last();
+                return new EventColorSetting
+                {
+                    ColorId = group.Key,
+                    Label = string.IsNullOrWhiteSpace(setting.Label) ? null : setting.Label.Trim(),
+                    IsEnabled = setting.IsEnabled
+                };
+            })
+            .Where(setting => int.TryParse(setting.ColorId, out var id) && id is >= 1 and <= 11)
+            .OrderBy(setting => int.Parse(setting.ColorId))
+            .ToList();
         if (settings.VisibleCalendarIds.Count == 0)
         {
             settings.VisibleCalendarIds.Add(string.IsNullOrWhiteSpace(settings.ActiveCalendarId)

@@ -33,6 +33,14 @@ public sealed class AppSettings
     public bool ShowSyncPreviewBeforeManualSync { get; set; }
     public bool EnableSyncDiagnostics { get; set; }
     public SyncConflictPolicy SyncConflictPolicy { get; set; } = SyncConflictPolicy.SkipLocalDirty;
+    public List<EventColorSetting> EventColorSettings { get; set; } = [];
+}
+
+public sealed class EventColorSetting
+{
+    public string ColorId { get; set; } = "";
+    public string? Label { get; set; }
+    public bool IsEnabled { get; set; } = true;
 }
 
 public enum WeekdayDisplayType

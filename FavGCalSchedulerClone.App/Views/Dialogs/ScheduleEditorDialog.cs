@@ -16,8 +16,8 @@ internal static class ScheduleEditorDialog
         var root = ui.CreateEditorDialogRoot();
         window.Content = root;
 
-        var startDate = new DatePicker { SelectedDate = request.StartDate };
-        var endDate = new DatePicker { SelectedDate = request.EndDate };
+        var startDate = ui.CreateDatePickerWithTodayButton(request.StartDate, out var startDateEditor);
+        var endDate = ui.CreateDatePickerWithTodayButton(request.EndDate, out var endDateEditor);
         var startTime = TimeComboBox(request.StartTime);
         var endTime = TimeComboBox(request.EndTime);
         var dayCount = new TextBox { Width = ui.X(48), Text = "1", HorizontalContentAlignment = HorizontalAlignment.Right };
@@ -111,8 +111,8 @@ internal static class ScheduleEditorDialog
         timeGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         timeGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         timeGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        ui.AddLabeledField(timeGrid, 0, 0, "開始日", startDate);
-        ui.AddLabeledField(timeGrid, 0, 2, "終了日", endDate);
+        ui.AddLabeledField(timeGrid, 0, 0, "開始日", startDateEditor);
+        ui.AddLabeledField(timeGrid, 0, 2, "終了日", endDateEditor);
         var dayPanel = new StackPanel { Orientation = Orientation.Horizontal };
         dayPanel.Children.Add(dayCount);
         dayPanel.Children.Add(new TextBlock { Text = " 日数", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) });

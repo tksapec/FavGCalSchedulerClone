@@ -375,6 +375,18 @@ public partial class MainWindow : Window
         delete.Click += async (_, _) => await DeleteSelectedEventWithOptionalConfirmationAsync();
         menu.Items.Add(delete);
 
+        var copy = new MenuItem { Header = "コピー", IsEnabled = _viewModel.SelectedEvent is not null };
+        copy.Click += (_, _) => _viewModel.CopySelectedEventLabel();
+        menu.Items.Add(copy);
+
+        var cut = new MenuItem { Header = "切り取り", IsEnabled = _viewModel.SelectedEvent is not null };
+        cut.Click += (_, _) => _viewModel.CutSelectedEventLabel();
+        menu.Items.Add(cut);
+
+        var paste = new MenuItem { Header = "貼付", IsEnabled = _viewModel.CanPasteEventLabel };
+        paste.Click += async (_, _) => await _viewModel.PasteEventLabelAsync(_viewModel.SelectedDay?.Date ?? _viewModel.SelectedEvent?.Start.Date ?? DateTime.Today);
+        menu.Items.Add(paste);
+
         var completeTodo = new MenuItem
         {
             Header = "ToDoを完了にする",

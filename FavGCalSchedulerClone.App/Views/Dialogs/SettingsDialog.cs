@@ -1,6 +1,8 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using FavGCalSchedulerClone.App.Models;
+using FavGCalSchedulerClone.App.Services;
 using Microsoft.Win32;
 
 namespace FavGCalSchedulerClone.App.Views.Dialogs;
@@ -60,6 +62,65 @@ internal static class SettingsDialog
         displayPage.Children.Add(opacityLabel);
         displayPage.Children.Add(opacity);
         tabs.Items.Add(Tab("表示設定", displayPage));
+
+        var colorPage = Page();
+        var colorControls = new List<(string ColorId, TextBox Label, CheckBox IsEnabled)>();
+        var colorGrid = new Grid { Margin = new Thickness(0, 8, 0, 0) };
+        colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        colorGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        AddText(colorGrid, "Color", 0, 0);
+        AddText(colorGrid, "Label", 0, 2);
+        AddText(colorGrid, "Enabled", 0, 3);
+
+        for (var colorId = 1; colorId <= 11; colorId++)
+        {
+            var id = colorId.ToString();
+            var configured = settings.EventColorSettings.FirstOrDefault(item => item.ColorId == id);
+            var colors = TagService.DefaultEventColorPalette.TryGetValue(id, out var paletteColor)
+                ? paletteColor
+                : new EventDisplayColors(TagService.DefaultDisplayColor, TagService.DefaultDisplayForegroundColor);
+            var row = colorGrid.RowDefinitions.Count;
+            colorGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            var swatch = new Border
+            {
+                Width = 54,
+                Height = 16,
+                BorderBrush = Brushes.SlateGray,
+                BorderThickness = new Thickness(1),
+                Background = CreateBrush(colors.Background),
+                Margin = new Thickness(0, 2, 8, 6)
+            };
+            Grid.SetRow(swatch, row);
+            Grid.SetColumn(swatch, 0);
+            colorGrid.Children.Add(swatch);
+            AddText(colorGrid, id, row, 1);
+            var label = new TextBox
+            {
+                Text = configured?.Label ?? $"色 {id}",
+                MinWidth = 220,
+                Margin = new Thickness(0, 0, 12, 6)
+            };
+            Grid.SetRow(label, row);
+            Grid.SetColumn(label, 2);
+            colorGrid.Children.Add(label);
+            var enabled = new CheckBox
+            {
+                IsChecked = configured?.IsEnabled ?? true,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 0, 0, 6)
+            };
+            Grid.SetRow(enabled, row);
+            Grid.SetColumn(enabled, 3);
+            colorGrid.Children.Add(enabled);
+            colorControls.Add((id, label, enabled));
+        }
+
+        colorPage.Children.Add(new TextBlock { Text = "予定色の表示名と有効状態" });
+        colorPage.Children.Add(colorGrid);
+        tabs.Items.Add(Tab("予定色", colorPage));
 
         var todoPage = Page();
         var periods = new object[] { 0, 1, 3, 6, 12 };
@@ -200,7 +261,40 @@ internal static class SettingsDialog
         settings.EnableSyncDiagnostics = syncDiagnostics.IsChecked == true;
         settings.SyncConflictPolicy = conflictPolicy.SelectedItem is SyncConflictPolicy policy ? policy : SyncConflictPolicy.SkipLocalDirty;
         settings.AutomaticSyncIntervalMinutes = syncInterval.SelectedIndex switch { 1 => 30, 2 => 60, 3 => 120, 4 => 360, _ => null };
+        settings.EventColorSettings = colorControls
+            .Select(item => new EventColorSetting
+            {
+                ColorId = item.ColorId,
+                Label = string.IsNullOrWhiteSpace(item.Label.Text) ? null : item.Label.Text.Trim(),
+                IsEnabled = item.IsEnabled.IsChecked == true
+            })
+            .ToList();
         return Task.FromResult<SettingsDialogResult?>(new SettingsDialogResult(settings, oauthPath.Text));
+    }
+
+    private static void AddText(Grid grid, string text, int row, int column)
+    {
+        var block = new TextBlock
+        {
+            Text = text,
+            Margin = new Thickness(0, 0, 8, 6),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        Grid.SetRow(block, row);
+        Grid.SetColumn(block, column);
+        grid.Children.Add(block);
+    }
+
+    private static Brush CreateBrush(string color)
+    {
+        try
+        {
+            return (Brush)new BrushConverter().ConvertFromString(color)!;
+        }
+        catch
+        {
+            return Brushes.White;
+        }
     }
 
     private static async Task RunGoogleOperationAsync(Window owner, string title, string successMessage, string errorTitle, Func<Task> operation)

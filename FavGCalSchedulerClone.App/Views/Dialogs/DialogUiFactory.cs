@@ -98,6 +98,28 @@ internal sealed class DialogUiFactory
         return combo;
     }
 
+    public DatePicker CreateDatePickerWithTodayButton(DateTime selectedDate, out FrameworkElement editor)
+    {
+        var datePicker = new DatePicker
+        {
+            SelectedDate = selectedDate
+        };
+        var today = new Button
+        {
+            Content = "今日",
+            MinWidth = X(58),
+            Margin = new Thickness(X(8), 0, 0, 0)
+        };
+        today.Click += (_, _) => datePicker.SelectedDate = DateTime.Today;
+
+        var panel = new DockPanel { LastChildFill = true };
+        DockPanel.SetDock(today, Dock.Right);
+        panel.Children.Add(today);
+        panel.Children.Add(datePicker);
+        editor = panel;
+        return datePicker;
+    }
+
     public DataGridTemplateColumn CreateColoredTitleColumn(DataGridLength width)
     {
         var template = new DataTemplate(typeof(CalendarEvent));

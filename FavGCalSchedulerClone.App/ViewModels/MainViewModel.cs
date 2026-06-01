@@ -47,6 +47,7 @@ public sealed class MainViewModel : ObservableObject
     private IReadOnlyList<string> _scheduleTitleHistory = [];
     private IReadOnlyList<string> _scheduleLocationHistory = [];
     private int _syncInProgress;
+    private LabelClipboardItem? _labelClipboard;
     private Func<SyncPreview, Task<bool>>? _confirmManualSyncPreviewAsync;
     private Func<Task>? _showAddScheduleAsync;
     private Func<Task>? _showAddTodoAsync;
@@ -372,7 +373,30 @@ public sealed class MainViewModel : ObservableObject
                     : TagService.DefaultEventColorPalette[id];
                 return new EventColorSelectionItem(id, $"色 {id}", colors.Background, colors.Foreground);
             }))
+            .Select(ApplyEventColorSetting)
+            .Where(item => item is not null)
+            .Cast<EventColorSelectionItem>()
             .ToArray();
+
+    public bool CanPasteEventLabel => _labelClipboard is not null;
+
+    private EventColorSelectionItem? ApplyEventColorSetting(EventColorSelectionItem item)
+    {
+        if (item.Id is null)
+        {
+            return item;
+        }
+
+        var setting = _settings.EventColorSettings.FirstOrDefault(setting => setting.ColorId == item.Id);
+        if (setting?.IsEnabled == false)
+        {
+            return null;
+        }
+
+        return string.IsNullOrWhiteSpace(setting?.Label)
+            ? item
+            : item with { Label = setting.Label! };
+    }
 
     public int SelectedTabIndex
     {
@@ -531,6 +555,58 @@ public sealed class MainViewModel : ObservableObject
         SelectedEvent = FindMovedVisibleEvent(movedEvent, candidate, targetDate) ?? movedEvent ?? candidate;
         UpdateSegmentSelection();
         Status = calendarEvent.IsTodoLike ? "ToDoを移動しました。" : "予定を移動しました。";
+        await SyncAfterLocalChangeAsync();
+        return true;
+    }
+
+    public void CopySelectedEventLabel()
+    {
+        if (SelectedEvent is null)
+        {
+            return;
+        }
+
+        _labelClipboard = new LabelClipboardItem(CloneEventForEditing(SelectedEvent), Cut: false);
+        OnPropertyChanged(nameof(CanPasteEventLabel));
+    }
+
+    public void CutSelectedEventLabel()
+    {
+        if (SelectedEvent is null)
+        {
+            return;
+        }
+
+        _labelClipboard = new LabelClipboardItem(CloneEventForEditing(SelectedEvent), Cut: true);
+        OnPropertyChanged(nameof(CanPasteEventLabel));
+    }
+
+    public async Task<bool> PasteEventLabelAsync(DateTime targetDate)
+    {
+        if (_labelClipboard is not { } clipboard)
+        {
+            return false;
+        }
+
+        var pasted = CloneEventAsNewLocalEvent(clipboard.Event);
+        var dayShift = (targetDate.Date - clipboard.Event.Start.Date).Days;
+        pasted.Start = pasted.Start.AddDays(dayShift);
+        pasted.End = pasted.End.AddDays(dayShift);
+        await _repository.SaveEventAsync(pasted);
+
+        if (clipboard.Cut)
+        {
+            var source = clipboard.Event;
+            source.IsDeleted = true;
+            source.IsDirty = true;
+            await _repository.SaveEventAsync(source);
+            _labelClipboard = null;
+            OnPropertyChanged(nameof(CanPasteEventLabel));
+        }
+
+        _pendingSelectedDate = targetDate.Date;
+        SelectedEvent = pasted;
+        await RefreshCalendarAsync();
         await SyncAfterLocalChangeAsync();
         return true;
     }
@@ -776,7 +852,8 @@ public sealed class MainViewModel : ObservableObject
             nameof(DefaultScheduleReminderMinutes), nameof(CalendarLabelFontSize),
             nameof(SideListFontSize), nameof(WindowOpacity), nameof(WeekdayHeaders),
             nameof(EnableReminderSound), nameof(ReminderSoundFilePath),
-            nameof(ReminderSoundVolume), nameof(UseWindowsToastNotifications)
+            nameof(ReminderSoundVolume), nameof(UseWindowsToastNotifications),
+            nameof(EventColorOptions)
         })
         {
             OnPropertyChanged(propertyName);
@@ -1175,8 +1252,10 @@ public sealed class MainViewModel : ObservableObject
 
         foreach (var item in events
                      .Where(item => item.IsTodoDone && TodoDisplayFilter.IsWithinDisplayPeriod(item, _settings.CompletedTodoDisplayPeriodMonths, DateTime.Today))
-                     .OrderBy(item => item.Start)
-                     .ThenBy(item => item.TodoPriority)
+                     .OrderBy(item => Math.Abs((item.Start.Date - DateTime.Today).Days))
+                     .ThenBy(item => item.Start.Date)
+                     .ThenByDescending(item => item.UpdatedAt)
+                     .ThenBy(item => item.Title, StringComparer.CurrentCulture)
                      .Take(100))
         {
             CompletedTodoEvents.Add(item);
@@ -1424,7 +1503,7 @@ public sealed class MainViewModel : ObservableObject
         }
         else
         {
-            if (!TimeSpan.TryParse(StartTime, out var startTime) || !TimeSpan.TryParse(EndTime, out var endTime))
+            if (!TryParseEditorTime(StartTime, out var startTime) || !TryParseEditorTime(EndTime, out var endTime))
             {
                 Status = "時刻は HH:mm 形式で入力してください。";
                 return null;
@@ -1729,6 +1808,56 @@ public sealed class MainViewModel : ObservableObject
             DisplayForegroundColor = source.DisplayForegroundColor,
             IsGeneratedOccurrence = source.IsGeneratedOccurrence
         };
+    }
+
+    private static CalendarEvent CloneEventAsNewLocalEvent(CalendarEvent source)
+    {
+        var clone = CloneEventForEditing(source);
+        clone.Id = Guid.NewGuid().ToString("N");
+        clone.GoogleEventId = null;
+        clone.RecurringEventId = null;
+        clone.RecurringParentId = null;
+        clone.OriginalStart = null;
+        clone.IsRecurrenceException = false;
+        clone.RecurrenceJson = null;
+        clone.IsDeleted = false;
+        clone.IsDirty = true;
+        clone.LastSyncedAt = null;
+        clone.IsGeneratedOccurrence = false;
+        return clone;
+    }
+
+    public static bool TryParseEditorTime(string? value, out TimeSpan time)
+    {
+        time = default;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var trimmed = value.Trim();
+        if (trimmed.Length == 4 && trimmed.All(char.IsDigit))
+        {
+            var hour = int.Parse(trimmed[..2], CultureInfo.InvariantCulture);
+            var minute = int.Parse(trimmed[2..], CultureInfo.InvariantCulture);
+            if (hour is >= 0 and <= 23 && minute is >= 0 and <= 59)
+            {
+                time = new TimeSpan(hour, minute, 0);
+                return true;
+            }
+
+            return false;
+        }
+
+        return TimeSpan.TryParseExact(
+            trimmed,
+            ["h\\:mm", "hh\\:mm"],
+            CultureInfo.InvariantCulture,
+            out time)
+            && time.Days == 0
+            && time.Hours is >= 0 and <= 23
+            && time.Minutes is >= 0 and <= 59
+            && time.Seconds == 0;
     }
 
     private async Task BrowseOAuthClientAsync()
@@ -2135,3 +2264,5 @@ public sealed class MainViewModel : ObservableObject
 }
 
 public sealed record EventColorSelectionItem(string? Id, string Label, string Background, string Foreground);
+
+internal sealed record LabelClipboardItem(CalendarEvent Event, bool Cut);
