@@ -150,6 +150,42 @@ public sealed class CalendarRepositoryTests
     }
 
     [Fact]
+    public async Task SaveEventAsync_PreservesExistingGoogleEventIdWhenEditedCopyIsStale()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        var local = new CalendarEvent
+        {
+            Id = "local-1",
+            Title = "synced",
+            CalendarId = "primary",
+            GoogleEventId = "google-1",
+            Start = new DateTimeOffset(2026, 5, 16, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 5, 16, 10, 0, 0, TimeSpan.Zero),
+            IsDirty = false,
+            LastSyncedAt = new DateTimeOffset(2026, 5, 16, 10, 0, 0, TimeSpan.Zero)
+        };
+        await repository.SaveEventAsync(local);
+
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Id = "local-1",
+            Title = "edited",
+            CalendarId = "primary",
+            Start = local.Start,
+            End = local.End,
+            IsDirty = true
+        });
+
+        var stored = await repository.FindMasterByIdAsync("local-1");
+        Assert.NotNull(stored);
+        Assert.Equal("google-1", stored!.GoogleEventId);
+        Assert.Equal(local.LastSyncedAt, stored.LastSyncedAt);
+        Assert.True(stored.IsDirty);
+    }
+
+    [Fact]
     public async Task SaveEventAsync_RoundTripsRecurrenceFields()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");

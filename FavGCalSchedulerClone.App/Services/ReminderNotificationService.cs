@@ -9,6 +9,7 @@ public sealed class ReminderNotificationService : IDisposable
     private const string ReminderStateKey = "reminder:fired";
     private const string ReminderSnoozeKey = "reminder:snoozed";
     private const string ReminderHistoryKey = "reminder:history";
+    private const string ReminderLastErrorKey = "reminder:last-error";
     private const int MaxHistoryCount = 50;
     private readonly CalendarRepository _repository;
     private readonly Timer _timer;
@@ -56,6 +57,7 @@ public sealed class ReminderNotificationService : IDisposable
         catch (Exception ex)
         {
             Debug.WriteLine(ex);
+            await _repository.SaveSettingValueAsync(ReminderLastErrorKey, $"{DateTimeOffset.Now:O} {ex}");
         }
     }
 
@@ -91,10 +93,18 @@ public sealed class ReminderNotificationService : IDisposable
 
             foreach (var notification in dueNotifications)
             {
-                await DispatchNotificationAsync(notification, cancellationToken);
-                fired[notification.OccurrenceKey] = current.ToString("O");
-                snoozed.Remove(notification.OccurrenceKey);
-                await AddHistoryAsync(notification, current, null);
+                var result = await TryDispatchNotificationAsync(notification, cancellationToken);
+                if (result.Succeeded)
+                {
+                    fired[notification.OccurrenceKey] = current.ToString("O");
+                    snoozed.Remove(notification.OccurrenceKey);
+                    await AddHistoryAsync(notification, current, null, deliverySucceeded: true, deliveryError: null);
+                }
+                else
+                {
+                    await AddHistoryAsync(notification, current, null, deliverySucceeded: false, deliveryError: result.ErrorMessage);
+                    await _repository.SaveSettingValueAsync(ReminderLastErrorKey, $"{current:O} {result.ErrorMessage}");
+                }
             }
 
             await SaveFiredStateAsync(fired);
@@ -148,6 +158,30 @@ public sealed class ReminderNotificationService : IDisposable
         }
     }
 
+    public async Task<bool> ShowTestNotificationAsync(CancellationToken cancellationToken = default)
+    {
+        var current = DateTimeOffset.Now;
+        var notification = new ReminderNotification(
+            $"test:{current.UtcTicks}",
+            "test",
+            "Test reminder",
+            current.ToString("yyyy/MM/dd HH:mm"),
+            current,
+            current,
+            current,
+            GoogleCalendarDefaults.PrimaryCalendarId,
+            IsTodoLike: false);
+
+        var result = await TryDispatchNotificationAsync(notification, cancellationToken);
+        await AddHistoryAsync(notification, current, null, result.Succeeded, result.ErrorMessage);
+        if (!result.Succeeded)
+        {
+            await _repository.SaveSettingValueAsync(ReminderLastErrorKey, $"{current:O} {result.ErrorMessage}");
+        }
+
+        return result.Succeeded;
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -160,16 +194,31 @@ public sealed class ReminderNotificationService : IDisposable
         _gate.Dispose();
     }
 
-    private async Task DispatchNotificationAsync(ReminderNotification notification, CancellationToken cancellationToken)
+    private async Task<ReminderDeliveryResult> TryDispatchNotificationAsync(ReminderNotification notification, CancellationToken cancellationToken)
     {
-        if (_notifier is not null)
+        try
         {
-            await _notifier.ShowAsync(notification, cancellationToken);
-        }
+            var dispatched = false;
+            if (_notifier is not null)
+            {
+                await _notifier.ShowAsync(notification, cancellationToken);
+                dispatched = true;
+            }
 
-        if (ReminderTriggered is not null)
+            if (ReminderTriggered is not null)
+            {
+                await ReminderTriggered.Invoke(notification);
+                dispatched = true;
+            }
+
+            return dispatched
+                ? ReminderDeliveryResult.Success()
+                : ReminderDeliveryResult.Failure("No reminder notifier is configured.");
+        }
+        catch (Exception ex)
         {
-            await ReminderTriggered.Invoke(notification);
+            Debug.WriteLine(ex);
+            return ReminderDeliveryResult.Failure(ex.Message);
         }
     }
 
@@ -275,7 +324,12 @@ public sealed class ReminderNotificationService : IDisposable
         await _repository.SaveSettingValueAsync(key, json);
     }
 
-    private async Task AddHistoryAsync(ReminderNotification notification, DateTimeOffset notifiedAt, DateTimeOffset? snoozedUntil)
+    private async Task AddHistoryAsync(
+        ReminderNotification notification,
+        DateTimeOffset notifiedAt,
+        DateTimeOffset? snoozedUntil,
+        bool deliverySucceeded,
+        string? deliveryError)
     {
         var history = (await LoadHistoryAsync()).ToList();
         history.Insert(0, new ReminderHistoryItem
@@ -290,7 +344,9 @@ public sealed class ReminderNotificationService : IDisposable
             OccurrenceStart = notification.OccurrenceStart,
             CalendarId = notification.CalendarId,
             IsTodoLike = notification.IsTodoLike,
-            SnoozedUntil = snoozedUntil
+            SnoozedUntil = snoozedUntil,
+            DeliverySucceeded = deliverySucceeded,
+            DeliveryError = deliveryError
         });
 
         await SaveHistoryAsync(history.Take(MaxHistoryCount).ToList());
@@ -347,3 +403,9 @@ public sealed record ReminderNotification(
     DateTimeOffset OccurrenceStart,
     string CalendarId,
     bool IsTodoLike);
+
+internal sealed record ReminderDeliveryResult(bool Succeeded, string? ErrorMessage)
+{
+    public static ReminderDeliveryResult Success() => new(true, null);
+    public static ReminderDeliveryResult Failure(string? errorMessage) => new(false, errorMessage);
+}

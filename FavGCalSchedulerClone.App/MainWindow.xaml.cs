@@ -379,7 +379,7 @@ public partial class MainWindow : Window
         copy.Click += (_, _) => _viewModel.CopySelectedEventLabel();
         menu.Items.Add(copy);
 
-        var cut = new MenuItem { Header = "切り取り", IsEnabled = _viewModel.SelectedEvent is not null };
+        var cut = new MenuItem { Header = "切り取り", IsEnabled = _viewModel.CanCutSelectedEventLabel };
         cut.Click += (_, _) => _viewModel.CutSelectedEventLabel();
         menu.Items.Add(cut);
 
@@ -989,7 +989,8 @@ public partial class MainWindow : Window
                 _viewModel.SetOAuthClientJsonPathAsync,
                 _viewModel.AuthorizeGoogleAsync,
                 _viewModel.ClearTokensAsync,
-                _viewModel.ReloadAvailableCalendarsAsync));
+                _viewModel.ReloadAvailableCalendarsAsync,
+                () => _reminderService.ShowTestNotificationAsync()));
         if (result is null)
         {
             return;

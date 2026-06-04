@@ -559,6 +559,103 @@ public sealed class MainViewModelTodoTests
         Assert.Contains(allEvents, item => item.Id != source.Id && item.Title == "Cut source" && item.Start.Date == DateTime.Today.AddDays(3));
     }
 
+    [Fact]
+    public async Task CutSelectedEventLabel_IgnoresRecurringEvents()
+    {
+        var viewModel = await CreateViewModelAsync();
+        viewModel.SelectedEvent = new CalendarEvent
+        {
+            Title = "Recurring source",
+            CalendarId = GoogleCalendarDefaults.PrimaryCalendarId,
+            Start = new DateTimeOffset(DateTime.Today.AddHours(9)),
+            End = new DateTimeOffset(DateTime.Today.AddHours(10)),
+            RecurrenceJson = """{"Rules":["RRULE:FREQ=DAILY;COUNT=2"]}"""
+        };
+
+        viewModel.CutSelectedEventLabel();
+        var pasted = await viewModel.PasteEventLabelAsync(DateTime.Today.AddDays(1));
+
+        Assert.False(viewModel.CanCutSelectedEventLabel);
+        Assert.False(pasted);
+        Assert.False(viewModel.CanPasteEventLabel);
+    }
+
+    [Fact]
+    public async Task SaveCurrentEventAsync_PreservesGoogleEventIdAfterCopiedEventWasSynced()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        await viewModel.InitializeAsync();
+        viewModel.BeginNewEvent(DateTime.Today);
+        viewModel.Title = "Copy source";
+        await viewModel.SaveCurrentEventAsync();
+        viewModel.CopySelectedEventLabel();
+        await viewModel.PasteEventLabelAsync(DateTime.Today.AddDays(1));
+        var staleSelected = viewModel.SelectedEvent!;
+        await repository.MarkSyncedAsync(staleSelected, "google-pasted");
+
+        viewModel.Title = "Edited copied event";
+        await viewModel.SaveCurrentEventAsync();
+
+        var stored = await repository.FindMasterByIdAsync(staleSelected.Id);
+        Assert.NotNull(stored);
+        Assert.Equal("google-pasted", stored!.GoogleEventId);
+        Assert.Equal("Edited copied event", stored.Title);
+        Assert.True(stored.IsDirty);
+    }
+
+    [Fact]
+    public async Task SaveCurrentEventAsync_CalendarMoveCreatesDeleteTombstoneForOldRemoteEvent()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Id = "event-1",
+            Title = "Move calendar",
+            CalendarId = "primary",
+            GoogleEventId = "google-old",
+            Start = new DateTimeOffset(DateTime.Today.AddHours(9)),
+            End = new DateTimeOffset(DateTime.Today.AddHours(10)),
+            IsDirty = false
+        });
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        await viewModel.InitializeAsync();
+        viewModel.AvailableCalendars.Add(new GoogleCalendarSelectionItem
+        {
+            Id = "team",
+            Summary = "team",
+            IsSelected = true
+        });
+        viewModel.SelectedEvent = (await repository.FindMasterByIdAsync("event-1"))!;
+        viewModel.EditorCalendarId = "team";
+        viewModel.Title = "Move calendar";
+
+        await viewModel.SaveCurrentEventAsync();
+
+        var dirty = await repository.LoadDirtyEventsAsync();
+        Assert.Contains(dirty, item => item.Id == "event-1" && item.CalendarId == "team" && item.GoogleEventId is null && !item.IsDeleted);
+        Assert.Contains(dirty, item => item.Id != "event-1" && item.CalendarId == "primary" && item.GoogleEventId == "google-old" && item.IsDeleted);
+    }
+
+    [Fact]
+    public async Task SaveCurrentEventAsync_InvalidCompactTimeShowsFourDigitHelp()
+    {
+        var viewModel = await CreateViewModelAsync();
+        viewModel.BeginNewEvent(DateTime.Today);
+        viewModel.Title = "Invalid time";
+        viewModel.IsAllDay = false;
+        viewModel.StartTime = "900";
+        viewModel.EndTime = "10:00";
+
+        await viewModel.SaveCurrentEventAsync();
+
+        Assert.Contains("4桁数字", viewModel.Status);
+        Assert.Contains("0900", viewModel.Status);
+    }
+
     private static async Task<MainViewModel> CreateViewModelAsync()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");

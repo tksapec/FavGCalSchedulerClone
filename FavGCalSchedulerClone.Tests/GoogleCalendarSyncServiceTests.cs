@@ -1,5 +1,6 @@
 using FavGCalSchedulerClone.App.Models;
 using FavGCalSchedulerClone.App.Services;
+using FavGCalSchedulerClone.App.ViewModels;
 using Google.Apis.Calendar.v3.Data;
 
 namespace FavGCalSchedulerClone.Tests;
@@ -281,6 +282,131 @@ public sealed class GoogleCalendarSyncServiceTests
         Assert.Equal("remote update", api.EventsByCalendar["work"]["remote-1"].Summary);
     }
 
+    [Fact]
+    public async Task SyncAsync_PushesDirtyEventOutsideConfiguredCalendars()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        var settings = CreateSettings("primary");
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            CalendarId = "team",
+            Title = "dirty team",
+            Start = new DateTimeOffset(2026, 1, 7, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 1, 7, 10, 0, 0, TimeSpan.Zero),
+            IsDirty = true
+        });
+        var service = new GoogleCalendarSyncService(repository, api);
+
+        await service.SyncAsync(settings);
+
+        Assert.Contains(api.Operations, item => item.StartsWith("insert:team:", StringComparison.Ordinal));
+        var stored = (await repository.LoadEventsAsync(
+            new DateTimeOffset(2026, 1, 7, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 1, 8, 0, 0, 0, TimeSpan.Zero))).Single();
+        Assert.False(stored.IsDirty);
+        Assert.NotNull(stored.GoogleEventId);
+    }
+
+    [Fact]
+    public async Task PreviewAndDiagnosticsIncludeDirtyCalendarsOutsideConfiguredCalendars()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        var settings = CreateSettings("primary");
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            CalendarId = "team",
+            Title = "dirty team",
+            Start = new DateTimeOffset(2026, 1, 8, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 1, 8, 10, 0, 0, TimeSpan.Zero),
+            IsDirty = true
+        });
+        var service = new GoogleCalendarSyncService(repository, api);
+
+        var preview = await service.PreviewAsync(settings);
+        var diagnostics = await service.LoadDiagnosticsAsync(settings);
+
+        Assert.Contains(preview.Calendars, item => item.CalendarId == "team" && item.DirtyCount == 1);
+        Assert.Contains(preview.PushItems, item => item.CalendarId == "team" && item.Title == "dirty team");
+        Assert.Contains(diagnostics.Calendars, item => item.CalendarId == "team" && item.DirtyCount == 1);
+        Assert.Contains(diagnostics.DirtyItems, item => item.CalendarId == "team" && item.Title == "dirty team" && item.Kind == "予定" && item.Operation == "作成");
+    }
+
+    [Fact]
+    public async Task LoadDiagnosticsAsync_IncludesDirtyScheduleTodoAndDeleteTombstone()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        var settings = CreateSettings("primary");
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            CalendarId = "primary",
+            Title = "dirty schedule",
+            Start = new DateTimeOffset(2026, 1, 10, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 1, 10, 10, 0, 0, TimeSpan.Zero),
+            IsDirty = true
+        });
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            CalendarId = "primary",
+            Title = "dirty todo",
+            Description = "#todoA0%",
+            Start = new DateTimeOffset(2026, 1, 11, 0, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 1, 12, 0, 0, 0, TimeSpan.Zero),
+            IsAllDay = true,
+            IsDirty = true
+        });
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            CalendarId = "primary",
+            GoogleEventId = "remote-delete",
+            Title = "delete tombstone",
+            Start = new DateTimeOffset(2026, 1, 12, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 1, 12, 10, 0, 0, TimeSpan.Zero),
+            IsDeleted = true,
+            IsDirty = true
+        });
+        var service = new GoogleCalendarSyncService(repository, api);
+
+        var diagnostics = await service.LoadDiagnosticsAsync(settings);
+
+        Assert.Contains(diagnostics.DirtyItems, item => item.Title == "dirty schedule" && item.Kind == "予定" && item.Operation == "作成");
+        Assert.Contains(diagnostics.DirtyItems, item => item.Title == "dirty todo" && item.Kind == "ToDo" && item.Operation == "作成");
+        Assert.Contains(diagnostics.DirtyItems, item => item.Title == "delete tombstone" && item.Operation == "削除" && item.GoogleEventId == "remote-delete");
+    }
+
+    [Fact]
+    public async Task MainViewModel_RerunsSyncWhenLocalChangeSyncIsRequestedDuringSync()
+    {
+        var repository = await CreateRepositoryAsync();
+        var listStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var continueList = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var api = new FakeGoogleCalendarApi
+        {
+            ListStarted = listStarted,
+            ContinueList = continueList
+        };
+        var settings = CreateSettings("primary");
+        settings.SyncAfterLocalChange = true;
+        await repository.SaveSettingsAsync(settings);
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository, api));
+        await viewModel.InitializeAsync();
+
+        var manualSync = viewModel.SynchronizeManuallyWithPreviewAsync();
+        await listStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await viewModel.SaveTodoAsync(new DateTime(2026, 1, 9), "A", 0, "queued local change", null);
+        continueList.SetResult();
+        await manualSync.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Contains(api.Operations, item => item.StartsWith("insert:primary:", StringComparison.Ordinal));
+        var stored = (await repository.LoadEventsAsync(
+            new DateTimeOffset(2026, 1, 9, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 1, 10, 0, 0, 0, TimeSpan.Zero))).Single();
+        Assert.False(stored.IsDirty);
+        Assert.NotNull(stored.GoogleEventId);
+    }
+
     private static async Task<CalendarRepository> CreateRepositoryAsync()
     {
         var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
@@ -314,6 +440,8 @@ public sealed class GoogleCalendarSyncServiceTests
         public List<string> Operations { get; } = [];
         public bool ThrowOnInsert { get; set; }
         public bool ThrowOnList { get; set; }
+        public TaskCompletionSource? ListStarted { get; set; }
+        public TaskCompletionSource? ContinueList { get; set; }
 
         public Task<IGoogleCalendarClient> CreateClientAsync(string clientJsonPath, CancellationToken cancellationToken = default)
         {
@@ -375,15 +503,24 @@ public sealed class GoogleCalendarSyncServiceTests
             return Task.FromResult(Clone(googleEvent));
         }
 
-        public Task<GoogleEventPage> ListEventsAsync(GoogleEventListRequest request, CancellationToken cancellationToken = default)
+        public async Task<GoogleEventPage> ListEventsAsync(GoogleEventListRequest request, CancellationToken cancellationToken = default)
         {
             if (ThrowOnList)
             {
                 throw new InvalidOperationException("list failed");
             }
 
+            if (ListStarted is not null && ContinueList is not null)
+            {
+                var continueList = ContinueList;
+                ListStarted.SetResult();
+                ListStarted = null;
+                ContinueList = null;
+                await continueList.Task.WaitAsync(cancellationToken);
+            }
+
             var events = Calendar(request.CalendarId).Values.Select(Clone).ToArray();
-            return Task.FromResult(new GoogleEventPage(events, null, $"token-{request.CalendarId}-{events.Length}"));
+            return new GoogleEventPage(events, null, $"token-{request.CalendarId}-{events.Length}");
         }
 
         public Task<IReadOnlyList<Event>> ListInstancesAsync(

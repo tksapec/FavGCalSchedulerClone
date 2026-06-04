@@ -58,6 +58,31 @@ public sealed class DialogDtoTests
     }
 
     [Fact]
+    public void TodoEditorDialog_UsesScheduleSizedDueDateColumn()
+    {
+        Assert.True(TodoEditorDialog.DueDateColumnPhysicalWidth >= 230);
+        Assert.True(TodoEditorDialog.UpperDueColumnWeight > 2);
+    }
+
+    [Fact]
+    public async Task SyncDiagnosticsDialog_ShowsDirtyItemsTab()
+    {
+        var dialogPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..",
+            "FavGCalSchedulerClone.App",
+            "Views",
+            "Dialogs",
+            "SyncDialogs.cs"));
+        var code = await File.ReadAllTextAsync(dialogPath);
+
+        Assert.Contains("diagnostics.DirtyItems", code);
+        Assert.Contains("nameof(SyncDirtyItem.Kind)", code);
+        Assert.Contains("nameof(SyncDirtyItem.Operation)", code);
+        Assert.Contains("未同期", code);
+    }
+
+    [Fact]
     public void SettingsDialogResult_PreservesSettingsAndOAuthPath()
     {
         var settings = new AppSettings

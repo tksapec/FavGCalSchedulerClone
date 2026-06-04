@@ -93,6 +93,22 @@ internal static class SyncDialogs
         calendarGrid.Columns.Add(new DataGridTextColumn { Header = "未同期", Binding = new Binding(nameof(SyncCalendarDiagnostic.DirtyCount)), Width = 80 });
         tabs.Items.Add(new TabItem { Header = "カレンダー", Content = calendarGrid });
 
+        var dirtyGrid = new DataGrid
+        {
+            ItemsSource = new ObservableCollection<SyncDirtyItem>(diagnostics.DirtyItems),
+            AutoGenerateColumns = false,
+            CanUserAddRows = false,
+            IsReadOnly = true
+        };
+        dirtyGrid.Columns.Add(new DataGridTextColumn { Header = "種別", Binding = new Binding(nameof(SyncDirtyItem.Kind)), Width = 70 });
+        dirtyGrid.Columns.Add(new DataGridTextColumn { Header = "操作", Binding = new Binding(nameof(SyncDirtyItem.Operation)), Width = 70 });
+        dirtyGrid.Columns.Add(new DataGridTextColumn { Header = "カレンダー", Binding = new Binding(nameof(SyncDirtyItem.CalendarId)), Width = 120 });
+        dirtyGrid.Columns.Add(new DataGridTextColumn { Header = "開始", Binding = new Binding(nameof(SyncDirtyItem.Start)), Width = 150 });
+        dirtyGrid.Columns.Add(new DataGridTextColumn { Header = "件名", Binding = new Binding(nameof(SyncDirtyItem.Title)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
+        dirtyGrid.Columns.Add(new DataGridTextColumn { Header = "Google ID", Binding = new Binding(nameof(SyncDirtyItem.GoogleEventId)), Width = 140 });
+        dirtyGrid.Columns.Add(new DataGridTextColumn { Header = "更新", Binding = new Binding(nameof(SyncDirtyItem.UpdatedAt)), Width = 150 });
+        tabs.Items.Add(new TabItem { Header = "未同期", Content = dirtyGrid });
+
         var historyGrid = new DataGrid
         {
             ItemsSource = new ObservableCollection<SyncResult>(diagnostics.History),

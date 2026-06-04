@@ -90,15 +90,15 @@
             <Setter Property="Padding" Value="0" />
             <Setter Property="ClipToBounds" Value="False" />
             <Style.Triggers>
+                <DataTrigger Binding="{Binding IsCurrentMonth}" Value="False">
+                    <Setter Property="Background" Value="{StaticResource OutsideMonthBrush}" />
+                    <Setter Property="Opacity" Value="0.78" />
+                </DataTrigger>
                 <DataTrigger Binding="{Binding IsSunday}" Value="True">
                     <Setter Property="Background" Value="{StaticResource SundayBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding IsSaturday}" Value="True">
                     <Setter Property="Background" Value="{StaticResource SaturdayBrush}" />
-                </DataTrigger>
-                <DataTrigger Binding="{Binding IsCurrentMonth}" Value="False">
-                    <Setter Property="Background" Value="{StaticResource OutsideMonthBrush}" />
-                    <Setter Property="Opacity" Value="0.78" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding IsHoliday}" Value="True">
                     <Setter Property="Background" Value="{StaticResource HolidayBrush}" />

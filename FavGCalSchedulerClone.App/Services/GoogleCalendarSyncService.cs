@@ -99,7 +99,7 @@ public sealed class GoogleCalendarSyncService
         var deleted = 0;
         var recreated = 0;
 
-        foreach (var calendarId in ResolveTargetCalendarIds(settings))
+        foreach (var calendarId in await ResolveTargetCalendarIdsAsync(settings))
         {
             var push = await PushDirtyEventsAsync(client, calendarId, cancellationToken);
             pushed += push.Pushed;
@@ -139,7 +139,7 @@ public sealed class GoogleCalendarSyncService
             .ToArray();
         if (targets is null || targets.Length == 0)
         {
-            targets = ResolveTargetCalendarIds(settings).ToArray();
+            targets = ResolveConfiguredTargetCalendarIds(settings).ToArray();
         }
 
         var pulled = 0;
@@ -164,7 +164,7 @@ public sealed class GoogleCalendarSyncService
         var calendars = new List<SyncCalendarDiagnostic>();
         var dirtyEvents = await _repository.LoadDirtyEventsAsync();
 
-        foreach (var calendarId in ResolveTargetCalendarIds(settings))
+        foreach (var calendarId in ResolveTargetCalendarIds(settings, dirtyEvents))
         {
             cancellationToken.ThrowIfCancellationRequested();
             var calendarDirty = dirtyEvents.Where(e => e.CalendarId == calendarId).OrderBy(e => e.UpdatedAt).ToArray();
@@ -219,7 +219,7 @@ public sealed class GoogleCalendarSyncService
         var history = await LoadSyncHistoryAsync();
         var dirtyEvents = await _repository.LoadDirtyEventsAsync();
         var calendars = new List<SyncCalendarDiagnostic>();
-        foreach (var calendarId in ResolveTargetCalendarIds(settings))
+        foreach (var calendarId in ResolveTargetCalendarIds(settings, dirtyEvents))
         {
             var syncToken = await _repository.GetSyncTokenAsync(calendarId);
             calendars.Add(new SyncCalendarDiagnostic(
@@ -228,7 +228,11 @@ public sealed class GoogleCalendarSyncService
                 dirtyEvents.Count(item => item.CalendarId == calendarId)));
         }
 
-        return new SyncDiagnosticsSnapshot(history.FirstOrDefault(), history, calendars, dirtyEvents.Count);
+        var dirtyItems = dirtyEvents
+            .OrderBy(item => item.UpdatedAt)
+            .Select(ToDirtyItem)
+            .ToArray();
+        return new SyncDiagnosticsSnapshot(history.FirstOrDefault(), history, calendars, dirtyEvents.Count, dirtyItems);
     }
 
     public async Task<SyncResult> RecordFailedSyncAsync(string message, bool keepHistory)
@@ -292,7 +296,31 @@ public sealed class GoogleCalendarSyncService
         }
     }
 
-    private static IReadOnlyList<string> ResolveTargetCalendarIds(AppSettings settings)
+    private async Task<IReadOnlyList<string>> ResolveTargetCalendarIdsAsync(AppSettings settings)
+    {
+        return ResolveTargetCalendarIds(settings, await _repository.LoadDirtyEventsAsync());
+    }
+
+    private static IReadOnlyList<string> ResolveTargetCalendarIds(
+        AppSettings settings,
+        IEnumerable<CalendarEvent> dirtyEvents)
+    {
+        var ids = ResolveConfiguredTargetCalendarIds(settings).ToList();
+        foreach (var calendarId in dirtyEvents
+            .Select(item => item.CalendarId)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal))
+        {
+            if (!ids.Contains(calendarId, StringComparer.Ordinal))
+            {
+                ids.Add(calendarId);
+            }
+        }
+
+        return ids;
+    }
+
+    private static IReadOnlyList<string> ResolveConfiguredTargetCalendarIds(AppSettings settings)
     {
         var ids = settings.VisibleCalendarIds
             .Where(id => !string.IsNullOrWhiteSpace(id))
@@ -595,6 +623,18 @@ public sealed class GoogleCalendarSyncService
             calendarEvent.Start,
             kind,
             detail);
+    }
+
+    private static SyncDirtyItem ToDirtyItem(CalendarEvent calendarEvent)
+    {
+        return new SyncDirtyItem(
+            calendarEvent.IsTodoLike ? "ToDo" : "予定",
+            calendarEvent.CalendarId,
+            calendarEvent.Start,
+            string.IsNullOrWhiteSpace(calendarEvent.Title) ? "(no title)" : calendarEvent.Title,
+            calendarEvent.IsDeleted ? "削除" : string.IsNullOrWhiteSpace(calendarEvent.GoogleEventId) ? "作成" : "更新",
+            calendarEvent.GoogleEventId,
+            calendarEvent.UpdatedAt);
     }
 
     private static async Task<IReadOnlyList<Event>> LoadRemoteChangesForPreviewAsync(

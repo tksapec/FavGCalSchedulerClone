@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using FavGCalSchedulerClone.App.Models;
@@ -12,7 +13,7 @@ internal static class ScheduleEditorDialog
         Func<bool> hideOwner,
         Action showOwner)
     {
-        var window = ui.CreateOwnedDialog(request.IsNew ? "スケジュールの追加" : "スケジュールの編集", 1222, 830, usePhysicalPixelSize: true);
+        var window = ui.CreateOwnedDialog(request.IsNew ? "スケジュールの追加" : "スケジュールの編集", 1320, 830, usePhysicalPixelSize: true);
         var root = ui.CreateEditorDialogRoot();
         window.Content = root;
 
@@ -20,7 +21,7 @@ internal static class ScheduleEditorDialog
         var endDate = ui.CreateDatePickerWithTodayButton(request.EndDate, out var endDateEditor);
         var startTime = TimeComboBox(request.StartTime);
         var endTime = TimeComboBox(request.EndTime);
-        var dayCount = new TextBox { Width = ui.X(48), Text = "1", HorizontalContentAlignment = HorizontalAlignment.Right };
+        var dayCount = new TextBox { Width = ui.X(64), Text = "1", HorizontalContentAlignment = HorizontalAlignment.Right };
         var isAllDay = new CheckBox
         {
             Content = "終日",
@@ -104,9 +105,9 @@ internal static class ScheduleEditorDialog
 
         var timeGroup = new GroupBox { Header = "開始時間／終了時間", Margin = new Thickness(0, 0, ui.X(10), ui.Y(10)), Padding = ui.Thickness(14, 14, 14, 6) };
         var timeGrid = new Grid();
-        timeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ui.X(166)) });
+        timeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ui.X(230)) });
         timeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ui.X(28)) });
-        timeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ui.X(166)) });
+        timeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ui.X(230)) });
         timeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         timeGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         timeGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -140,7 +141,7 @@ internal static class ScheduleEditorDialog
         alarmGroup.Content = alarmGrid;
 
         var upper = new Grid();
-        upper.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ui.X(470)) });
+        upper.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ui.X(620)) });
         upper.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         Grid.SetColumn(timeGroup, 0);
         Grid.SetColumn(alarmGroup, 1);
@@ -208,13 +209,49 @@ internal static class ScheduleEditorDialog
 
     private static ComboBox TimeComboBox(string selected)
     {
-        return new ComboBox
+        var combo = new ComboBox
         {
             IsEditable = true,
             IsTextSearchEnabled = true,
             Text = selected,
             ItemsSource = TimeChoices().ToArray()
         };
+        combo.LostKeyboardFocus += (_, _) => combo.Text = NormalizeTimeText(combo.Text);
+        return combo;
+    }
+
+    internal static string NormalizeTimeText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return value ?? "";
+        }
+
+        var trimmed = value.Trim();
+        if (trimmed.Length == 4
+            && trimmed.All(char.IsDigit)
+            && int.TryParse(trimmed[..2], out var compactHour)
+            && int.TryParse(trimmed[2..], out var compactMinute)
+            && compactHour is >= 0 and <= 23
+            && compactMinute is >= 0 and <= 59)
+        {
+            return $"{compactHour:00}:{compactMinute:00}";
+        }
+
+        if (TimeSpan.TryParseExact(
+            trimmed,
+            ["h\\:mm", "hh\\:mm"],
+            CultureInfo.InvariantCulture,
+            out var time)
+            && time.Days == 0
+            && time.Hours is >= 0 and <= 23
+            && time.Minutes is >= 0 and <= 59
+            && time.Seconds == 0)
+        {
+            return $"{time.Hours:00}:{time.Minutes:00}";
+        }
+
+        return value;
     }
 
     private static IEnumerable<string> TimeChoices()

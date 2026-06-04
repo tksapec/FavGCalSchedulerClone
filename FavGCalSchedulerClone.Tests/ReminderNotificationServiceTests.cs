@@ -217,6 +217,51 @@ public sealed class ReminderNotificationServiceTests
         await service.CheckDueRemindersAsync(start);
     }
 
+    [Fact]
+    public async Task CheckDueRemindersAsync_DoesNotMarkFiredWhenNotificationDispatchFails()
+    {
+        var repository = await CreateRepositoryAsync();
+        var service = new ReminderNotificationService(repository);
+        var attempts = 0;
+        service.ReminderTriggered += _ =>
+        {
+            attempts++;
+            throw new InvalidOperationException("notification failed");
+        };
+
+        var start = new DateTimeOffset(2026, 5, 17, 12, 0, 0, TimeSpan.FromHours(9));
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "Retry reminder",
+            CalendarId = "primary",
+            Start = start,
+            End = start.AddHours(1),
+            ReminderMinutesBeforeStart = 0
+        });
+
+        await service.CheckDueRemindersAsync(start);
+        await service.CheckDueRemindersAsync(start.AddMinutes(1));
+
+        Assert.Equal(2, attempts);
+        var history = await service.LoadHistoryAsync();
+        Assert.Equal(2, history.Count);
+        Assert.All(history, item => Assert.False(item.DeliverySucceeded));
+    }
+
+    [Fact]
+    public async Task ShowTestNotificationAsync_RecordsFailureWhenNoNotifierExists()
+    {
+        var repository = await CreateRepositoryAsync();
+        var service = new ReminderNotificationService(repository);
+
+        var success = await service.ShowTestNotificationAsync();
+
+        Assert.False(success);
+        var item = Assert.Single(await service.LoadHistoryAsync());
+        Assert.False(item.DeliverySucceeded);
+        Assert.Contains("No reminder notifier", item.DeliveryError);
+    }
+
     private static async Task<CalendarRepository> CreateRepositoryAsync()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");

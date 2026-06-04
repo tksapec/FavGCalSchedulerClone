@@ -52,6 +52,7 @@ internal static class ReminderHistoryDialog
         grid.Columns.Add(new DataGridTextColumn { Header = "予定日時", Binding = new Binding(nameof(ReminderHistoryItem.DateDisplayText)), Width = 140 });
         grid.Columns.Add(new DataGridTextColumn { Header = "件名", Binding = new Binding(nameof(ReminderHistoryItem.Title)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
         grid.Columns.Add(new DataGridTextColumn { Header = "スヌーズ", Binding = new Binding(nameof(ReminderHistoryItem.SnoozedUntilText)), Width = 140 });
+        grid.Columns.Add(new DataGridTextColumn { Header = "Status", Binding = new Binding(nameof(ReminderHistoryItem.DeliveryStatusText)), Width = 160 });
         panel.Children.Add(grid);
 
         window.ShowDialog();

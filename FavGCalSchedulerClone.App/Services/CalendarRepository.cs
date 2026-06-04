@@ -277,6 +277,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
 
     public async Task SaveEventAsync(CalendarEvent calendarEvent)
     {
+        await PreserveExistingRemoteLinkAsync(calendarEvent);
         calendarEvent.UpdatedAt = DateTimeOffset.Now;
         calendarEvent.IsTodoLike = TagService.IsTodoLike(calendarEvent);
         await UpsertEventAsync(calendarEvent);
@@ -319,6 +320,25 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         calendarEvent.IsDeleted = true;
         calendarEvent.IsDirty = true;
         await SaveEventAsync(calendarEvent);
+    }
+
+    private async Task PreserveExistingRemoteLinkAsync(CalendarEvent calendarEvent)
+    {
+        if (!string.IsNullOrWhiteSpace(calendarEvent.GoogleEventId))
+        {
+            return;
+        }
+
+        var existing = await FindMasterByIdAsync(calendarEvent.Id);
+        if (existing is null
+            || string.IsNullOrWhiteSpace(existing.GoogleEventId)
+            || !string.Equals(existing.CalendarId, calendarEvent.CalendarId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        calendarEvent.GoogleEventId = existing.GoogleEventId;
+        calendarEvent.LastSyncedAt = existing.LastSyncedAt;
     }
 
     public async Task<string?> GetSyncTokenAsync(string calendarId)

@@ -6,6 +6,8 @@ namespace FavGCalSchedulerClone.App.Views.Dialogs;
 
 internal static class TodoEditorDialog
 {
+    internal const double DueDateColumnPhysicalWidth = 230;
+    internal const double UpperDueColumnWeight = 2.4;
     private static readonly string[] PriorityItems = ["A", "B", "C", "D", "E", "F"];
 
     public static TodoEditorResult? Show(DialogUiFactory ui, TodoEditorRequest request)
@@ -29,6 +31,7 @@ internal static class TodoEditorDialog
         };
         if (request.IsNew)
         {
+            complete.Margin = new Thickness(0);
             var done = new CheckBox { Content = "進捗(0%)", VerticalAlignment = VerticalAlignment.Center };
             done.Checked += (_, _) => done.Content = "進捗(100%)";
             done.Unchecked += (_, _) => done.Content = "進捗(0%)";
@@ -37,7 +40,7 @@ internal static class TodoEditorDialog
             complete.Unchecked += (_, _) => done.IsChecked = false;
             done.Checked += (_, _) => complete.IsChecked = true;
             done.Unchecked += (_, _) => complete.IsChecked = false;
-            progressInput = done;
+            progressInput = complete;
             progressValue = new TextBlock();
             getProgress = () => complete.IsChecked == true || done.IsChecked == true ? 100 : 0;
         }
@@ -131,14 +134,17 @@ internal static class TodoEditorDialog
     {
         var dueGroup = new GroupBox { Header = "期限／進捗", Padding = ui.Thickness(16, 16, 16, 8), Margin = new Thickness(0, 0, ui.X(10), ui.Y(10)) };
         var dueGrid = new Grid();
-        dueGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ui.X(180)) });
+        dueGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ui.X(DueDateColumnPhysicalWidth)) });
         dueGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         dueGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         dueGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         ui.AddLabeledField(dueGrid, 0, 0, "期限", dueDate);
         var progressPanel = new StackPanel { Orientation = Orientation.Horizontal };
         progressPanel.Children.Add(progressInput);
-        progressPanel.Children.Add(complete);
+        if (!ReferenceEquals(progressInput, complete))
+        {
+            progressPanel.Children.Add(complete);
+        }
         if (progressValue is TextBlock text && !string.IsNullOrWhiteSpace(text.Text))
         {
             progressPanel.Children.Add(progressValue);
@@ -156,7 +162,7 @@ internal static class TodoEditorDialog
         priorityGroup.Content = priorityGrid;
 
         var upper = new Grid();
-        upper.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
+        upper.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(UpperDueColumnWeight, GridUnitType.Star) });
         upper.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         Grid.SetColumn(dueGroup, 0);
         Grid.SetColumn(priorityGroup, 1);

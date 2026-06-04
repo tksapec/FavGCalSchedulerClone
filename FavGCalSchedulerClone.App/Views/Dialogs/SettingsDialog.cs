@@ -167,8 +167,19 @@ internal static class SettingsDialog
         var volume = new Slider { Minimum = 0, Maximum = 100, Value = settings.ReminderSoundVolume, Width = 360, IsSnapToTickEnabled = true };
         var testSound = new Button { Content = "テスト再生", Width = 100 };
         var stopSound = new Button { Content = "停止", Width = 80 };
+        var testNotification = new Button { Content = "通知テスト", Width = 110 };
         testSound.Click += (_, _) => request.PlayPreviewSound(soundPath.Text, (int)volume.Value);
         stopSound.Click += (_, _) => request.StopPreviewSound();
+        testNotification.Click += async (_, _) =>
+        {
+            var success = await request.ShowTestNotificationAsync();
+            MessageBox.Show(
+                window,
+                success ? "通知テストを表示しました。" : "通知テストに失敗しました。通知一覧を確認してください。",
+                "通知テスト",
+                MessageBoxButton.OK,
+                success ? MessageBoxImage.Information : MessageBoxImage.Warning);
+        };
         var toast = new CheckBox { Content = "Windowsトースト通知を使う", IsChecked = settings.UseWindowsToastNotifications, Margin = new Thickness(0, 18, 0, 0) };
         notifyPage.Children.Add(soundEnabled);
         notifyPage.Children.Add(soundPath);
@@ -178,6 +189,7 @@ internal static class SettingsDialog
         var soundButtons = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
         soundButtons.Children.Add(testSound);
         soundButtons.Children.Add(stopSound);
+        soundButtons.Children.Add(testNotification);
         notifyPage.Children.Add(soundButtons);
         notifyPage.Children.Add(toast);
         tabs.Items.Add(Tab("通知設定", notifyPage));
@@ -322,6 +334,7 @@ internal sealed record SettingsDialogRequest(
     Func<string, Task> SetOAuthClientJsonPathAsync,
     Func<Task> AuthorizeGoogleAsync,
     Func<Task> ClearTokensAsync,
-    Func<Task> ReloadAvailableCalendarsAsync);
+    Func<Task> ReloadAvailableCalendarsAsync,
+    Func<Task<bool>> ShowTestNotificationAsync);
 
 internal sealed record SettingsDialogResult(AppSettings Settings, string OAuthClientJsonPath);

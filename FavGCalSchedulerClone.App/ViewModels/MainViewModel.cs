@@ -47,6 +47,7 @@ public sealed class MainViewModel : ObservableObject
     private IReadOnlyList<string> _scheduleTitleHistory = [];
     private IReadOnlyList<string> _scheduleLocationHistory = [];
     private int _syncInProgress;
+    private int _syncRerunRequested;
     private LabelClipboardItem? _labelClipboard;
     private Func<SyncPreview, Task<bool>>? _confirmManualSyncPreviewAsync;
     private Func<Task>? _showAddScheduleAsync;
@@ -281,6 +282,7 @@ public sealed class MainViewModel : ObservableObject
                 LoadEditor(value);
                 DeleteEventCommand.RaiseCanExecuteChanged();
                 MarkSelectedTodoDoneCommand.RaiseCanExecuteChanged();
+                OnPropertyChanged(nameof(CanCutSelectedEventLabel));
             }
         }
     }
@@ -379,6 +381,7 @@ public sealed class MainViewModel : ObservableObject
             .ToArray();
 
     public bool CanPasteEventLabel => _labelClipboard is not null;
+    public bool CanCutSelectedEventLabel => SelectedEvent is not null && !SelectedEvent.IsRecurringSeriesItem;
 
     private EventColorSelectionItem? ApplyEventColorSetting(EventColorSelectionItem item)
     {
@@ -530,7 +533,7 @@ public sealed class MainViewModel : ObservableObject
 
         if (!calendarEvent.IsRecurringSeriesItem)
         {
-            await _repository.SaveEventAsync(candidate);
+            await SaveEventWithCalendarMoveAsync(candidate, calendarEvent);
             SelectedEvent = candidate;
         }
         else
@@ -572,7 +575,7 @@ public sealed class MainViewModel : ObservableObject
 
     public void CutSelectedEventLabel()
     {
-        if (SelectedEvent is null)
+        if (!CanCutSelectedEventLabel || SelectedEvent is null)
         {
             return;
         }
@@ -669,6 +672,7 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
+        var originalTodo = CloneEventForEditing(editingTodo);
         editingTodo.Title = title.Trim();
         editingTodo.Description = TagService.UpdateTodoMarker(description, priority, progress);
         editingTodo.CalendarId = ResolveEditorCalendarId();
@@ -680,7 +684,7 @@ public sealed class MainViewModel : ObservableObject
         editingTodo.IsTodoLike = true;
         editingTodo.ColorId = EditorColorId;
 
-        await _repository.SaveEventAsync(editingTodo);
+        await SaveEventWithCalendarMoveAsync(editingTodo, originalTodo);
         await RefreshCalendarAsync();
         SelectedEvent = _visibleEvents.FirstOrDefault(item => item.Id == editingTodo.Id) ?? editingTodo;
         Status = "ToDoを保存しました。同期するとGoogleカレンダーへ反映されます。";
@@ -1147,7 +1151,7 @@ public sealed class MainViewModel : ObservableObject
     {
         try
         {
-            await RefreshCalendarAsync();
+            await RefreshCalendarPreservingSelectionAsync();
         }
         catch (Exception ex)
         {
@@ -1207,6 +1211,23 @@ public sealed class MainViewModel : ObservableObject
         RefreshSelectedDayEvents();
         RefreshSevenDayEvents();
         await RefreshTodosAsync();
+    }
+
+    private async Task RefreshCalendarPreservingSelectionAsync()
+    {
+        var selectedId = SelectedEvent?.Id;
+        await RefreshCalendarAsync();
+        if (string.IsNullOrWhiteSpace(selectedId))
+        {
+            return;
+        }
+
+        var refreshed = _visibleEvents.FirstOrDefault(item => string.Equals(item.Id, selectedId, StringComparison.Ordinal))
+            ?? _storedEvents.FirstOrDefault(item => string.Equals(item.Id, selectedId, StringComparison.Ordinal));
+        if (refreshed is not null)
+        {
+            SelectedEvent = refreshed;
+        }
     }
 
     private void RefreshSelectedDayEvents()
@@ -1411,7 +1432,7 @@ public sealed class MainViewModel : ObservableObject
 
         if (SelectedEvent is null || recurrenceScope is null)
         {
-            await _repository.SaveEventAsync(candidate);
+            await SaveEventWithCalendarMoveAsync(candidate, SelectedEvent);
             await RecordScheduleHistoryAsync(candidate);
             SelectedEvent = candidate;
             await RefreshCalendarAsync();
@@ -1475,6 +1496,32 @@ public sealed class MainViewModel : ObservableObject
         await SyncAfterLocalChangeAsync();
     }
 
+    private async Task SaveEventWithCalendarMoveAsync(CalendarEvent candidate, CalendarEvent? original)
+    {
+        if (original is not null
+            && !string.IsNullOrWhiteSpace(original.GoogleEventId)
+            && !string.Equals(original.CalendarId, candidate.CalendarId, StringComparison.Ordinal))
+        {
+            var tombstone = CloneEventForEditing(original);
+            tombstone.Id = Guid.NewGuid().ToString("N");
+            tombstone.IsDeleted = true;
+            tombstone.IsDirty = true;
+            tombstone.LastSyncedAt = null;
+            await _repository.SaveEventAsync(tombstone);
+
+            candidate.GoogleEventId = null;
+            candidate.LastSyncedAt = null;
+            if (candidate.IsRecurrenceException)
+            {
+                candidate.RecurringEventId = null;
+                candidate.RecurringParentId = null;
+                candidate.OriginalStart = null;
+            }
+        }
+
+        await _repository.SaveEventAsync(candidate);
+    }
+
     private CalendarEvent? BuildEditedEventAsync()
     {
         if (string.IsNullOrWhiteSpace(Title))
@@ -1505,7 +1552,7 @@ public sealed class MainViewModel : ObservableObject
         {
             if (!TryParseEditorTime(StartTime, out var startTime) || !TryParseEditorTime(EndTime, out var endTime))
             {
-                Status = "時刻は HH:mm 形式で入力してください。";
+                Status = "時刻は HH:mm 形式、または4桁数字(例: 0900, 1234)で入力してください。";
                 return null;
             }
 
@@ -1534,7 +1581,7 @@ public sealed class MainViewModel : ObservableObject
             candidate.RecurringParentId = SelectedEvent.RecurringParentId;
             candidate.RecurringEventId = SelectedEvent.RecurringEventId;
             candidate.OriginalStart = SelectedEvent.OriginalStart;
-            await _repository.SaveEventAsync(candidate);
+            await SaveEventWithCalendarMoveAsync(candidate, SelectedEvent);
             SelectedEvent = candidate;
             return;
         }
@@ -1542,7 +1589,7 @@ public sealed class MainViewModel : ObservableObject
         var master = await ResolveSeriesMasterAsync(SelectedEvent);
         if (master is null)
         {
-            await _repository.SaveEventAsync(candidate);
+            await SaveEventWithCalendarMoveAsync(candidate, SelectedEvent);
             SelectedEvent = candidate;
             return;
         }
@@ -1573,7 +1620,7 @@ public sealed class MainViewModel : ObservableObject
         var master = await ResolveSeriesMasterAsync(SelectedEvent);
         if (master is null)
         {
-            await _repository.SaveEventAsync(candidate);
+            await SaveEventWithCalendarMoveAsync(candidate, SelectedEvent);
             SelectedEvent = candidate;
             return;
         }
@@ -1581,7 +1628,7 @@ public sealed class MainViewModel : ObservableObject
         var target = CloneEventForEditing(master);
         ApplySeriesEditValues(target, candidate, SelectedEvent);
         target.IsDirty = true;
-        await _repository.SaveEventAsync(target);
+        await SaveEventWithCalendarMoveAsync(target, master);
         SelectedEvent = target;
     }
 
@@ -1595,7 +1642,7 @@ public sealed class MainViewModel : ObservableObject
         var master = await ResolveSeriesMasterAsync(SelectedEvent);
         if (master is null)
         {
-            await _repository.SaveEventAsync(candidate);
+            await SaveEventWithCalendarMoveAsync(candidate, SelectedEvent);
             SelectedEvent = candidate;
             return;
         }
@@ -1955,6 +2002,7 @@ public sealed class MainViewModel : ObservableObject
     {
         if (Interlocked.Exchange(ref _syncInProgress, 1) != 0)
         {
+            Interlocked.Exchange(ref _syncRerunRequested, 1);
             return null;
         }
 
@@ -2007,6 +2055,10 @@ public sealed class MainViewModel : ObservableObject
         finally
         {
             Interlocked.Exchange(ref _syncInProgress, 0);
+            if (Interlocked.Exchange(ref _syncRerunRequested, 0) != 0)
+            {
+                await SynchronizeAsync(reportErrors: false, SyncInvocationKind.LocalChange);
+            }
         }
     }
 

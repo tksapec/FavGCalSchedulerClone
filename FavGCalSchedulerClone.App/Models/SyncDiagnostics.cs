@@ -46,8 +46,18 @@ public sealed record SyncCalendarDiagnostic(
     bool HasSyncToken,
     int DirtyCount);
 
+public sealed record SyncDirtyItem(
+    string Kind,
+    string CalendarId,
+    DateTimeOffset Start,
+    string Title,
+    string Operation,
+    string? GoogleEventId,
+    DateTimeOffset UpdatedAt);
+
 public sealed record SyncDiagnosticsSnapshot(
     SyncResult? LastResult,
     IReadOnlyList<SyncResult> History,
     IReadOnlyList<SyncCalendarDiagnostic> Calendars,
-    int DirtyCount);
+    int DirtyCount,
+    IReadOnlyList<SyncDirtyItem> DirtyItems);

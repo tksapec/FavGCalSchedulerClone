@@ -100,4 +100,17 @@ public sealed partial class MainWindowMenuTests
         Assert.DoesNotContain("WideField(", codeBehind);
     }
 
+    [Fact]
+    public async Task DayCell_WeekendTriggersOverrideOutsideMonthTrigger()
+    {
+        var xaml = await File.ReadAllTextAsync(MainWindowXamlPath);
+
+        Assert.True(
+            xaml.IndexOf("Binding=\"{Binding IsCurrentMonth}\"", StringComparison.Ordinal) <
+            xaml.IndexOf("Binding=\"{Binding IsSaturday}\"", StringComparison.Ordinal));
+        Assert.True(
+            xaml.IndexOf("Binding=\"{Binding IsSaturday}\"", StringComparison.Ordinal) <
+            xaml.IndexOf("Binding=\"{Binding IsWorkdayOverride}\"", StringComparison.Ordinal));
+    }
+
 }
