@@ -215,13 +215,15 @@ internal static class SettingsDialog
                     toastVerifiedAt = DateTimeOffset.Now;
                     toastVerifiedAumid = request.ToastAumid;
                     toastVerifiedExecutablePath = request.ToastExecutablePath;
+                    await request.SaveToastVerificationAsync(toastVerifiedAt.Value, toastVerifiedAumid, toastVerifiedExecutablePath);
                     toastStatus.Text = SettingsDialogNotificationHelper.FormatToastStatus(
                         request.ToastStatusText,
                         request.ToastAumid,
                         request.ToastExecutablePath,
                         toastVerifiedAt,
                         toastVerifiedAumid,
-                        toastVerifiedExecutablePath);
+                        toastVerifiedExecutablePath,
+                        saved: true);
                 }
                 else
                 {
@@ -229,6 +231,7 @@ internal static class SettingsDialog
                     toastVerifiedAumid = null;
                     toastVerifiedExecutablePath = null;
                     toastFallback.IsChecked = true;
+                    await request.ClearToastVerificationAsync();
                     toastStatus.Text = SettingsDialogNotificationHelper.FormatToastStatus(
                         request.ToastStatusText,
                         request.ToastAumid,
@@ -412,6 +415,8 @@ internal sealed record SettingsDialogRequest(
     Func<Task> ClearTokensAsync,
     Func<Task> ReloadAvailableCalendarsAsync,
     Func<ReminderTestSettings, Task<ReminderTestNotificationResult>> ShowTestNotificationAsync,
+    Func<DateTimeOffset, string, string, Task> SaveToastVerificationAsync,
+    Func<Task> ClearToastVerificationAsync,
     string ToastStatusText,
     string ToastAumid,
     string ToastExecutablePath);

@@ -99,11 +99,11 @@ public sealed class ReminderNotificationService : IDisposable
                 {
                     fired[notification.OccurrenceKey] = current.ToString("O");
                     snoozed.Remove(notification.OccurrenceKey);
-                    await AddHistoryAsync(notification, current, null, deliverySucceeded: true, deliveryMethod: result.DeliveryMethod, result.UsedMessageBoxFallback, result.ToastVerified, result.ToastStatus, deliveryError: null);
+                    await AddHistoryAsync(notification, current, null, deliverySucceeded: true, deliveryMethod: result.DeliveryMethod, result.UsedMessageBoxFallback, result.MessageBoxRole, result.ToastVerified, result.ToastStatus, result.SoundStatus, result.SoundError, deliveryError: null);
                 }
                 else
                 {
-                    await AddHistoryAsync(notification, current, null, deliverySucceeded: false, deliveryMethod: result.DeliveryMethod, result.UsedMessageBoxFallback, result.ToastVerified, result.ToastStatus, deliveryError: result.ErrorMessage);
+                    await AddHistoryAsync(notification, current, null, deliverySucceeded: false, deliveryMethod: result.DeliveryMethod, result.UsedMessageBoxFallback, result.MessageBoxRole, result.ToastVerified, result.ToastStatus, result.SoundStatus, result.SoundError, deliveryError: result.ErrorMessage);
                     await _repository.SaveSettingValueAsync(ReminderLastErrorKey, $"{current:O} {result.ErrorMessage}");
                 }
             }
@@ -184,7 +184,7 @@ public sealed class ReminderNotificationService : IDisposable
             IsTodoLike: false);
 
         var result = await TryDispatchNotificationAsync(notification, cancellationToken, notifier);
-        await AddHistoryAsync(notification, current, null, result.Succeeded, result.DeliveryMethod, result.UsedMessageBoxFallback, result.ToastVerified, result.ToastStatus, result.ErrorMessage);
+        await AddHistoryAsync(notification, current, null, result.Succeeded, result.DeliveryMethod, result.UsedMessageBoxFallback, result.MessageBoxRole, result.ToastVerified, result.ToastStatus, result.SoundStatus, result.SoundError, result.ErrorMessage);
         if (!result.Succeeded)
         {
             await _repository.SaveSettingValueAsync(ReminderLastErrorKey, $"{current:O} {result.ErrorMessage}");
@@ -194,8 +194,11 @@ public sealed class ReminderNotificationService : IDisposable
             result.Succeeded,
             result.DeliveryMethod,
             result.UsedMessageBoxFallback,
+            result.MessageBoxRole,
             result.ToastVerified,
             result.ToastStatus,
+            result.SoundStatus,
+            result.SoundError,
             result.ErrorMessage);
     }
 
@@ -234,7 +237,7 @@ public sealed class ReminderNotificationService : IDisposable
 
             var metadata = notifier as IReminderNotifierMetadata;
             return dispatched
-                ? ReminderDeliveryResult.Success(metadata?.DeliveryMethodName ?? notifier?.GetType().Name ?? "ReminderTriggered", metadata?.UsedMessageBoxFallback ?? false, metadata?.ToastVerified ?? false, metadata?.ToastStatus)
+                ? ReminderDeliveryResult.Success(metadata?.DeliveryMethodName ?? notifier?.GetType().Name ?? "ReminderTriggered", metadata?.UsedMessageBoxFallback ?? false, metadata?.MessageBoxRole ?? MessageBoxNotificationRole.None, metadata?.ToastVerified ?? false, metadata?.ToastStatus, metadata?.SoundStatus ?? ReminderSoundStatus.NotConfigured, metadata?.SoundError)
                 : ReminderDeliveryResult.Failure("none", "No reminder notifier is configured.");
         }
         catch (Exception ex)
@@ -242,7 +245,7 @@ public sealed class ReminderNotificationService : IDisposable
             Debug.WriteLine(ex);
             var notifier = notifierOverride ?? _notifier;
             var metadata = notifier as IReminderNotifierMetadata;
-            return ReminderDeliveryResult.Failure(metadata?.DeliveryMethodName ?? notifier?.GetType().Name ?? "unknown", ex.Message, metadata?.UsedMessageBoxFallback ?? false, metadata?.ToastVerified ?? false, metadata?.ToastStatus);
+            return ReminderDeliveryResult.Failure(metadata?.DeliveryMethodName ?? notifier?.GetType().Name ?? "unknown", ex.Message, metadata?.UsedMessageBoxFallback ?? false, metadata?.MessageBoxRole ?? MessageBoxNotificationRole.None, metadata?.ToastVerified ?? false, metadata?.ToastStatus, metadata?.SoundStatus ?? ReminderSoundStatus.NotConfigured, metadata?.SoundError);
         }
     }
 
@@ -355,8 +358,11 @@ public sealed class ReminderNotificationService : IDisposable
         bool deliverySucceeded,
         string? deliveryMethod,
         bool usedMessageBoxFallback,
+        MessageBoxNotificationRole messageBoxRole,
         bool toastVerified,
         string? toastStatus,
+        ReminderSoundStatus soundStatus,
+        string? soundError,
         string? deliveryError)
     {
         var history = (await LoadHistoryAsync()).ToList();
@@ -370,8 +376,11 @@ public sealed class ReminderNotificationService : IDisposable
             existingFailure.LastFailedAt = notifiedAt;
             existingFailure.DeliveryMethod = deliveryMethod;
             existingFailure.UsedMessageBoxFallback = usedMessageBoxFallback;
+            existingFailure.MessageBoxRole = messageBoxRole;
             existingFailure.ToastVerified = toastVerified;
             existingFailure.ToastStatus = toastStatus;
+            existingFailure.SoundStatus = soundStatus;
+            existingFailure.SoundError = soundError;
             existingFailure.DeliveryError = deliveryError;
             existingFailure.SnoozedUntil = snoozedUntil;
             await SaveHistoryAsync(history.Take(MaxHistoryCount).ToList());
@@ -394,8 +403,11 @@ public sealed class ReminderNotificationService : IDisposable
             DeliverySucceeded = deliverySucceeded,
             DeliveryMethod = deliveryMethod,
             UsedMessageBoxFallback = usedMessageBoxFallback,
+            MessageBoxRole = messageBoxRole,
             ToastVerified = toastVerified,
             ToastStatus = toastStatus,
+            SoundStatus = soundStatus,
+            SoundError = soundError,
             DeliveryError = deliveryError,
             FailureCount = deliverySucceeded ? 0 : 1,
             LastFailedAt = deliverySucceeded ? null : notifiedAt
@@ -460,8 +472,11 @@ public sealed record ReminderTestNotificationResult(
     bool Succeeded,
     string? DeliveryMethod,
     bool UsedMessageBoxFallback,
+    MessageBoxNotificationRole MessageBoxRole,
     bool ToastVerified,
     string? ToastStatus,
+    ReminderSoundStatus SoundStatus,
+    string? SoundError,
     string? ErrorMessage);
 
 internal sealed record ReminderDeliveryResult(
@@ -469,17 +484,23 @@ internal sealed record ReminderDeliveryResult(
     string? DeliveryMethod,
     string? ErrorMessage,
     bool UsedMessageBoxFallback,
+    MessageBoxNotificationRole MessageBoxRole,
     bool ToastVerified,
-    string? ToastStatus)
+    string? ToastStatus,
+    ReminderSoundStatus SoundStatus,
+    string? SoundError)
 {
-    public static ReminderDeliveryResult Success(string? deliveryMethod, bool usedMessageBoxFallback, bool toastVerified, string? toastStatus) =>
-        new(true, deliveryMethod, null, usedMessageBoxFallback, toastVerified, toastStatus);
+    public static ReminderDeliveryResult Success(string? deliveryMethod, bool usedMessageBoxFallback, MessageBoxNotificationRole messageBoxRole, bool toastVerified, string? toastStatus, ReminderSoundStatus soundStatus, string? soundError) =>
+        new(true, deliveryMethod, null, usedMessageBoxFallback, messageBoxRole, toastVerified, toastStatus, soundStatus, soundError);
 
     public static ReminderDeliveryResult Failure(
         string? deliveryMethod,
         string? errorMessage,
         bool usedMessageBoxFallback = false,
+        MessageBoxNotificationRole messageBoxRole = MessageBoxNotificationRole.None,
         bool toastVerified = false,
-        string? toastStatus = null) =>
-        new(false, deliveryMethod, errorMessage, usedMessageBoxFallback, toastVerified, toastStatus);
+        string? toastStatus = null,
+        ReminderSoundStatus soundStatus = ReminderSoundStatus.NotConfigured,
+        string? soundError = null) =>
+        new(false, deliveryMethod, errorMessage, usedMessageBoxFallback, messageBoxRole, toastVerified, toastStatus, soundStatus, soundError);
 }

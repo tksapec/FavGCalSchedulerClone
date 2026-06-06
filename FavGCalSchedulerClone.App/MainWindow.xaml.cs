@@ -1037,6 +1037,8 @@ public partial class MainWindow : Window
                 _viewModel.ClearTokensAsync,
                 _viewModel.ReloadAvailableCalendarsAsync,
                 settings => _reminderService.ShowTestNotificationDetailedAsync(CreateReminderNotifier(settings)),
+                _viewModel.SaveToastVerificationAsync,
+                _viewModel.ClearToastVerificationAsync,
                 _toastInitializationService.CurrentStatus.ToDisplayText(),
                 WindowsToastInitializationService.AppUserModelId,
                 _toastInitializationService.CurrentExecutablePath));

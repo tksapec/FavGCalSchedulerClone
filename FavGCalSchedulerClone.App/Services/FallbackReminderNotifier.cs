@@ -50,8 +50,19 @@ public sealed class FallbackReminderNotifier : IReminderNotifier, IReminderNotif
         }
     }
 
-    public bool UsedMessageBoxFallback => (_lastUsedFallback || _alwaysShowFallback)
-        && (_fallback is not IReminderNotifierMetadata metadata || metadata.UsedMessageBoxFallback);
+    public bool UsedMessageBoxFallback => _lastPrimaryFailed
+        && (_fallback is not IReminderNotifierMetadata metadata
+            || metadata.MessageBoxRole == MessageBoxNotificationRole.Primary
+            || metadata.UsedMessageBoxFallback);
+    public MessageBoxNotificationRole MessageBoxRole => _lastPrimaryFailed
+        ? MessageBoxNotificationRole.Fallback
+        : _lastUsedFallback || _alwaysShowFallback
+            ? MessageBoxNotificationRole.AfterToast
+            : _primary is IReminderNotifierMetadata metadata
+                ? metadata.MessageBoxRole
+                : MessageBoxNotificationRole.None;
     public bool ToastVerified => _primary is IReminderNotifierMetadata metadata && metadata.ToastVerified;
     public string? ToastStatus => _primary is IReminderNotifierMetadata metadata ? metadata.ToastStatus : null;
+    public ReminderSoundStatus SoundStatus => ReminderSoundStatus.NotConfigured;
+    public string? SoundError => null;
 }

@@ -319,8 +319,11 @@ public sealed class ReminderNotificationServiceTests
         var item = Assert.Single(await service.LoadHistoryAsync());
         Assert.Equal("Toast + MessageBox", item.DeliveryMethod);
         Assert.True(item.UsedMessageBoxFallback);
+        Assert.Equal(MessageBoxNotificationRole.Fallback, item.MessageBoxRole);
         Assert.True(item.ToastVerified);
         Assert.Equal("Ready", item.ToastStatus);
+        Assert.Equal(ReminderSoundStatus.Played, item.SoundStatus);
+        Assert.Equal("played", item.SoundError);
         Assert.Contains("verified", item.DeliveryStatusText);
     }
 
@@ -336,9 +339,90 @@ public sealed class ReminderNotificationServiceTests
         Assert.True(result.Succeeded);
         Assert.Equal("Toast + MessageBox", result.DeliveryMethod);
         Assert.True(result.UsedMessageBoxFallback);
+        Assert.Equal(MessageBoxNotificationRole.Fallback, result.MessageBoxRole);
         Assert.True(result.ToastVerified);
         Assert.Equal("Ready", result.ToastStatus);
+        Assert.Equal(ReminderSoundStatus.Played, result.SoundStatus);
+        Assert.Equal("played", result.SoundError);
         Assert.Null(result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ShowTestNotificationDetailedAsync_TreatsMessageBoxPrimaryAsNotFallback()
+    {
+        var repository = await CreateRepositoryAsync();
+        var service = new ReminderNotificationService(repository);
+        var notifier = new PrimaryMessageBoxMetadataNotifier();
+
+        var result = await service.ShowTestNotificationDetailedAsync(notifier);
+
+        Assert.True(result.Succeeded);
+        Assert.False(result.UsedMessageBoxFallback);
+        Assert.Equal(MessageBoxNotificationRole.Primary, result.MessageBoxRole);
+        var item = Assert.Single(await service.LoadHistoryAsync());
+        Assert.Equal("MessageBox通知", item.MessageBoxRoleText);
+    }
+
+    [Fact]
+    public async Task FallbackReminderNotifier_MarksMessageBoxFallbackOnlyWhenPrimaryFails()
+    {
+        var primary = new ThrowingMetadataNotifier();
+        var fallback = new PrimaryMessageBoxMetadataNotifier();
+        var notifier = new FallbackReminderNotifier(primary, fallback);
+
+        await notifier.ShowAsync(CreateTestNotification());
+
+        Assert.True(notifier.UsedMessageBoxFallback);
+        Assert.Equal(MessageBoxNotificationRole.Fallback, notifier.MessageBoxRole);
+        Assert.Contains("failed ->", notifier.DeliveryMethodName);
+    }
+
+    [Fact]
+    public async Task FallbackReminderNotifier_MarksMessageBoxAfterToastWhenAlwaysShownAfterPrimarySuccess()
+    {
+        var primary = new MetadataNotifier();
+        var fallback = new PrimaryMessageBoxMetadataNotifier();
+        var notifier = new FallbackReminderNotifier(primary, fallback, alwaysShowFallback: true);
+
+        await notifier.ShowAsync(CreateTestNotification());
+
+        Assert.False(notifier.UsedMessageBoxFallback);
+        Assert.Equal(MessageBoxNotificationRole.AfterToast, notifier.MessageBoxRole);
+        Assert.Contains("+", notifier.DeliveryMethodName);
+    }
+
+    [Fact]
+    public async Task ShowTestNotificationDetailedAsync_RecordsMissingSoundFileWithoutFailingNotification()
+    {
+        var repository = await CreateRepositoryAsync();
+        var service = new ReminderNotificationService(repository);
+        var inner = new RecordingNotifier();
+        var notifier = new SoundReminderNotifier(inner, "C:\\missing\\notify.wav", 80, _ => false, (_, _) => throw new InvalidOperationException("should not play"));
+
+        var result = await service.ShowTestNotificationDetailedAsync(notifier);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(ReminderSoundStatus.MissingFile, result.SoundStatus);
+        Assert.Contains("notify.wav", result.SoundError);
+        var item = Assert.Single(await service.LoadHistoryAsync());
+        Assert.Contains("ファイルなし", item.SoundStatusText);
+    }
+
+    [Fact]
+    public async Task ShowTestNotificationDetailedAsync_RecordsSoundPlaybackFailureWithoutFailingNotification()
+    {
+        var repository = await CreateRepositoryAsync();
+        var service = new ReminderNotificationService(repository);
+        var inner = new RecordingNotifier();
+        var notifier = new SoundReminderNotifier(inner, "C:\\sound\\notify.wav", 80, _ => true, (_, _) => throw new InvalidOperationException("audio failed"));
+
+        var result = await service.ShowTestNotificationDetailedAsync(notifier);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(ReminderSoundStatus.Failed, result.SoundStatus);
+        Assert.Equal("audio failed", result.SoundError);
+        var item = Assert.Single(await service.LoadHistoryAsync());
+        Assert.Contains("再生失敗", item.SoundStatusText);
     }
 
     private static async Task<CalendarRepository> CreateRepositoryAsync()
@@ -347,6 +431,12 @@ public sealed class ReminderNotificationServiceTests
         var repository = new CalendarRepository(dbPath);
         await repository.InitializeAsync();
         return repository;
+    }
+
+    private static ReminderNotification CreateTestNotification()
+    {
+        var now = DateTimeOffset.Now;
+        return new ReminderNotification("test:key", "test", "Test", "today", now, now, now, GoogleCalendarDefaults.PrimaryCalendarId, false);
     }
 
     private sealed class RecordingNotifier : IReminderNotifier
@@ -364,12 +454,47 @@ public sealed class ReminderNotificationServiceTests
     {
         public string DeliveryMethodName => "Toast + MessageBox";
         public bool UsedMessageBoxFallback => true;
+        public MessageBoxNotificationRole MessageBoxRole => MessageBoxNotificationRole.Fallback;
         public bool ToastVerified => true;
         public string? ToastStatus => "Ready";
+        public ReminderSoundStatus SoundStatus => ReminderSoundStatus.Played;
+        public string? SoundError => "played";
 
         public Task ShowAsync(ReminderNotification notification, CancellationToken cancellationToken = default)
         {
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class PrimaryMessageBoxMetadataNotifier : IReminderNotifier, IReminderNotifierMetadata
+    {
+        public string DeliveryMethodName => "MessageBox";
+        public bool UsedMessageBoxFallback => false;
+        public MessageBoxNotificationRole MessageBoxRole => MessageBoxNotificationRole.Primary;
+        public bool ToastVerified => false;
+        public string? ToastStatus => null;
+        public ReminderSoundStatus SoundStatus => ReminderSoundStatus.NotConfigured;
+        public string? SoundError => null;
+
+        public Task ShowAsync(ReminderNotification notification, CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class ThrowingMetadataNotifier : IReminderNotifier, IReminderNotifierMetadata
+    {
+        public string DeliveryMethodName => "WindowsToast";
+        public bool UsedMessageBoxFallback => false;
+        public MessageBoxNotificationRole MessageBoxRole => MessageBoxNotificationRole.None;
+        public bool ToastVerified => false;
+        public string? ToastStatus => "トースト通知未確認";
+        public ReminderSoundStatus SoundStatus => ReminderSoundStatus.NotConfigured;
+        public string? SoundError => null;
+
+        public Task ShowAsync(ReminderNotification notification, CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("toast failed");
         }
     }
 }

@@ -101,6 +101,41 @@ public sealed class MainViewModelTodoTests
     }
 
     [Fact]
+    public async Task SaveToastVerificationAsync_PersistsImmediately()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        await viewModel.InitializeAsync();
+        var verifiedAt = DateTimeOffset.Now;
+
+        await viewModel.SaveToastVerificationAsync(verifiedAt, WindowsToastInitializationService.AppUserModelId, Environment.ProcessPath ?? "");
+
+        var reloaded = await new CalendarRepository(dbPath).LoadSettingsAsync();
+        Assert.Equal(verifiedAt, reloaded.ToastVerifiedAt);
+        Assert.Equal(WindowsToastInitializationService.AppUserModelId, reloaded.ToastVerifiedAumid);
+        Assert.Equal(Environment.ProcessPath, reloaded.ToastVerifiedExecutablePath);
+    }
+
+    [Fact]
+    public async Task ClearToastVerificationAsync_ClearsVerificationAndEnablesMessageBoxFallbackImmediately()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        await viewModel.InitializeAsync();
+        await viewModel.SaveToastVerificationAsync(DateTimeOffset.Now, WindowsToastInitializationService.AppUserModelId, Environment.ProcessPath ?? "");
+
+        await viewModel.ClearToastVerificationAsync();
+
+        var reloaded = await new CalendarRepository(dbPath).LoadSettingsAsync();
+        Assert.Null(reloaded.ToastVerifiedAt);
+        Assert.Null(reloaded.ToastVerifiedAumid);
+        Assert.Null(reloaded.ToastVerifiedExecutablePath);
+        Assert.True(reloaded.ShowMessageBoxAfterToastNotification);
+    }
+
+    [Fact]
     public async Task BeginNewEvent_UsesDefaultAllDaySetting()
     {
         var viewModel = await CreateViewModelAsync();

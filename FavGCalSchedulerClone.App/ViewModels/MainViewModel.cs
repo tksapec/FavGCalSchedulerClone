@@ -887,6 +887,28 @@ public sealed class MainViewModel : ObservableObject
             : "アプリ設定を保存しました。";
     }
 
+    public async Task SaveToastVerificationAsync(DateTimeOffset verifiedAt, string aumid, string executablePath)
+    {
+        _settings.ToastVerifiedAt = verifiedAt;
+        _settings.ToastVerifiedAumid = aumid;
+        _settings.ToastVerifiedExecutablePath = executablePath;
+        await _repository.SaveSettingsAsync(_settings);
+        OnPropertyChanged(nameof(IsWindowsToastVerifiedForCurrentApp));
+        Status = "Windowsトースト通知の確認済み状態を保存しました。";
+    }
+
+    public async Task ClearToastVerificationAsync()
+    {
+        _settings.ToastVerifiedAt = null;
+        _settings.ToastVerifiedAumid = null;
+        _settings.ToastVerifiedExecutablePath = null;
+        _settings.ShowMessageBoxAfterToastNotification = true;
+        await _repository.SaveSettingsAsync(_settings);
+        OnPropertyChanged(nameof(IsWindowsToastVerifiedForCurrentApp));
+        OnPropertyChanged(nameof(ShowMessageBoxAfterToastNotification));
+        Status = "Windowsトースト通知の確認済み状態を解除し、MessageBox併用を有効にしました。";
+    }
+
     private static bool IsWindowsToastVerifiedForCurrentAppSettings(AppSettings settings)
     {
         return settings.ToastVerifiedAt is not null

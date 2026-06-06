@@ -15,8 +15,11 @@ public sealed class WindowsToastReminderNotifier : IReminderNotifier, IReminderN
 
     public string DeliveryMethodName => "WindowsToast";
     public bool UsedMessageBoxFallback => false;
+    public MessageBoxNotificationRole MessageBoxRole => MessageBoxNotificationRole.None;
     public bool ToastVerified => _toastVerified;
     public string? ToastStatus => _toastInitializationService.CurrentStatus.ToDisplayText();
+    public ReminderSoundStatus SoundStatus => ReminderSoundStatus.NotConfigured;
+    public string? SoundError => null;
 
     public Task ShowAsync(ReminderNotification notification, CancellationToken cancellationToken = default)
     {

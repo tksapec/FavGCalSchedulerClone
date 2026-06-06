@@ -12,9 +12,12 @@ public sealed class MessageBoxReminderNotifier : IReminderNotifier, IReminderNot
     }
 
     public string DeliveryMethodName => "MessageBox";
-    public bool UsedMessageBoxFallback => true;
+    public bool UsedMessageBoxFallback => false;
+    public MessageBoxNotificationRole MessageBoxRole => MessageBoxNotificationRole.Primary;
     public bool ToastVerified => false;
     public string? ToastStatus => null;
+    public ReminderSoundStatus SoundStatus => ReminderSoundStatus.NotConfigured;
+    public string? SoundError => null;
 
     public Task ShowAsync(ReminderNotification notification, CancellationToken cancellationToken = default)
     {
