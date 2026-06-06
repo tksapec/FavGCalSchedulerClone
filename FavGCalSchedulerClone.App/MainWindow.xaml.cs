@@ -59,7 +59,8 @@ public partial class MainWindow : Window
             {
                 AboutDialog.Show(this);
                 return Task.CompletedTask;
-            });
+            },
+            ShowMonthJumpDialogAsync);
         ToastNotificationManagerCompat.OnActivated += ToastNotificationManagerCompat_OnActivated;
         WindowsToastActivationBridge.Activated += WindowsToastActivationBridge_Activated;
     }
@@ -1051,6 +1052,18 @@ public partial class MainWindow : Window
         await _viewModel.SaveApplicationSettingsAsync(result.Settings);
         _reminderService.SetNotifier(CreateReminderNotifier());
     }
+
+    private async Task ShowMonthJumpDialogAsync()
+    {
+        var target = MonthJumpDialog.Show(DialogUi, _viewModel.CurrentMonth);
+        if (target is null)
+        {
+            return;
+        }
+
+        await _viewModel.NavigateToDateAsync(target.Value);
+    }
+
     private void PlayPreviewSound(string path, int volume)
     {
         StopPreviewSound();

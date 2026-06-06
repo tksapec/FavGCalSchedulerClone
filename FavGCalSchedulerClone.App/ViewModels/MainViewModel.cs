@@ -68,6 +68,7 @@ public sealed class MainViewModel : ObservableObject
     private Func<Task>? _showSettingsAsync;
     private Func<Task>? _showReminderHistoryAsync;
     private Func<Task>? _showAboutAsync;
+    private Func<Task>? _showMonthJumpAsync;
 
     public MainViewModel(CalendarRepository repository, GoogleCalendarSyncService syncService)
         : this(repository, syncService, new BackupService(), new CalendarCsvService(), new FavGCalSchedulerImportService(repository))
@@ -118,6 +119,7 @@ public sealed class MainViewModel : ObservableObject
         ShowSettingsCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_showSettingsAsync));
         ShowReminderHistoryCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_showReminderHistoryAsync));
         ShowAboutCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_showAboutAsync));
+        ShowMonthJumpCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_showMonthJumpAsync));
     }
 
     private AsyncRelayCommand CreateAsyncCommand(Func<Task> execute, Func<bool>? canExecute = null) =>
@@ -172,9 +174,12 @@ public sealed class MainViewModel : ObservableObject
     public AsyncRelayCommand ShowSettingsCommand { get; }
     public AsyncRelayCommand ShowReminderHistoryCommand { get; }
     public AsyncRelayCommand ShowAboutCommand { get; }
+    public AsyncRelayCommand ShowMonthJumpCommand { get; }
     internal Func<DateTime, CancellationToken, Task>? BeforeLoadCalendarSnapshotAsync { get; set; }
     internal Action<DateTime>? BeforeSaveDisplayMonth { get; set; }
+    internal Action? BeforeRefreshTodos { get; set; }
     internal TimeSpan NavigationRefreshDelay { get; set; } = TimeSpan.FromMilliseconds(80);
+    internal int CalendarCacheCount => _calendarCache.Count;
 
     public string MonthTitle => CurrentMonth.ToString("yyyy/MM", CultureInfo.InvariantCulture);
     public string JapaneseMonthTitle => CalendarStatusFormatter.FormatJapaneseMonthTitle(CurrentMonth);
@@ -484,7 +489,7 @@ public sealed class MainViewModel : ObservableObject
         _navigationAnchorDate = DateTime.Today;
         SetCurrentMonthWithoutRefreshing(DateTime.Today);
         ShowImmediateCalendarShellForMonth(CurrentMonth);
-        await RefreshCalendarAsync();
+        await RefreshCalendarAsync(invalidateCache: false, refreshTodos: false);
         Status = "今日を表示しました。";
     }
 
@@ -508,7 +513,7 @@ public sealed class MainViewModel : ObservableObject
         _navigationAnchorDate = targetDate.Date;
         SetCurrentMonthWithoutRefreshing(targetDate.Date);
         ShowImmediateCalendarShellForMonth(CurrentMonth);
-        await RefreshCalendarAsync();
+        await RefreshCalendarAsync(invalidateCache: false, refreshTodos: false);
     }
 
     public void SelectEvent(CalendarEvent calendarEvent, bool selectEventDay = true)
@@ -1099,7 +1104,8 @@ public sealed class MainViewModel : ObservableObject
         Func<Task> showSyncDiagnosticsAsync,
         Func<Task> showSettingsAsync,
         Func<Task> showReminderHistoryAsync,
-        Func<Task> showAboutAsync)
+        Func<Task> showAboutAsync,
+        Func<Task>? showMonthJumpAsync = null)
     {
         _showAddScheduleAsync = showAddScheduleAsync;
         _showAddTodoAsync = showAddTodoAsync;
@@ -1114,6 +1120,7 @@ public sealed class MainViewModel : ObservableObject
         _showSettingsAsync = showSettingsAsync;
         _showReminderHistoryAsync = showReminderHistoryAsync;
         _showAboutAsync = showAboutAsync;
+        _showMonthJumpAsync = showMonthJumpAsync;
     }
 
     private static Task InvokeWindowCommandAsync(Func<Task>? handler) => handler?.Invoke() ?? Task.CompletedTask;
@@ -1267,7 +1274,7 @@ public sealed class MainViewModel : ObservableObject
 
     private void StartRefreshCalendar()
     {
-        _ = RefreshCalendarSafelyAsync(BeginCalendarRefresh(saveDisplayMonth: true));
+        _ = RefreshCalendarSafelyAsync(BeginCalendarRefresh(saveDisplayMonth: true, refreshTodos: true));
     }
 
     private async Task RefreshCalendarSafelyAsync(CalendarRefreshRequest request)
@@ -1289,8 +1296,17 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task RefreshCalendarAsync()
     {
-        InvalidateCalendarCache();
-        await RefreshCalendarAsync(BeginCalendarRefresh(saveDisplayMonth: true));
+        await RefreshCalendarAsync(invalidateCache: true, refreshTodos: true);
+    }
+
+    private async Task RefreshCalendarAsync(bool invalidateCache, bool refreshTodos)
+    {
+        if (invalidateCache)
+        {
+            InvalidateCalendarCache();
+        }
+
+        await RefreshCalendarAsync(BeginCalendarRefresh(saveDisplayMonth: true, refreshTodos));
     }
 
     private async Task RefreshCalendarAsync(CalendarRefreshRequest request)
@@ -1321,7 +1337,7 @@ public sealed class MainViewModel : ObservableObject
             request.CancellationToken.ThrowIfCancellationRequested();
         }
 
-        var snapshot = await LoadCalendarSnapshotAsync(request.Month, request.CancellationToken);
+        var snapshot = TryGetCalendarCache(request.Month) ?? await LoadCalendarSnapshotAsync(request.Month, request.CancellationToken);
         if (!IsLatestCalendarRefresh(request))
         {
             return;
@@ -1329,7 +1345,11 @@ public sealed class MainViewModel : ObservableObject
 
         ApplyCalendarSnapshot(snapshot, request.PendingSelectedDate, clearPendingSelectedDate: true);
         StoreCalendarCache(snapshot);
-        await RefreshTodosAsync();
+        if (request.RefreshTodos)
+        {
+            BeforeRefreshTodos?.Invoke();
+            await RefreshTodosAsync();
+        }
         if (IsLatestCalendarRefresh(request))
         {
             _ = PrefetchAdjacentMonthsAsync(request);
@@ -1430,7 +1450,7 @@ public sealed class MainViewModel : ObservableObject
         {
             await Task.Delay(NavigationRefreshDelay, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
-            await RefreshCalendarSafelyAsync(BeginCalendarRefresh(saveDisplayMonth: true));
+            await RefreshCalendarSafelyAsync(BeginCalendarRefresh(saveDisplayMonth: true, refreshTodos: false));
         }
         catch (OperationCanceledException)
         {
@@ -1443,7 +1463,7 @@ public sealed class MainViewModel : ObservableObject
         Interlocked.Increment(ref _refreshGeneration);
     }
 
-    private CalendarRefreshRequest BeginCalendarRefresh(bool saveDisplayMonth)
+    private CalendarRefreshRequest BeginCalendarRefresh(bool saveDisplayMonth, bool refreshTodos)
     {
         _deferredCalendarRefreshCts?.Cancel();
         _calendarRefreshCts?.Cancel();
@@ -1454,6 +1474,7 @@ public sealed class MainViewModel : ObservableObject
             CurrentMonth,
             _pendingSelectedDate,
             saveDisplayMonth,
+            refreshTodos,
             _calendarRefreshCts.Token);
     }
 
@@ -1467,6 +1488,12 @@ public sealed class MainViewModel : ObservableObject
 
     private void ShowImmediateCalendarShellForMonth(DateTime month)
     {
+        if (TryGetCalendarCache(month) is { } snapshot)
+        {
+            ApplyCalendarSnapshot(snapshot, _pendingSelectedDate, clearPendingSelectedDate: false);
+            return;
+        }
+
         var (gridStart, gridEnd) = DateRangeHelper.MonthGridRange(month, _settings.WeekStartsOnMonday);
         EnsureCalendarDayCapacity((gridEnd - gridStart).Days);
         var index = 0;
@@ -1565,6 +1592,18 @@ public sealed class MainViewModel : ObservableObject
                 .Select(item => item.Id)
                 .OrderBy(id => id, StringComparer.Ordinal));
         return new CalendarCacheKey(normalizedMonth, _settings.WeekStartsOnMonday, visibleCalendars);
+    }
+
+    private CalendarRefreshSnapshot? TryGetCalendarCache(DateTime month)
+    {
+        var key = CreateCalendarCacheKey(month);
+        if (!_calendarCache.TryGetValue(key, out var snapshot))
+        {
+            return null;
+        }
+
+        Debug.WriteLine($"Calendar cache hit: {key.Month:yyyy-MM}, weekStartsOnMonday={key.WeekStartsOnMonday}, calendars={key.VisibleCalendarIds}");
+        return snapshot;
     }
 
     private void StoreCalendarCache(CalendarRefreshSnapshot snapshot)
@@ -2707,6 +2746,7 @@ internal sealed record CalendarRefreshRequest(
     DateTime Month,
     DateTime? PendingSelectedDate,
     bool SaveDisplayMonth,
+    bool RefreshTodos,
     CancellationToken CancellationToken);
 
 internal sealed record CalendarCacheKey(DateTime Month, bool WeekStartsOnMonday, string VisibleCalendarIds);

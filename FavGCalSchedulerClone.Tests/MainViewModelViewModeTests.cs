@@ -1,6 +1,7 @@
 using FavGCalSchedulerClone.App.Models;
 using FavGCalSchedulerClone.App.Services;
 using FavGCalSchedulerClone.App.ViewModels;
+using FavGCalSchedulerClone.App.Views.Dialogs;
 
 namespace FavGCalSchedulerClone.Tests;
 
@@ -181,12 +182,13 @@ public sealed class MainViewModelViewModeTests
     [Fact]
     public async Task NavigationRefresh_DoesNotApplyCanceledOlderLoad()
     {
-        var firstTarget = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1).AddMonths(1);
+        var firstTarget = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1).AddMonths(3);
         var secondTarget = firstTarget.AddMonths(1);
         var viewModel = await CreateViewModelAsync([
             CreateEvent("first target", firstTarget.AddDays(4)),
             CreateEvent("second target", secondTarget.AddDays(4))
         ]);
+        viewModel.NavigationRefreshDelay = TimeSpan.Zero;
         var firstLoadStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseFirstLoad = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         viewModel.BeforeLoadCalendarSnapshotAsync = async (month, token) =>
@@ -198,9 +200,9 @@ public sealed class MainViewModelViewModeTests
             }
         };
 
-        viewModel.NextMonthCommand.Execute(null);
+        viewModel.CurrentMonth = firstTarget;
         await firstLoadStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        viewModel.NextMonthCommand.Execute(null);
+        viewModel.CurrentMonth = secondTarget;
 
         await WaitUntilAsync(() => viewModel.CalendarDays.Any(day => day.Events.Any(item => item.Title == "second target")));
         Assert.Equal(secondTarget, viewModel.CurrentMonth);
@@ -215,30 +217,124 @@ public sealed class MainViewModelViewModeTests
     }
 
     [Fact]
-    public async Task Navigation_ShowsShellImmediatelyAndAppliesEventsAfterFinalRefresh()
+    public async Task Navigation_UsesCachedMonthImmediatelyWhenReturning()
     {
         var currentMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
         var viewModel = await CreateViewModelAsync([
             CreateEvent("cached current", currentMonth.AddDays(2))
         ]);
         await WaitUntilAsync(() => viewModel.CalendarDays.Any(day => day.Events.Any(item => item.Title == "cached current")));
-        var loadStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        viewModel.BeforeLoadCalendarSnapshotAsync = (_, token) =>
+        var loadCount = 0;
+        viewModel.BeforeLoadCalendarSnapshotAsync = (_, _) =>
         {
-            loadStarted.TrySetResult();
-            return release.Task.WaitAsync(token);
+            loadCount++;
+            return Task.CompletedTask;
         };
 
         viewModel.NextMonthCommand.Execute(null);
         viewModel.PreviousMonthCommand.Execute(null);
 
         Assert.Equal(currentMonth, viewModel.CurrentMonth);
-        Assert.DoesNotContain(viewModel.CalendarDays.SelectMany(day => day.Events), item => item.Title == "cached current");
+        Assert.Contains(viewModel.CalendarDays.SelectMany(day => day.Events), item => item.Title == "cached current");
 
-        await loadStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        release.SetResult();
-        await WaitUntilAsync(() => viewModel.CalendarDays.Any(day => day.Events.Any(item => item.Title == "cached current")));
+        await Task.Delay(viewModel.NavigationRefreshDelay + TimeSpan.FromMilliseconds(100));
+        Assert.Equal(0, loadCount);
+    }
+
+    [Fact]
+    public async Task Navigation_KeepsCalendarCacheAcrossMonthMoves()
+    {
+        var viewModel = await CreateViewModelAsync();
+        await WaitUntilAsync(() => viewModel.CalendarCacheCount > 0);
+        var cachedCount = viewModel.CalendarCacheCount;
+
+        viewModel.NextMonthCommand.Execute(null);
+        viewModel.PreviousMonthCommand.Execute(null);
+
+        Assert.True(viewModel.CalendarCacheCount >= cachedCount);
+    }
+
+    [Fact]
+    public async Task SaveSettings_InvalidatesCalendarCache()
+    {
+        var viewModel = await CreateViewModelAsync();
+        await WaitUntilAsync(() => viewModel.CalendarCacheCount > 0);
+        var settings = viewModel.CreateSettingsSnapshot();
+        settings.WeekStartsOnMonday = !settings.WeekStartsOnMonday;
+        var loadCount = 0;
+        viewModel.BeforeLoadCalendarSnapshotAsync = (_, _) =>
+        {
+            loadCount++;
+            return Task.CompletedTask;
+        };
+
+        await viewModel.SaveApplicationSettingsAsync(settings);
+
+        Assert.True(loadCount > 0);
+        Assert.True(viewModel.CalendarCacheCount > 0);
+    }
+
+    [Fact]
+    public async Task SaveTags_InvalidatesCalendarCache()
+    {
+        var viewModel = await CreateViewModelAsync();
+        await WaitUntilAsync(() => viewModel.CalendarCacheCount > 0);
+        var loadCount = 0;
+        viewModel.BeforeLoadCalendarSnapshotAsync = (_, _) =>
+        {
+            loadCount++;
+            return Task.CompletedTask;
+        };
+
+        await viewModel.SaveTagsAsync();
+
+        Assert.True(loadCount > 0);
+    }
+
+    [Fact]
+    public async Task Navigation_DoesNotRefreshTodosForMonthMove()
+    {
+        var viewModel = await CreateViewModelAsync();
+        var todoRefreshCount = 0;
+        viewModel.BeforeRefreshTodos = () => todoRefreshCount++;
+
+        viewModel.NextMonthCommand.Execute(null);
+        await Task.Delay(viewModel.NavigationRefreshDelay + TimeSpan.FromMilliseconds(150));
+
+        Assert.Equal(0, todoRefreshCount);
+    }
+
+    [Fact]
+    public async Task SaveTodo_InvalidatesCalendarCacheAndRefreshesTodos()
+    {
+        var viewModel = await CreateViewModelAsync();
+        var loadCount = 0;
+        var todoRefreshCount = 0;
+        viewModel.BeforeLoadCalendarSnapshotAsync = (_, _) =>
+        {
+            loadCount++;
+            return Task.CompletedTask;
+        };
+        viewModel.BeforeRefreshTodos = () => todoRefreshCount++;
+
+        await viewModel.SaveTodoAsync(DateTime.Today, "A", 0, "cache invalidating todo", null);
+
+        Assert.True(loadCount > 0);
+        Assert.True(todoRefreshCount > 0);
+    }
+
+    [Fact]
+    public void MonthJumpDialog_ValidatesTargetMonth()
+    {
+        Assert.True(MonthJumpDialog.TryCreateTargetMonth("2027", "6", out var target, out var error));
+        Assert.Equal(new DateTime(2027, 6, 1), target);
+        Assert.Equal("", error);
+
+        Assert.False(MonthJumpDialog.TryCreateTargetMonth("1899", "6", out _, out error));
+        Assert.Contains("1900", error);
+
+        Assert.False(MonthJumpDialog.TryCreateTargetMonth("2027", "13", out _, out error));
+        Assert.Contains("12", error);
     }
 
     [Fact]

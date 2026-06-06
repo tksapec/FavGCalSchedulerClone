@@ -92,8 +92,8 @@
             <Setter Property="Background" Value="#34495E" />
             <Setter Property="BorderBrush" Value="#50657A" />
             <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Delay" Value="150" />
-            <Setter Property="Interval" Value="50" />
+            <Setter Property="Delay" Value="250" />
+            <Setter Property="Interval" Value="100" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="RepeatButton">
@@ -340,8 +340,12 @@
             <StackPanel Grid.Column="3" HorizontalAlignment="Center" VerticalAlignment="Center">
                 <TextBlock Text="{Binding CurrentPeriodTitle}" Foreground="#FFFFFF" FontSize="15" FontWeight="SemiBold"
                            HorizontalAlignment="Center" />
-                <Button Style="{StaticResource MonthNavButton}" Content="今日" Command="{Binding TodayCommand}"
-                        MinWidth="64" Height="20" FontSize="11" Padding="8,0" Margin="0,2,0,0" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,2,0,0">
+                    <Button Style="{StaticResource MonthNavButton}" Content="今日" Command="{Binding TodayCommand}"
+                            MinWidth="64" Height="20" FontSize="11" Padding="8,0" Margin="0,0,3,0" />
+                    <Button Style="{StaticResource MonthNavButton}" Content="移動" Command="{Binding ShowMonthJumpCommand}"
+                            MinWidth="54" Height="20" FontSize="11" Padding="8,0" Margin="3,0,0,0" />
+                </StackPanel>
             </StackPanel>
             <RepeatButton Grid.Column="4" Style="{StaticResource MonthNavRepeatButton}" Content="{Binding NextMonthLabel}" Command="{Binding NextMonthCommand}" />
             <RepeatButton Grid.Column="5" Style="{StaticResource MonthNavRepeatButton}" Content="{Binding NextYearLabel}" Command="{Binding NextYearCommand}" />
