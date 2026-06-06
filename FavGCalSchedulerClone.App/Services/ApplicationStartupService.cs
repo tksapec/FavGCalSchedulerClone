@@ -8,12 +8,17 @@ public sealed class ApplicationStartupService : IApplicationStartupService, IDis
 {
     private readonly MainViewModel _viewModel;
     private readonly ReminderNotificationService _reminderService;
+    private readonly WindowsToastInitializationService _toastInitializationService;
     private readonly DispatcherTimer _automaticSyncTimer;
 
-    public ApplicationStartupService(MainViewModel viewModel, ReminderNotificationService reminderService)
+    public ApplicationStartupService(
+        MainViewModel viewModel,
+        ReminderNotificationService reminderService,
+        WindowsToastInitializationService toastInitializationService)
     {
         _viewModel = viewModel;
         _reminderService = reminderService;
+        _toastInitializationService = toastInitializationService;
         _automaticSyncTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
         _automaticSyncTimer.Tick += async (_, _) => await _viewModel.RunAutomaticSyncIfDueAsync();
     }
@@ -23,6 +28,12 @@ public sealed class ApplicationStartupService : IApplicationStartupService, IDis
         try
         {
             await _viewModel.InitializeAsync();
+            await _toastInitializationService.InitializeAsync();
+            if (owner is FavGCalSchedulerClone.App.MainWindow mainWindow)
+            {
+                notifier = mainWindow.CreateReminderNotifier();
+            }
+
             _reminderService.SetNotifier(notifier);
             await _reminderService.StartAsync();
             _automaticSyncTimer.Start();

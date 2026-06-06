@@ -12,6 +12,9 @@ internal static class SettingsDialog
     public static Task<SettingsDialogResult?> ShowAsync(DialogUiFactory ui, SettingsDialogRequest request)
     {
         var settings = request.Settings;
+        var toastVerifiedAt = settings.ToastVerifiedAt;
+        var toastVerifiedAumid = settings.ToastVerifiedAumid;
+        var toastVerifiedExecutablePath = settings.ToastVerifiedExecutablePath;
         var window = ui.CreateOwnedDialog("アプリ設定", 690, 610);
         window.ResizeMode = ResizeMode.CanResize;
         var root = new DockPanel { Margin = new Thickness(10) };
@@ -170,6 +173,12 @@ internal static class SettingsDialog
         var testNotification = new Button { Content = "通知テスト", Width = 110 };
         var toast = new CheckBox { Content = "Windowsトースト通知を使う", IsChecked = settings.UseWindowsToastNotifications, Margin = new Thickness(0, 18, 0, 0) };
         var toastFallback = new CheckBox { Content = "トースト通知後にMessageBoxも表示する", IsChecked = settings.ShowMessageBoxAfterToastNotification, Margin = new Thickness(0, 8, 0, 0) };
+        var toastStatus = new TextBlock
+        {
+            Text = $"Toast status: {request.ToastStatusText}\nAUMID: {request.ToastAumid}\nEXE: {request.ToastExecutablePath}",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 8, 0, 0)
+        };
         testSound.Click += (_, _) => request.PlayPreviewSound(soundPath.Text, (int)volume.Value);
         stopSound.Click += (_, _) => request.StopPreviewSound();
         testNotification.Click += async (_, _) =>
@@ -186,6 +195,30 @@ internal static class SettingsDialog
                 "通知テスト",
                 MessageBoxButton.OK,
                 success ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            if (success && toast.IsChecked == true && toastFallback.IsChecked != true)
+            {
+                var displayed = MessageBox.Show(
+                    window,
+                    "Windowsトースト通知は実際に表示されましたか？\n「はい」の場合のみ、トースト単独通知を保存可能にします。",
+                    "Windowsトースト通知の確認",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question);
+                if (displayed == MessageBoxResult.Yes)
+                {
+                    toastVerifiedAt = DateTimeOffset.Now;
+                    toastVerifiedAumid = request.ToastAumid;
+                    toastVerifiedExecutablePath = request.ToastExecutablePath;
+                    toastStatus.Text = $"Toast status: 表示確認済み ({toastVerifiedAt:yyyy/MM/dd HH:mm})\nAUMID: {request.ToastAumid}\nEXE: {request.ToastExecutablePath}";
+                }
+                else
+                {
+                    toastVerifiedAt = null;
+                    toastVerifiedAumid = null;
+                    toastVerifiedExecutablePath = null;
+                    toastFallback.IsChecked = true;
+                    toastStatus.Text = $"Toast status: 表示未確認のため MessageBox 併用に戻します\nAUMID: {request.ToastAumid}\nEXE: {request.ToastExecutablePath}";
+                }
+            }
         };
         notifyPage.Children.Add(soundEnabled);
         notifyPage.Children.Add(soundPath);
@@ -199,6 +232,7 @@ internal static class SettingsDialog
         notifyPage.Children.Add(soundButtons);
         notifyPage.Children.Add(toast);
         notifyPage.Children.Add(toastFallback);
+        notifyPage.Children.Add(toastStatus);
         tabs.Items.Add(Tab("通知設定", notifyPage));
 
         var accountPage = Page();
@@ -275,6 +309,21 @@ internal static class SettingsDialog
         settings.ReminderSoundVolume = (int)volume.Value;
         settings.UseWindowsToastNotifications = toast.IsChecked == true;
         settings.ShowMessageBoxAfterToastNotification = toastFallback.IsChecked == true;
+        settings.ToastVerifiedAt = toastVerifiedAt;
+        settings.ToastVerifiedAumid = toastVerifiedAumid;
+        settings.ToastVerifiedExecutablePath = toastVerifiedExecutablePath;
+        if (settings.UseWindowsToastNotifications
+            && !settings.ShowMessageBoxAfterToastNotification
+            && !IsCurrentToastVerification(settings, request))
+        {
+            settings.ShowMessageBoxAfterToastNotification = true;
+            MessageBox.Show(
+                window,
+                "Windowsトースト通知の実表示が確認されていないため、MessageBox併用を有効にして保存します。",
+                "Windowsトースト通知",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
         settings.OAuthClientJsonPath = string.IsNullOrWhiteSpace(oauthPath.Text) ? null : oauthPath.Text.Trim();
         settings.SyncAfterLocalChange = syncAfterChange.IsChecked == true;
         settings.ShowSyncPreviewBeforeManualSync = syncPreview.IsChecked == true;
@@ -317,6 +366,13 @@ internal static class SettingsDialog
         }
     }
 
+    private static bool IsCurrentToastVerification(AppSettings settings, SettingsDialogRequest request)
+    {
+        return settings.ToastVerifiedAt is not null
+            && string.Equals(settings.ToastVerifiedAumid, request.ToastAumid, StringComparison.Ordinal)
+            && string.Equals(settings.ToastVerifiedExecutablePath, request.ToastExecutablePath, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static async Task RunGoogleOperationAsync(Window owner, string title, string successMessage, string errorTitle, Func<Task> operation)
     {
         try
@@ -343,7 +399,10 @@ internal sealed record SettingsDialogRequest(
     Func<Task> AuthorizeGoogleAsync,
     Func<Task> ClearTokensAsync,
     Func<Task> ReloadAvailableCalendarsAsync,
-    Func<ReminderTestSettings, Task<bool>> ShowTestNotificationAsync);
+    Func<ReminderTestSettings, Task<bool>> ShowTestNotificationAsync,
+    string ToastStatusText,
+    string ToastAumid,
+    string ToastExecutablePath);
 
 internal sealed record SettingsDialogResult(AppSettings Settings, string OAuthClientJsonPath);
 

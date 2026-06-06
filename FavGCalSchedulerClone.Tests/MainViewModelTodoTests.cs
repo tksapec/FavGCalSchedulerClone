@@ -65,6 +65,42 @@ public sealed class MainViewModelTodoTests
     }
 
     [Fact]
+    public async Task SaveApplicationSettingsAsync_ForcesMessageBoxFallbackWhenToastOnlyIsUnverified()
+    {
+        var viewModel = await CreateViewModelAsync();
+        var settings = viewModel.CreateSettingsSnapshot();
+        settings.UseWindowsToastNotifications = true;
+        settings.ShowMessageBoxAfterToastNotification = false;
+        settings.ToastVerifiedAt = null;
+        settings.ToastVerifiedAumid = null;
+        settings.ToastVerifiedExecutablePath = null;
+
+        await viewModel.SaveApplicationSettingsAsync(settings);
+
+        Assert.True(viewModel.UseWindowsToastNotifications);
+        Assert.True(viewModel.ShowMessageBoxAfterToastNotification);
+        Assert.False(viewModel.IsWindowsToastVerifiedForCurrentApp);
+    }
+
+    [Fact]
+    public async Task SaveApplicationSettingsAsync_AllowsToastOnlyWhenCurrentAppWasVerified()
+    {
+        var viewModel = await CreateViewModelAsync();
+        var settings = viewModel.CreateSettingsSnapshot();
+        settings.UseWindowsToastNotifications = true;
+        settings.ShowMessageBoxAfterToastNotification = false;
+        settings.ToastVerifiedAt = DateTimeOffset.Now;
+        settings.ToastVerifiedAumid = WindowsToastInitializationService.AppUserModelId;
+        settings.ToastVerifiedExecutablePath = Environment.ProcessPath;
+
+        await viewModel.SaveApplicationSettingsAsync(settings);
+
+        Assert.True(viewModel.UseWindowsToastNotifications);
+        Assert.False(viewModel.ShowMessageBoxAfterToastNotification);
+        Assert.True(viewModel.IsWindowsToastVerifiedForCurrentApp);
+    }
+
+    [Fact]
     public async Task BeginNewEvent_UsesDefaultAllDaySetting()
     {
         var viewModel = await CreateViewModelAsync();

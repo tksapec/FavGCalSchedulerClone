@@ -439,6 +439,7 @@ public sealed class MainViewModel : ObservableObject
     public int ReminderSoundVolume => _settings.ReminderSoundVolume;
     public bool UseWindowsToastNotifications => _settings.UseWindowsToastNotifications;
     public bool ShowMessageBoxAfterToastNotification => _settings.ShowMessageBoxAfterToastNotification;
+    public bool IsWindowsToastVerifiedForCurrentApp => IsWindowsToastVerifiedForCurrentAppSettings(_settings);
     public string DefaultBackupFileName => $"FavGCalSchedulerClone-backup-{DateTime.Now:yyyyMMdd-HHmmss}.zip";
 
     public async Task InitializeAsync()
@@ -851,6 +852,15 @@ public sealed class MainViewModel : ObservableObject
     public async Task SaveApplicationSettingsAsync(AppSettings settings)
     {
         _settings = AppSettingsNormalizer.Normalize(settings);
+        var forcedToastFallback = false;
+        if (_settings.UseWindowsToastNotifications
+            && !_settings.ShowMessageBoxAfterToastNotification
+            && !IsWindowsToastVerifiedForCurrentAppSettings(_settings))
+        {
+            _settings.ShowMessageBoxAfterToastNotification = true;
+            forcedToastFallback = true;
+        }
+
         SelectedTabIndex = _settings.StartupTabIndex;
         SelectedTodoTabIndex = _settings.StartupTodoTabIndex;
         CurrentViewMode = _settings.StartupCalendarViewMode;
@@ -865,14 +875,23 @@ public sealed class MainViewModel : ObservableObject
             nameof(SideListFontSize), nameof(WindowOpacity), nameof(WeekdayHeaders),
             nameof(EnableReminderSound), nameof(ReminderSoundFilePath),
             nameof(ReminderSoundVolume), nameof(UseWindowsToastNotifications), nameof(ShowMessageBoxAfterToastNotification),
-            nameof(EventColorOptions)
+            nameof(IsWindowsToastVerifiedForCurrentApp), nameof(EventColorOptions)
         })
         {
             OnPropertyChanged(propertyName);
         }
 
         await RefreshCalendarAsync();
-        Status = "アプリ設定を保存しました。";
+        Status = forcedToastFallback
+            ? "Windowsトースト通知は未確認のため、MessageBox併用へ戻して保存しました。"
+            : "アプリ設定を保存しました。";
+    }
+
+    private static bool IsWindowsToastVerifiedForCurrentAppSettings(AppSettings settings)
+    {
+        return settings.ToastVerifiedAt is not null
+            && string.Equals(settings.ToastVerifiedAumid, WindowsToastInitializationService.AppUserModelId, StringComparison.Ordinal)
+            && string.Equals(settings.ToastVerifiedExecutablePath, Environment.ProcessPath, StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task<IReadOnlyList<string>> LoadScheduleTitleHistoryAsync()
@@ -1084,6 +1103,67 @@ public sealed class MainViewModel : ObservableObject
     {
         await SaveOAuthPathAsync();
         return await _syncService.LoadDiagnosticsAsync(_settings);
+    }
+
+    public async Task<CalendarEvent?> FindEventByIdAsync(string localId)
+    {
+        return await _repository.FindEventByIdAsync(localId);
+    }
+
+    public async Task<SyncResult> ResyncDirtyItemsAsync(IReadOnlyCollection<string> localIds)
+    {
+        await SaveOAuthPathAsync();
+        var result = await _syncService.SyncDirtyEventsAsync(_settings, localIds.ToHashSet(StringComparer.Ordinal));
+        await RefreshCalendarAsync();
+        Status = $"{result.Message} / 未同期残数 {(await _repository.LoadDirtyEventsAsync()).Count}";
+        return result;
+    }
+
+    public async Task<SyncResult> ResyncFailedItemsAsync(IReadOnlyCollection<string> localIds)
+    {
+        var dirtyIds = (await _repository.LoadDirtyEventsAsync())
+            .Select(item => item.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        var targets = localIds
+            .Where(id => dirtyIds.Contains(id))
+            .ToArray();
+        if (targets.Length == 0)
+        {
+            var empty = SyncResult.Empty("再同期対象の失敗データは現在 dirty ではありません。");
+            Status = empty.Message;
+            return empty;
+        }
+
+        return await ResyncDirtyItemsAsync(targets);
+    }
+
+    public async Task<int> MarkDirtyItemsSyncedAsync(IReadOnlyCollection<string> localIds)
+    {
+        await CreateDiagnosticsBulkBackupAsync();
+        var updated = await _repository.MarkSyncedByIdsAsync(localIds);
+        await RefreshCalendarAsync();
+        Status = $"選択した未同期データを同期済み扱いにしました: {updated} 件";
+        return updated;
+    }
+
+    public async Task<SyncResult> DiscardLocalChangesAsync(IReadOnlyCollection<string> localIds)
+    {
+        await CreateDiagnosticsBulkBackupAsync();
+        await SaveOAuthPathAsync();
+        var result = await _syncService.DiscardLocalChangesAsync(_settings, localIds.ToHashSet(StringComparer.Ordinal));
+        await RefreshCalendarAsync();
+        Status = result.Message;
+        return result;
+    }
+
+    public async Task<BackupResult> CreateDiagnosticsBulkBackupAsync()
+    {
+        await _repository.InitializeAsync();
+        var backupPath = Path.Combine(
+            AppPaths.AppDataDirectory,
+            "backups",
+            $"diagnostics-bulk-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
+        return await _backupService.CreateBackupAsync(_repository.DatabasePath, backupPath);
     }
 
     public async Task ClearSyncDiagnosticsAsync()

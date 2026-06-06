@@ -257,6 +257,8 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         return (await ReadEventsAsync(command)).FirstOrDefault();
     }
 
+    public Task<CalendarEvent?> FindEventByIdAsync(string? id) => FindMasterByIdAsync(id);
+
     public async Task<IReadOnlyList<CalendarEvent>> LoadSeriesEventsAsync(string? recurringParentId, string? recurringEventId)
     {
         await using var connection = OpenConnection();
@@ -313,6 +315,42 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         command.Parameters.AddWithValue("$google_event_id", (object?)googleEventId ?? DBNull.Value);
         command.Parameters.AddWithValue("$last_synced_at", DateTimeOffset.Now.ToString("O"));
         await command.ExecuteNonQueryAsync();
+    }
+
+    public async Task<int> MarkSyncedByIdsAsync(IEnumerable<string> ids)
+    {
+        var idList = ids
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var updated = 0;
+        foreach (var id in idList)
+        {
+            var calendarEvent = await FindMasterByIdAsync(id);
+            if (calendarEvent is null)
+            {
+                continue;
+            }
+
+            await MarkSyncedAsync(calendarEvent);
+            updated++;
+        }
+
+        return updated;
+    }
+
+    public async Task<bool> HardDeleteEventAsync(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return false;
+        }
+
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM events WHERE id = $id";
+        command.Parameters.AddWithValue("$id", id);
+        return await command.ExecuteNonQueryAsync() > 0;
     }
 
     public async Task DeleteEventAsync(CalendarEvent calendarEvent)

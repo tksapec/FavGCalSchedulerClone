@@ -2,7 +2,7 @@ using System.Windows.Media;
 
 namespace FavGCalSchedulerClone.App.Services;
 
-public sealed class SoundReminderNotifier : IReminderNotifier
+public sealed class SoundReminderNotifier : IReminderNotifier, IReminderNotifierMetadata
 {
     private readonly IReminderNotifier _inner;
     private readonly string? _filePath;
@@ -15,6 +15,11 @@ public sealed class SoundReminderNotifier : IReminderNotifier
         _filePath = filePath;
         _volume = Math.Clamp(volume, 0, 100) / 100.0;
     }
+
+    public string DeliveryMethodName => _inner is IReminderNotifierMetadata metadata ? $"Sound + {metadata.DeliveryMethodName}" : "Sound";
+    public bool UsedMessageBoxFallback => _inner is IReminderNotifierMetadata metadata && metadata.UsedMessageBoxFallback;
+    public bool ToastVerified => _inner is IReminderNotifierMetadata metadata && metadata.ToastVerified;
+    public string? ToastStatus => _inner is IReminderNotifierMetadata metadata ? metadata.ToastStatus : null;
 
     public async Task ShowAsync(ReminderNotification notification, CancellationToken cancellationToken = default)
     {

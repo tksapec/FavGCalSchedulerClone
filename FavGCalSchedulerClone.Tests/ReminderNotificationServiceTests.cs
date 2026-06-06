@@ -278,6 +278,24 @@ public sealed class ReminderNotificationServiceTests
         Assert.Equal(nameof(RecordingNotifier), item.DeliveryMethod);
     }
 
+    [Fact]
+    public async Task ShowTestNotificationAsync_StoresNotifierMetadataInHistory()
+    {
+        var repository = await CreateRepositoryAsync();
+        var service = new ReminderNotificationService(repository);
+        var notifier = new MetadataNotifier();
+
+        var success = await service.ShowTestNotificationAsync(notifier);
+
+        Assert.True(success);
+        var item = Assert.Single(await service.LoadHistoryAsync());
+        Assert.Equal("Toast + MessageBox", item.DeliveryMethod);
+        Assert.True(item.UsedMessageBoxFallback);
+        Assert.True(item.ToastVerified);
+        Assert.Equal("Ready", item.ToastStatus);
+        Assert.Contains("verified", item.DeliveryStatusText);
+    }
+
     private static async Task<CalendarRepository> CreateRepositoryAsync()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
@@ -293,6 +311,19 @@ public sealed class ReminderNotificationServiceTests
         public Task ShowAsync(ReminderNotification notification, CancellationToken cancellationToken = default)
         {
             Count++;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class MetadataNotifier : IReminderNotifier, IReminderNotifierMetadata
+    {
+        public string DeliveryMethodName => "Toast + MessageBox";
+        public bool UsedMessageBoxFallback => true;
+        public bool ToastVerified => true;
+        public string? ToastStatus => "Ready";
+
+        public Task ShowAsync(ReminderNotification notification, CancellationToken cancellationToken = default)
+        {
             return Task.CompletedTask;
         }
     }

@@ -98,11 +98,11 @@ public sealed class ReminderNotificationService : IDisposable
                 {
                     fired[notification.OccurrenceKey] = current.ToString("O");
                     snoozed.Remove(notification.OccurrenceKey);
-                    await AddHistoryAsync(notification, current, null, deliverySucceeded: true, deliveryMethod: result.DeliveryMethod, deliveryError: null);
+                    await AddHistoryAsync(notification, current, null, deliverySucceeded: true, deliveryMethod: result.DeliveryMethod, result.UsedMessageBoxFallback, result.ToastVerified, result.ToastStatus, deliveryError: null);
                 }
                 else
                 {
-                    await AddHistoryAsync(notification, current, null, deliverySucceeded: false, deliveryMethod: result.DeliveryMethod, deliveryError: result.ErrorMessage);
+                    await AddHistoryAsync(notification, current, null, deliverySucceeded: false, deliveryMethod: result.DeliveryMethod, result.UsedMessageBoxFallback, result.ToastVerified, result.ToastStatus, deliveryError: result.ErrorMessage);
                     await _repository.SaveSettingValueAsync(ReminderLastErrorKey, $"{current:O} {result.ErrorMessage}");
                 }
             }
@@ -178,7 +178,7 @@ public sealed class ReminderNotificationService : IDisposable
             IsTodoLike: false);
 
         var result = await TryDispatchNotificationAsync(notification, cancellationToken, notifier);
-        await AddHistoryAsync(notification, current, null, result.Succeeded, result.DeliveryMethod, result.ErrorMessage);
+        await AddHistoryAsync(notification, current, null, result.Succeeded, result.DeliveryMethod, result.UsedMessageBoxFallback, result.ToastVerified, result.ToastStatus, result.ErrorMessage);
         if (!result.Succeeded)
         {
             await _repository.SaveSettingValueAsync(ReminderLastErrorKey, $"{current:O} {result.ErrorMessage}");
@@ -220,14 +220,17 @@ public sealed class ReminderNotificationService : IDisposable
                 dispatched = true;
             }
 
+            var metadata = notifier as IReminderNotifierMetadata;
             return dispatched
-                ? ReminderDeliveryResult.Success(notifier?.GetType().Name ?? "ReminderTriggered")
+                ? ReminderDeliveryResult.Success(metadata?.DeliveryMethodName ?? notifier?.GetType().Name ?? "ReminderTriggered", metadata?.UsedMessageBoxFallback ?? false, metadata?.ToastVerified ?? false, metadata?.ToastStatus)
                 : ReminderDeliveryResult.Failure("none", "No reminder notifier is configured.");
         }
         catch (Exception ex)
         {
             Debug.WriteLine(ex);
-            return ReminderDeliveryResult.Failure((notifierOverride ?? _notifier)?.GetType().Name ?? "unknown", ex.Message);
+            var notifier = notifierOverride ?? _notifier;
+            var metadata = notifier as IReminderNotifierMetadata;
+            return ReminderDeliveryResult.Failure(metadata?.DeliveryMethodName ?? notifier?.GetType().Name ?? "unknown", ex.Message, metadata?.UsedMessageBoxFallback ?? false, metadata?.ToastVerified ?? false, metadata?.ToastStatus);
         }
     }
 
@@ -339,6 +342,9 @@ public sealed class ReminderNotificationService : IDisposable
         DateTimeOffset? snoozedUntil,
         bool deliverySucceeded,
         string? deliveryMethod,
+        bool usedMessageBoxFallback,
+        bool toastVerified,
+        string? toastStatus,
         string? deliveryError)
     {
         var history = (await LoadHistoryAsync()).ToList();
@@ -357,6 +363,9 @@ public sealed class ReminderNotificationService : IDisposable
             SnoozedUntil = snoozedUntil,
             DeliverySucceeded = deliverySucceeded,
             DeliveryMethod = deliveryMethod,
+            UsedMessageBoxFallback = usedMessageBoxFallback,
+            ToastVerified = toastVerified,
+            ToastStatus = toastStatus,
             DeliveryError = deliveryError
         });
 
@@ -415,8 +424,22 @@ public sealed record ReminderNotification(
     string CalendarId,
     bool IsTodoLike);
 
-internal sealed record ReminderDeliveryResult(bool Succeeded, string? DeliveryMethod, string? ErrorMessage)
+internal sealed record ReminderDeliveryResult(
+    bool Succeeded,
+    string? DeliveryMethod,
+    string? ErrorMessage,
+    bool UsedMessageBoxFallback,
+    bool ToastVerified,
+    string? ToastStatus)
 {
-    public static ReminderDeliveryResult Success(string? deliveryMethod) => new(true, deliveryMethod, null);
-    public static ReminderDeliveryResult Failure(string? deliveryMethod, string? errorMessage) => new(false, deliveryMethod, errorMessage);
+    public static ReminderDeliveryResult Success(string? deliveryMethod, bool usedMessageBoxFallback, bool toastVerified, string? toastStatus) =>
+        new(true, deliveryMethod, null, usedMessageBoxFallback, toastVerified, toastStatus);
+
+    public static ReminderDeliveryResult Failure(
+        string? deliveryMethod,
+        string? errorMessage,
+        bool usedMessageBoxFallback = false,
+        bool toastVerified = false,
+        string? toastStatus = null) =>
+        new(false, deliveryMethod, errorMessage, usedMessageBoxFallback, toastVerified, toastStatus);
 }

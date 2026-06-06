@@ -54,7 +54,15 @@ internal static class SyncDialogs
         return window.ShowDialog();
     }
 
-    public static void ShowDiagnostics(Window owner, SyncDiagnosticsSnapshot diagnostics, Func<Task> clearAsync, Func<Task>? retryFailuresAsync = null)
+    public static void ShowDiagnostics(
+        Window owner,
+        SyncDiagnosticsSnapshot diagnostics,
+        Func<Task> clearAsync,
+        Func<IReadOnlyList<string>, Task>? retryFailuresAsync = null,
+        Func<string, Task>? openDirtyItemAsync = null,
+        Func<IReadOnlyList<string>, Task>? retryDirtyItemsAsync = null,
+        Func<IReadOnlyList<string>, Task>? markDirtyItemsSyncedAsync = null,
+        Func<IReadOnlyList<string>, Task>? discardDirtyItemsAsync = null)
     {
         var window = CreateOwnedDialog(owner, "Google同期診断", 820, 540);
         var panel = new DockPanel { Margin = new Thickness(12), LastChildFill = true };
@@ -71,14 +79,23 @@ internal static class SyncDialogs
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0) };
         var clear = new Button { Content = "ログ削除", MinWidth = 96, Height = 28, Margin = new Thickness(0, 0, 8, 0) };
         var close = new Button { Content = "閉じる", MinWidth = 96, Height = 28 };
-        var retryFailures = new Button { Content = "失敗分を再同期", MinWidth = 116, Height = 28, Margin = new Thickness(0, 0, 8, 0), IsEnabled = retryFailuresAsync is not null && diagnostics.Failures.Count > 0 };
+        var retryFailures = new Button { Content = "失敗分を再同期", MinWidth = 116, Height = 28, Margin = new Thickness(0, 0, 8, 0), IsEnabled = retryFailuresAsync is not null && diagnostics.Failures.Any(item => !string.IsNullOrWhiteSpace(item.LocalId)) };
         var exportDirty = new Button { Content = "未同期CSV出力", MinWidth = 116, Height = 28, Margin = new Thickness(0, 0, 8, 0) };
         var exportLog = new Button { Content = "診断ログ出力", MinWidth = 116, Height = 28, Margin = new Thickness(0, 0, 8, 0) };
         retryFailures.Click += async (_, _) =>
         {
             if (retryFailuresAsync is not null)
             {
-                await retryFailuresAsync();
+                var ids = diagnostics.Failures
+                    .Select(item => item.LocalId)
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray();
+                if (ConfirmBulk(owner, "失敗分を再同期", ids.Length, "失敗診断に記録された dirty データだけを再同期します。"))
+                {
+                    await retryFailuresAsync(ids);
+                }
+
                 window.Close();
             }
         };
@@ -116,7 +133,9 @@ internal static class SyncDialogs
             ItemsSource = new ObservableCollection<SyncDirtyItem>(diagnostics.DirtyItems),
             AutoGenerateColumns = false,
             CanUserAddRows = false,
-            IsReadOnly = true
+            IsReadOnly = true,
+            SelectionMode = DataGridSelectionMode.Extended,
+            SelectionUnit = DataGridSelectionUnit.FullRow
         };
         dirtyGrid.Columns.Add(new DataGridTextColumn { Header = "種別", Binding = new Binding(nameof(SyncDirtyItem.Kind)), Width = 70 });
         dirtyGrid.Columns.Add(new DataGridTextColumn { Header = "操作", Binding = new Binding(nameof(SyncDirtyItem.Operation)), Width = 70 });
@@ -127,7 +146,55 @@ internal static class SyncDialogs
         dirtyGrid.Columns.Add(new DataGridTextColumn { Header = "更新", Binding = new Binding(nameof(SyncDirtyItem.UpdatedAt)), Width = 150 });
         dirtyGrid.Columns.Add(new DataGridTextColumn { Header = "失敗理由", Binding = new Binding(nameof(SyncDirtyItem.FailureReason)), Width = 180 });
         dirtyGrid.Columns.Add(new DataGridTextColumn { Header = "詳細", Binding = new Binding(nameof(SyncDirtyItem.ErrorMessage)), Width = 220 });
-        tabs.Items.Add(new TabItem { Header = "未同期", Content = dirtyGrid });
+        var dirtyPanel = new DockPanel();
+        var dirtyButtons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 8) };
+        var openDirty = new Button { Content = "選択行を開く", MinWidth = 104, Height = 28, Margin = new Thickness(0, 0, 8, 0), IsEnabled = openDirtyItemAsync is not null };
+        var retryDirty = new Button { Content = "選択行を再同期", MinWidth = 116, Height = 28, Margin = new Thickness(0, 0, 8, 0), IsEnabled = retryDirtyItemsAsync is not null };
+        var markSynced = new Button { Content = "同期済み扱い", MinWidth = 110, Height = 28, Margin = new Thickness(0, 0, 8, 0), IsEnabled = markDirtyItemsSyncedAsync is not null };
+        var discardLocal = new Button { Content = "ローカル変更破棄", MinWidth = 120, Height = 28, IsEnabled = discardDirtyItemsAsync is not null };
+        openDirty.Click += async (_, _) =>
+        {
+            if (openDirtyItemAsync is not null && GetSelectedDirtyIds(dirtyGrid).FirstOrDefault() is { } id)
+            {
+                await openDirtyItemAsync(id);
+                window.Close();
+            }
+        };
+        retryDirty.Click += async (_, _) =>
+        {
+            var ids = GetSelectedDirtyIds(dirtyGrid);
+            if (retryDirtyItemsAsync is not null && ConfirmBulk(owner, "選択行を再同期", ids.Count, "選択した dirty データだけを Google へ送信します。"))
+            {
+                await retryDirtyItemsAsync(ids);
+                window.Close();
+            }
+        };
+        markSynced.Click += async (_, _) =>
+        {
+            var ids = GetSelectedDirtyIds(dirtyGrid);
+            if (markDirtyItemsSyncedAsync is not null && ConfirmBulk(owner, "選択行を同期済み扱い", ids.Count, "Googleへ送信せず dirty 状態を解除します。実行前に自動バックアップを作成します。"))
+            {
+                await markDirtyItemsSyncedAsync(ids);
+                window.Close();
+            }
+        };
+        discardLocal.Click += async (_, _) =>
+        {
+            var ids = GetSelectedDirtyIds(dirtyGrid);
+            if (discardDirtyItemsAsync is not null && ConfirmBulk(owner, "選択行のローカル変更を破棄", ids.Count, "Googleから再取得できるものだけ復元し、ローカル新規は削除します。実行前に自動バックアップを作成します。"))
+            {
+                await discardDirtyItemsAsync(ids);
+                window.Close();
+            }
+        };
+        dirtyButtons.Children.Add(openDirty);
+        dirtyButtons.Children.Add(retryDirty);
+        dirtyButtons.Children.Add(markSynced);
+        dirtyButtons.Children.Add(discardLocal);
+        DockPanel.SetDock(dirtyButtons, Dock.Top);
+        dirtyPanel.Children.Add(dirtyButtons);
+        dirtyPanel.Children.Add(dirtyGrid);
+        tabs.Items.Add(new TabItem { Header = "未同期", Content = dirtyPanel });
 
         var failureGrid = new DataGrid
         {
@@ -137,9 +204,13 @@ internal static class SyncDialogs
             IsReadOnly = true
         };
         failureGrid.Columns.Add(new DataGridTextColumn { Header = "時刻", Binding = new Binding(nameof(SyncFailureDiagnostic.OccurredAt)), Width = 150 });
+        failureGrid.Columns.Add(new DataGridTextColumn { Header = "方向", Binding = new Binding(nameof(SyncFailureDiagnostic.Direction)), Width = 60 });
         failureGrid.Columns.Add(new DataGridTextColumn { Header = "操作", Binding = new Binding(nameof(SyncFailureDiagnostic.Operation)), Width = 70 });
         failureGrid.Columns.Add(new DataGridTextColumn { Header = "種別", Binding = new Binding(nameof(SyncFailureDiagnostic.Kind)), Width = 70 });
         failureGrid.Columns.Add(new DataGridTextColumn { Header = "カレンダー", Binding = new Binding(nameof(SyncFailureDiagnostic.CalendarId)), Width = 120 });
+        failureGrid.Columns.Add(new DataGridTextColumn { Header = "syncToken", Binding = new Binding(nameof(SyncFailureDiagnostic.SyncTokenPresent)), Width = 80 });
+        failureGrid.Columns.Add(new DataGridTextColumn { Header = "pageToken", Binding = new Binding(nameof(SyncFailureDiagnostic.PageToken)), Width = 100 });
+        failureGrid.Columns.Add(new DataGridTextColumn { Header = "分類", Binding = new Binding(nameof(SyncFailureDiagnostic.FailureCategory)), Width = 110 });
         failureGrid.Columns.Add(new DataGridTextColumn { Header = "開始日時", Binding = new Binding(nameof(SyncFailureDiagnostic.Start)), Width = 150 });
         failureGrid.Columns.Add(new DataGridTextColumn { Header = "件名", Binding = new Binding(nameof(SyncFailureDiagnostic.Title)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
         failureGrid.Columns.Add(new DataGridTextColumn { Header = "Google ID", Binding = new Binding(nameof(SyncFailureDiagnostic.GoogleEventId)), Width = 130 });
@@ -199,6 +270,28 @@ internal static class SyncDialogs
         return buttons;
     }
 
+    private static IReadOnlyList<string> GetSelectedDirtyIds(DataGrid dirtyGrid)
+    {
+        return dirtyGrid.SelectedItems
+            .OfType<SyncDirtyItem>()
+            .Select(item => item.LocalId)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static bool ConfirmBulk(Window owner, string operation, int count, string impact)
+    {
+        if (count <= 0)
+        {
+            MessageBox.Show(owner, "対象行を選択してください。", operation, MessageBoxButton.OK, MessageBoxImage.Information);
+            return false;
+        }
+
+        var message = $"{operation}を実行します。\n対象件数: {count} 件\n影響範囲: {impact}";
+        return MessageBox.Show(owner, message, operation, MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
+    }
+
     private static void ExportText(Window owner, string fileName, string content)
     {
         var dialog = new SaveFileDialog { FileName = fileName, Filter = "Text files (*.txt;*.csv)|*.txt;*.csv|All files (*.*)|*.*" };
@@ -227,7 +320,7 @@ internal static class SyncDialogs
         builder.AppendLine($"DirtyCount={diagnostics.DirtyCount}");
         foreach (var failure in diagnostics.Failures)
         {
-            builder.AppendLine($"{failure.OccurredAt:O} {failure.Operation} {failure.Kind} {failure.CalendarId} {failure.LocalId} {failure.GoogleEventId} {failure.Title} {failure.FailureReason} {failure.HttpStatusCode} {failure.ExceptionMessage}");
+            builder.AppendLine($"{failure.OccurredAt:O} {failure.Direction} {failure.Operation} {failure.Kind} {failure.CalendarId} syncToken={failure.SyncTokenPresent} pageToken={failure.PageToken} category={failure.FailureCategory} {failure.LocalId} {failure.GoogleEventId} {failure.Title} {failure.FailureReason} {failure.HttpStatusCode} {failure.GoogleErrorMessage} {failure.ExceptionMessage}");
         }
 
         return builder.ToString();

@@ -103,16 +103,17 @@ public sealed class GoogleCalendarSyncService
 
         foreach (var calendarId in await ResolveTargetCalendarIdsAsync(settings))
         {
-            var push = await PushDirtyEventsAsync(client, calendarId, failures, cancellationToken);
+            var push = await PushDirtyEventsAsync(client, calendarId, failures, localIds: null, cancellationToken);
             pushed += push.Pushed;
             failed += push.Failed;
             deleted += push.Deleted;
             recreated += push.Recreated;
 
-            var pull = await PullRemoteEventsAsync(client, calendarId, settings.SyncConflictPolicy, cancellationToken);
+            var pull = await PullRemoteEventsAsync(client, calendarId, settings.SyncConflictPolicy, failures, cancellationToken);
             pulled += pull.Pulled;
             skipped += pull.Skipped;
             conflicts += pull.Conflicts;
+            failed += pull.Failed;
         }
 
         var result = new SyncResult(
@@ -126,6 +127,126 @@ public sealed class GoogleCalendarSyncService
             startedAt,
             DateTimeOffset.Now,
             $"送信 {pushed} / 取得 {pulled} / スキップ {skipped} / 競合 {conflicts} / 失敗 {failed} / 削除 {deleted} / 再作成 {recreated}");
+        await SaveFailureDiagnosticsAsync(failures);
+        await SaveSyncResultAsync(result, settings.EnableSyncDiagnostics);
+        return result;
+    }
+
+    public async Task<SyncResult> SyncDirtyEventsAsync(AppSettings settings, IReadOnlySet<string> localIds, CancellationToken cancellationToken = default)
+    {
+        var startedAt = DateTimeOffset.Now;
+        EnsureOAuthSettings(settings);
+
+        if (localIds.Count == 0)
+        {
+            return SyncResult.Empty("再同期対象がありません。");
+        }
+
+        var client = await _googleCalendarApi.CreateClientAsync(settings.OAuthClientJsonPath!, cancellationToken);
+        var failures = new List<SyncFailureDiagnostic>();
+        var pushed = 0;
+        var failed = 0;
+        var deleted = 0;
+        var recreated = 0;
+        var dirtyEvents = await _repository.LoadDirtyEventsAsync();
+        var targetCalendars = dirtyEvents
+            .Where(item => localIds.Contains(item.Id))
+            .Select(item => item.CalendarId)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        foreach (var calendarId in targetCalendars)
+        {
+            var push = await PushDirtyEventsAsync(client, calendarId, failures, localIds, cancellationToken);
+            pushed += push.Pushed;
+            failed += push.Failed;
+            deleted += push.Deleted;
+            recreated += push.Recreated;
+        }
+
+        var result = new SyncResult(
+            pushed,
+            0,
+            0,
+            0,
+            failed,
+            deleted,
+            recreated,
+            startedAt,
+            DateTimeOffset.Now,
+            $"選択対象の再同期: 送信 {pushed} / 失敗 {failed} / 削除 {deleted} / 再作成 {recreated}");
+        await SaveFailureDiagnosticsAsync(failures);
+        await SaveSyncResultAsync(result, settings.EnableSyncDiagnostics);
+        return result;
+    }
+
+    public async Task<SyncResult> DiscardLocalChangesAsync(AppSettings settings, IReadOnlySet<string> localIds, CancellationToken cancellationToken = default)
+    {
+        var startedAt = DateTimeOffset.Now;
+        EnsureOAuthSettings(settings);
+
+        var client = await _googleCalendarApi.CreateClientAsync(settings.OAuthClientJsonPath!, cancellationToken);
+        var restored = 0;
+        var deleted = 0;
+        var failed = 0;
+        var failures = new List<SyncFailureDiagnostic>();
+
+        foreach (var localId in localIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var localEvent = await _repository.FindEventByIdAsync(localId);
+            if (localEvent is null || !localEvent.IsDirty)
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(localEvent.GoogleEventId))
+            {
+                if (!localEvent.IsDeleted)
+                {
+                    await _repository.HardDeleteEventAsync(localEvent.Id);
+                    deleted++;
+                }
+                else
+                {
+                    await _repository.MarkSyncedAsync(localEvent);
+                    restored++;
+                }
+
+                continue;
+            }
+
+            try
+            {
+                var googleEvent = await client.GetEventAsync(localEvent.CalendarId, localEvent.GoogleEventId, cancellationToken);
+                if (string.Equals(googleEvent.Status, "cancelled", StringComparison.OrdinalIgnoreCase))
+                {
+                    await _repository.MarkSyncedAsync(localEvent);
+                    restored++;
+                    continue;
+                }
+
+                await _repository.UpsertSyncedEventAsync(GoogleEventMapper.FromGoogleEvent(googleEvent, localEvent.CalendarId));
+                restored++;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                failed++;
+                failures.Add(CreateFailureDiagnostic(localEvent, "ローカル変更破棄", ex, "Googleから再取得できないため変更しませんでした。"));
+            }
+        }
+
+        var result = new SyncResult(
+            0,
+            restored,
+            0,
+            0,
+            failed,
+            deleted,
+            0,
+            startedAt,
+            DateTimeOffset.Now,
+            $"ローカル変更破棄: 復元 {restored} / ローカル新規削除 {deleted} / 失敗 {failed}");
         await SaveFailureDiagnosticsAsync(failures);
         await SaveSyncResultAsync(result, settings.EnableSyncDiagnostics);
         return result;
@@ -148,7 +269,13 @@ public sealed class GoogleCalendarSyncService
         var pulled = 0;
         foreach (var calendarId in targets)
         {
-            pulled += (await PullRemoteEventsAsync(client, calendarId, settings.SyncConflictPolicy, cancellationToken)).Pulled;
+            var failures = new List<SyncFailureDiagnostic>();
+            var pull = await PullRemoteEventsAsync(client, calendarId, settings.SyncConflictPolicy, failures, cancellationToken);
+            pulled += pull.Pulled;
+            if (failures.Count > 0)
+            {
+                await SaveFailureDiagnosticsAsync(failures);
+            }
         }
 
         return pulled;
@@ -345,10 +472,12 @@ public sealed class GoogleCalendarSyncService
         IGoogleCalendarClient client,
         string calendarId,
         ICollection<SyncFailureDiagnostic> failures,
+        IReadOnlySet<string>? localIds,
         CancellationToken cancellationToken)
     {
         var dirtyEvents = (await _repository.LoadDirtyEventsAsync())
             .Where(e => e.CalendarId == calendarId)
+            .Where(e => localIds is null || localIds.Contains(e.Id))
             .ToArray();
 
         var ordered = dirtyEvents
@@ -428,6 +557,13 @@ public sealed class GoogleCalendarSyncService
         var googleEvent = GoogleEventMapper.ToGoogleEvent(localEvent);
         if (string.IsNullOrWhiteSpace(localEvent.GoogleEventId))
         {
+            var existingRemoteId = await FindExactRemoteMatchAsync(client, calendarId, localEvent, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(existingRemoteId))
+            {
+                await _repository.MarkSyncedAsync(localEvent, existingRemoteId);
+                return SyncPushOutcome.Pushed;
+            }
+
             var inserted = await client.InsertEventAsync(calendarId, googleEvent, cancellationToken);
             await _repository.MarkSyncedAsync(localEvent, inserted.Id);
             return SyncPushOutcome.Pushed;
@@ -508,6 +644,52 @@ public sealed class GoogleCalendarSyncService
         return ex.HttpStatusCode == System.Net.HttpStatusCode.NotFound;
     }
 
+    private static async Task<string?> FindExactRemoteMatchAsync(
+        IGoogleCalendarClient client,
+        string calendarId,
+        CalendarEvent localEvent,
+        CancellationToken cancellationToken)
+    {
+        string? pageToken = null;
+        do
+        {
+            var page = await client.ListEventsAsync(
+                new GoogleEventListRequest(
+                    calendarId,
+                    SyncToken: null,
+                    pageToken,
+                    localEvent.Start.AddDays(-1),
+                    ShowDeleted: false,
+                    SingleEvents: false,
+                    MaxResults: 2500),
+                cancellationToken);
+            var match = page.Items.FirstOrDefault(item => IsExactRemoteMatch(item, localEvent));
+            if (!string.IsNullOrWhiteSpace(match?.Id))
+            {
+                return match.Id;
+            }
+
+            pageToken = page.NextPageToken;
+        }
+        while (!string.IsNullOrWhiteSpace(pageToken));
+
+        return null;
+    }
+
+    private static bool IsExactRemoteMatch(Event googleEvent, CalendarEvent localEvent)
+    {
+        if (string.Equals(googleEvent.Status, "cancelled", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var remote = GoogleEventMapper.FromGoogleEvent(googleEvent, localEvent.CalendarId);
+        return string.Equals(remote.Title, localEvent.Title, StringComparison.Ordinal)
+            && string.Equals(remote.Location ?? "", localEvent.Location ?? "", StringComparison.Ordinal)
+            && remote.Start == localEvent.Start
+            && remote.End == localEvent.End;
+    }
+
     private async Task<string?> ResolveRecurringEventIdAsync(CalendarEvent localEvent)
     {
         if (!string.IsNullOrWhiteSpace(localEvent.RecurringEventId))
@@ -545,16 +727,21 @@ public sealed class GoogleCalendarSyncService
             ?.Id;
     }
 
-    private async Task<SyncPullSummary> PullRemoteEventsAsync(IGoogleCalendarClient client, string calendarId, SyncConflictPolicy conflictPolicy, CancellationToken cancellationToken)
+    private async Task<SyncPullSummary> PullRemoteEventsAsync(
+        IGoogleCalendarClient client,
+        string calendarId,
+        SyncConflictPolicy conflictPolicy,
+        ICollection<SyncFailureDiagnostic> failures,
+        CancellationToken cancellationToken)
     {
         var syncToken = await _repository.GetSyncTokenAsync(calendarId);
         var pulled = 0;
         var skipped = 0;
         var conflicts = 0;
+        string? pageToken = null;
 
         try
         {
-            string? pageToken = null;
             do
             {
                 var page = await client.ListEventsAsync(
@@ -593,11 +780,18 @@ public sealed class GoogleCalendarSyncService
         }
         catch (GoogleApiException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.Gone)
         {
+            failures.Add(CreatePullFailureDiagnostic(calendarId, syncToken, pageToken, ex, "SyncTokenExpired", "410 Gone: sync token をリセットして再取得します。"));
             await _repository.SaveSyncTokenAsync(calendarId, null);
-            return await PullRemoteEventsAsync(client, calendarId, conflictPolicy, cancellationToken);
+            var retry = await PullRemoteEventsAsync(client, calendarId, conflictPolicy, failures, cancellationToken);
+            return new SyncPullSummary(pulled + retry.Pulled, skipped + retry.Skipped, conflicts + retry.Conflicts, retry.Failed);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            failures.Add(CreatePullFailureDiagnostic(calendarId, syncToken, pageToken, ex, "Pull", ex.Message));
+            return new SyncPullSummary(pulled, skipped, conflicts, 1);
         }
 
-        return new SyncPullSummary(pulled, skipped, conflicts);
+        return new SyncPullSummary(pulled, skipped, conflicts, 0);
     }
 
     private static bool MatchesOriginalStart(Event googleEvent, DateTimeOffset expected, bool isAllDay)
@@ -686,6 +880,34 @@ public sealed class GoogleCalendarSyncService
             googleException?.HttpStatusCode.ToString(),
             googleException?.Error?.Message,
             exception?.Message);
+    }
+
+    private static SyncFailureDiagnostic CreatePullFailureDiagnostic(
+        string calendarId,
+        string? syncToken,
+        string? pageToken,
+        Exception exception,
+        string category,
+        string reason)
+    {
+        var googleException = exception as GoogleApiException;
+        return new SyncFailureDiagnostic(
+            DateTimeOffset.Now,
+            "(pull)",
+            DateTimeOffset.Now,
+            calendarId,
+            "",
+            null,
+            "取得",
+            "Remote",
+            reason,
+            googleException?.HttpStatusCode.ToString(),
+            googleException?.Error?.Message,
+            exception.Message,
+            "Pull",
+            !string.IsNullOrWhiteSpace(syncToken),
+            pageToken,
+            category);
     }
 
     private static SyncDirtyItem ToDirtyItem(CalendarEvent calendarEvent)
@@ -830,7 +1052,7 @@ public enum GoogleNotFoundSyncAction
 }
 
 internal sealed record SyncPushSummary(int Pushed, int Failed, int Deleted, int Recreated);
-internal sealed record SyncPullSummary(int Pulled, int Skipped, int Conflicts);
+internal sealed record SyncPullSummary(int Pulled, int Skipped, int Conflicts, int Failed);
 internal sealed record SyncPushOutcome(bool Success, bool Deleted, bool Recreated)
 {
     public static SyncPushOutcome Pushed { get; } = new(true, false, false);

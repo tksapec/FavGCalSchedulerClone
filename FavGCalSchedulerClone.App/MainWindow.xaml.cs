@@ -19,6 +19,7 @@ public partial class MainWindow : Window
 {
     private readonly MainViewModel _viewModel;
     private readonly ReminderNotificationService _reminderService;
+    private readonly WindowsToastInitializationService _toastInitializationService;
     private readonly DispatcherTimer _automaticSyncTimer;
     private MediaPlayer? _previewSoundPlayer;
     private bool _exitRequested;
@@ -27,11 +28,12 @@ public partial class MainWindow : Window
     private CalendarDay? _dragOverDay;
     private DialogUiFactory DialogUi => new(this, _viewModel.EventColorOptions, _viewModel.SideListFontSize);
 
-    public MainWindow(MainViewModel viewModel, ReminderNotificationService reminderService)
+    public MainWindow(MainViewModel viewModel, ReminderNotificationService reminderService, WindowsToastInitializationService toastInitializationService)
     {
         InitializeComponent();
         _viewModel = viewModel;
         _reminderService = reminderService;
+        _toastInitializationService = toastInitializationService;
         _automaticSyncTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
         _automaticSyncTimer.Tick += async (_, _) => await _viewModel.RunAutomaticSyncIfDueAsync();
         DataContext = _viewModel;
@@ -59,6 +61,7 @@ public partial class MainWindow : Window
                 return Task.CompletedTask;
             });
         ToastNotificationManagerCompat.OnActivated += ToastNotificationManagerCompat_OnActivated;
+        WindowsToastActivationBridge.Activated += WindowsToastActivationBridge_Activated;
     }
 
     private void Window_Closing(object? sender, CancelEventArgs e)
@@ -70,6 +73,7 @@ public partial class MainWindow : Window
             _automaticSyncTimer.Stop();
             StopPreviewSound();
             ToastNotificationManagerCompat.OnActivated -= ToastNotificationManagerCompat_OnActivated;
+            WindowsToastActivationBridge.Activated -= WindowsToastActivationBridge_Activated;
             return;
         }
 
@@ -80,8 +84,9 @@ public partial class MainWindow : Window
     public IReminderNotifier CreateReminderNotifier()
     {
         var fallback = new MessageBoxReminderNotifier(this);
+        var toastVerified = _viewModel.IsWindowsToastVerifiedForCurrentApp;
         IReminderNotifier notifier = _viewModel.UseWindowsToastNotifications
-            ? new FallbackReminderNotifier(new WindowsToastReminderNotifier(), fallback, _viewModel.ShowMessageBoxAfterToastNotification)
+            ? new FallbackReminderNotifier(new WindowsToastReminderNotifier(_toastInitializationService, toastVerified), fallback, _viewModel.ShowMessageBoxAfterToastNotification)
             : fallback;
         return _viewModel.EnableReminderSound
             ? new SoundReminderNotifier(notifier, _viewModel.ReminderSoundFilePath, _viewModel.ReminderSoundVolume)
@@ -92,16 +97,26 @@ public partial class MainWindow : Window
     {
         var fallback = new MessageBoxReminderNotifier(this);
         IReminderNotifier notifier = settings.UseWindowsToastNotifications
-            ? new FallbackReminderNotifier(new WindowsToastReminderNotifier(), fallback, settings.ShowMessageBoxAfterToastNotification)
+            ? new FallbackReminderNotifier(new WindowsToastReminderNotifier(_toastInitializationService, toastVerified: true), fallback, settings.ShowMessageBoxAfterToastNotification)
             : fallback;
         return settings.EnableReminderSound
             ? new SoundReminderNotifier(notifier, settings.ReminderSoundFilePath, settings.ReminderSoundVolume)
             : notifier;
     }
 
+    private async void WindowsToastActivationBridge_Activated(object? sender, string arguments)
+    {
+        await HandleToastArgumentsAsync(arguments);
+    }
+
     private async void ToastNotificationManagerCompat_OnActivated(ToastNotificationActivatedEventArgsCompat args)
     {
-        var arguments = ToastArguments.Parse(args.Argument);
+        await HandleToastArgumentsAsync(args.Argument);
+    }
+
+    private async Task HandleToastArgumentsAsync(string argument)
+    {
+        var arguments = ToastArguments.Parse(argument);
         if (!arguments.TryGetValue("action", out var action)
             || !arguments.TryGetValue("occurrenceKey", out var occurrenceKey))
         {
@@ -971,7 +986,27 @@ public partial class MainWindow : Window
     private async Task ShowSyncDiagnosticsDialogAsync()
     {
         var diagnostics = await _viewModel.LoadSyncDiagnosticsAsync();
-        SyncDialogs.ShowDiagnostics(this, diagnostics, _viewModel.ClearSyncDiagnosticsAsync, async () => await _viewModel.SynchronizeManuallyWithPreviewAsync());
+        SyncDialogs.ShowDiagnostics(
+            this,
+            diagnostics,
+            _viewModel.ClearSyncDiagnosticsAsync,
+            async ids => await _viewModel.ResyncFailedItemsAsync(ids),
+            OpenDirtyItemFromDiagnosticsAsync,
+            async ids => await _viewModel.ResyncDirtyItemsAsync(ids),
+            async ids => await _viewModel.MarkDirtyItemsSyncedAsync(ids),
+            async ids => await _viewModel.DiscardLocalChangesAsync(ids));
+    }
+
+    private async Task OpenDirtyItemFromDiagnosticsAsync(string localId)
+    {
+        var calendarEvent = await _viewModel.FindEventByIdAsync(localId);
+        if (calendarEvent is null)
+        {
+            MessageBox.Show(this, "対象の予定が見つかりません。", "同期診断", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        await OpenGridEventEditorAsync(calendarEvent);
     }
 
     private async Task OpenReminderHistoryItemAsync(ReminderHistoryItem item)
@@ -1001,7 +1036,10 @@ public partial class MainWindow : Window
                 _viewModel.AuthorizeGoogleAsync,
                 _viewModel.ClearTokensAsync,
                 _viewModel.ReloadAvailableCalendarsAsync,
-                settings => _reminderService.ShowTestNotificationAsync(CreateReminderNotifier(settings))));
+                settings => _reminderService.ShowTestNotificationAsync(CreateReminderNotifier(settings)),
+                _toastInitializationService.CurrentStatus.ToDisplayText(),
+                WindowsToastInitializationService.AppUserModelId,
+                _toastInitializationService.CurrentExecutablePath));
         if (result is null)
         {
             return;

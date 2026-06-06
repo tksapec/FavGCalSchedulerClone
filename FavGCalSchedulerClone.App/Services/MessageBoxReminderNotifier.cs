@@ -2,7 +2,7 @@ using System.Windows;
 
 namespace FavGCalSchedulerClone.App.Services;
 
-public sealed class MessageBoxReminderNotifier : IReminderNotifier
+public sealed class MessageBoxReminderNotifier : IReminderNotifier, IReminderNotifierMetadata
 {
     private readonly Window _owner;
 
@@ -10,6 +10,11 @@ public sealed class MessageBoxReminderNotifier : IReminderNotifier
     {
         _owner = owner;
     }
+
+    public string DeliveryMethodName => "MessageBox";
+    public bool UsedMessageBoxFallback => true;
+    public bool ToastVerified => false;
+    public string? ToastStatus => null;
 
     public Task ShowAsync(ReminderNotification notification, CancellationToken cancellationToken = default)
     {

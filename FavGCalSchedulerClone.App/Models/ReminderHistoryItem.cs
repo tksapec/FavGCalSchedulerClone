@@ -15,10 +15,24 @@ public sealed class ReminderHistoryItem
     public DateTimeOffset? SnoozedUntil { get; set; }
     public bool DeliverySucceeded { get; set; } = true;
     public string? DeliveryMethod { get; set; }
+    public bool UsedMessageBoxFallback { get; set; }
+    public bool ToastVerified { get; set; }
+    public string? ToastStatus { get; set; }
     public string? DeliveryError { get; set; }
 
     public string KindText => IsTodoLike ? "ToDo" : "予定";
     public string NotifiedAtText => NotifiedAt.ToString("yyyy/MM/dd HH:mm");
     public string SnoozedUntilText => SnoozedUntil is null ? "" : SnoozedUntil.Value.ToString("yyyy/MM/dd HH:mm");
-    public string DeliveryStatusText => DeliverySucceeded ? $"OK ({DeliveryMethod})" : $"Failed ({DeliveryMethod}): {DeliveryError}";
+    public string DeliveryStatusText => FormatDeliveryStatus();
+
+    private string FormatDeliveryStatus()
+    {
+        var status = DeliverySucceeded ? "OK" : "Failed";
+        var fallback = UsedMessageBoxFallback ? " + MessageBox" : "";
+        var verified = ToastVerified ? " verified" : "";
+        var detail = string.IsNullOrWhiteSpace(DeliveryError) ? ToastStatus : DeliveryError;
+        return string.IsNullOrWhiteSpace(detail)
+            ? $"{status} ({DeliveryMethod}{fallback}{verified})"
+            : $"{status} ({DeliveryMethod}{fallback}{verified}): {detail}";
+    }
 }

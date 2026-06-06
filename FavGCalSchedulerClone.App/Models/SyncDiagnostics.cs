@@ -86,7 +86,11 @@ public sealed record SyncFailureDiagnostic(
     string FailureReason,
     string? HttpStatusCode,
     string? GoogleErrorMessage,
-    string? ExceptionMessage);
+    string? ExceptionMessage,
+    string Direction = "Push",
+    bool SyncTokenPresent = false,
+    string? PageToken = null,
+    string? FailureCategory = null);
 
 public sealed record SyncDiagnosticsSnapshot(
     SyncResult? LastResult,
