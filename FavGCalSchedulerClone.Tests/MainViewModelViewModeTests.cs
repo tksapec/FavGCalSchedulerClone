@@ -217,6 +217,45 @@ public sealed class MainViewModelViewModeTests
     }
 
     [Fact]
+    public async Task NavigationRefresh_CancelsOlderSnapshotBuild()
+    {
+        var firstTarget = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1).AddMonths(5);
+        var secondTarget = firstTarget.AddMonths(1);
+        var viewModel = await CreateViewModelAsync([
+            CreateEvent("first build target", firstTarget.AddDays(4)),
+            CreateEvent("second build target", secondTarget.AddDays(4))
+        ]);
+        viewModel.NavigationRefreshDelay = TimeSpan.Zero;
+        var firstBuildStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstBuildCanceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        viewModel.BeforeBuildCalendarSnapshot = (month, token) =>
+        {
+            if (month.Year != firstTarget.Year || month.Month != firstTarget.Month)
+            {
+                return;
+            }
+
+            firstBuildStarted.TrySetResult();
+            while (!token.IsCancellationRequested)
+            {
+                Thread.Sleep(10);
+            }
+
+            firstBuildCanceled.TrySetResult();
+            token.ThrowIfCancellationRequested();
+        };
+
+        viewModel.CurrentMonth = firstTarget;
+        await firstBuildStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        viewModel.CurrentMonth = secondTarget;
+
+        await firstBuildCanceled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await WaitUntilAsync(() => viewModel.CalendarDays.Any(day => day.Events.Any(item => item.Title == "second build target")));
+        Assert.Equal(secondTarget, viewModel.CurrentMonth);
+        Assert.DoesNotContain(viewModel.CalendarDays.SelectMany(day => day.Events), item => item.Title == "first build target");
+    }
+
+    [Fact]
     public async Task Navigation_UsesCachedMonthImmediatelyWhenReturning()
     {
         var currentMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
@@ -292,6 +331,58 @@ public sealed class MainViewModelViewModeTests
 
         Assert.Equal(target.AddMonths(2), viewModel.CurrentMonth);
         Assert.False(viewModel.IsCalendarMonthCached(blockedPrefetchMonth));
+    }
+
+    [Fact]
+    public async Task CalendarDayEvents_AssignsSingleAndMultiDayEventsByDate()
+    {
+        var month = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        var singleDate = month.AddDays(6);
+        var multiStart = month.AddDays(8);
+        var multi = CreateEvent("multi day", multiStart);
+        multi.End = new DateTimeOffset(multiStart.AddDays(2).AddHours(10));
+        var viewModel = await CreateViewModelAsync([
+            CreateEvent("single day", singleDate),
+            multi
+        ]);
+
+        Assert.Contains(viewModel.CalendarDays.Single(day => day.Date == singleDate).Events, item => item.Title == "single day");
+        Assert.Contains(viewModel.CalendarDays.Single(day => day.Date == multiStart).Events, item => item.Title == "multi day");
+        Assert.Contains(viewModel.CalendarDays.Single(day => day.Date == multiStart.AddDays(1)).Events, item => item.Title == "multi day");
+        Assert.Contains(viewModel.CalendarDays.Single(day => day.Date == multiStart.AddDays(2)).Events, item => item.Title == "multi day");
+    }
+
+    [Fact]
+    public async Task CalendarDayEvents_TreatsAllDayEndAsExclusive()
+    {
+        var month = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        var start = month.AddDays(10);
+        var allDay = new CalendarEvent
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Title = "all day exclusive",
+            Start = new DateTimeOffset(start),
+            End = new DateTimeOffset(start.AddDays(2)),
+            IsAllDay = true
+        };
+        var viewModel = await CreateViewModelAsync([allDay]);
+
+        Assert.Contains(viewModel.CalendarDays.Single(day => day.Date == start).Events, item => item.Title == "all day exclusive");
+        Assert.Contains(viewModel.CalendarDays.Single(day => day.Date == start.AddDays(1)).Events, item => item.Title == "all day exclusive");
+        Assert.DoesNotContain(viewModel.CalendarDays.Single(day => day.Date == start.AddDays(2)).Events, item => item.Title == "all day exclusive");
+    }
+
+    [Fact]
+    public async Task CalendarDayEvents_LimitsDisplayedItemsToFivePerDay()
+    {
+        var date = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1).AddDays(12);
+        var events = Enumerable.Range(0, 6)
+            .Select(index => CreateEvent($"overflow {index}", date))
+            .ToArray();
+
+        var viewModel = await CreateViewModelAsync(events);
+
+        Assert.Equal(5, viewModel.CalendarDays.Single(day => day.Date == date).Events.Count);
     }
 
     [Fact]

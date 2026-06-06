@@ -1374,7 +1374,11 @@ public sealed class MainViewModel : ObservableObject
             includeDeleted: true,
             cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
-        return BuildCalendarSnapshot(month, gridStart, gridEnd, storedEvents, context, cancellationToken);
+        var snapshot = await Task.Run(
+            () => BuildCalendarSnapshot(month, gridStart, gridEnd, storedEvents, context, cancellationToken),
+            cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        return snapshot;
     }
 
     private CalendarRefreshSnapshot BuildCalendarSnapshot(
@@ -1407,6 +1411,7 @@ public sealed class MainViewModel : ObservableObject
         _visibleEvents = snapshot.VisibleEvents;
 
         EnsureCalendarDayCapacity((snapshot.GridEnd - snapshot.GridStart).Days);
+        var eventsByDate = CreateEventsByDateIndex(snapshot);
         var index = 0;
         for (var date = snapshot.GridStart; date < snapshot.GridEnd; date = date.AddDays(1), index++)
         {
@@ -1414,7 +1419,12 @@ public sealed class MainViewModel : ObservableObject
             UpdateCalendarDayShell(day, date, clearEvents: true);
             day.IsWorkdayOverride = TagService.HasWorkdayOverride(_dayDirectiveEvents, date);
             day.IsHoliday = TagService.HasHolidayWithoutWorkdayOverride(_dayDirectiveEvents, date);
-            foreach (var calendarEvent in _visibleEvents.Where(e => DateRangeHelper.OccursOn(e, date)).Take(5))
+            if (!eventsByDate.TryGetValue(date.Date, out var eventsForDate))
+            {
+                continue;
+            }
+
+            foreach (var calendarEvent in eventsForDate.Take(5))
             {
                 day.Events.Add(calendarEvent);
             }
@@ -1446,6 +1456,43 @@ public sealed class MainViewModel : ObservableObject
         RefreshSelectedDayEvents();
         RefreshSevenDayEvents();
     }
+
+    private static Dictionary<DateTime, List<CalendarEvent>> CreateEventsByDateIndex(CalendarRefreshSnapshot snapshot)
+    {
+        var result = new Dictionary<DateTime, List<CalendarEvent>>();
+        var gridLastDate = snapshot.GridEnd.AddDays(-1).Date;
+        foreach (var calendarEvent in snapshot.VisibleEvents)
+        {
+            var firstDate = MaxDate(snapshot.GridStart.Date, calendarEvent.Start.Date);
+            var lastDate = MinDate(gridLastDate, calendarEvent.End.Date);
+            if (lastDate < firstDate)
+            {
+                lastDate = firstDate;
+            }
+
+            for (var date = firstDate; date <= lastDate; date = date.AddDays(1))
+            {
+                if (!DateRangeHelper.OccursOn(calendarEvent, date))
+                {
+                    continue;
+                }
+
+                if (!result.TryGetValue(date, out var eventsForDate))
+                {
+                    eventsForDate = [];
+                    result[date] = eventsForDate;
+                }
+
+                eventsForDate.Add(calendarEvent);
+            }
+        }
+
+        return result;
+    }
+
+    private static DateTime MaxDate(DateTime left, DateTime right) => left >= right ? left : right;
+
+    private static DateTime MinDate(DateTime left, DateTime right) => left <= right ? left : right;
 
     private async Task RefreshCalendarPreservingSelectionAsync(CalendarRefreshRequest request)
     {
