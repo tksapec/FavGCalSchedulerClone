@@ -34,6 +34,15 @@ public sealed partial class MainWindowMenuTests
         Assert.Contains($"<KeyBinding Key=\"{key}\" Command=\"{{Binding {command}}}\" />", xaml);
     }
 
+    [Fact]
+    public async Task MainWindow_DefinesCtrlGForMonthJump()
+    {
+        var xaml = await File.ReadAllTextAsync(MainWindowXamlPath);
+
+        Assert.Contains("<KeyBinding Key=\"G\" Modifiers=\"Control\" Command=\"{Binding ShowMonthJumpCommand}\" />", xaml);
+        Assert.Contains("InputGestureText=\"Ctrl+G\" Command=\"{Binding ShowMonthJumpCommand}\"", xaml);
+    }
+
     [Theory]
     [InlineData("BackupAllCalendarsCommand")]
     [InlineData("RestoreAllCalendarsCommand")]
@@ -45,6 +54,7 @@ public sealed partial class MainWindowMenuTests
     [InlineData("ShowScheduleListCommand")]
     [InlineData("SearchCommand")]
     [InlineData("ShowSyncDiagnosticsCommand")]
+    [InlineData("ShowMonthJumpCommand")]
     [InlineData("ShowSettingsCommand")]
     [InlineData("ShowReminderHistoryCommand")]
     [InlineData("ShowAboutCommand")]

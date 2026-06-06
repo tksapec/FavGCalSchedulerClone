@@ -176,10 +176,12 @@ public sealed class MainViewModel : ObservableObject
     public AsyncRelayCommand ShowAboutCommand { get; }
     public AsyncRelayCommand ShowMonthJumpCommand { get; }
     internal Func<DateTime, CancellationToken, Task>? BeforeLoadCalendarSnapshotAsync { get; set; }
+    internal Action<DateTime, CancellationToken>? BeforeBuildCalendarSnapshot { get; set; }
     internal Action<DateTime>? BeforeSaveDisplayMonth { get; set; }
     internal Action? BeforeRefreshTodos { get; set; }
     internal TimeSpan NavigationRefreshDelay { get; set; } = TimeSpan.FromMilliseconds(80);
     internal int CalendarCacheCount => _calendarCache.Count;
+    internal bool IsCalendarMonthCached(DateTime month) => TryGetCalendarCache(month) is not null;
 
     public string MonthTitle => CurrentMonth.ToString("yyyy/MM", CultureInfo.InvariantCulture);
     public string JapaneseMonthTitle => CalendarStatusFormatter.FormatJapaneseMonthTitle(CurrentMonth);
@@ -1364,20 +1366,34 @@ public sealed class MainViewModel : ObservableObject
             cancellationToken.ThrowIfCancellationRequested();
         }
 
-        var (gridStart, gridEnd) = DateRangeHelper.MonthGridRange(month, _settings.WeekStartsOnMonday);
+        var context = CreateCalendarSnapshotBuildContext();
+        var (gridStart, gridEnd) = DateRangeHelper.MonthGridRange(month, context.WeekStartsOnMonday);
         var storedEvents = await _repository.LoadEventsAsync(
             new DateTimeOffset(gridStart),
             new DateTimeOffset(gridEnd),
             includeDeleted: true,
             cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
+        return BuildCalendarSnapshot(month, gridStart, gridEnd, storedEvents, context, cancellationToken);
+    }
+
+    private CalendarRefreshSnapshot BuildCalendarSnapshot(
+        DateTime month,
+        DateTime gridStart,
+        DateTime gridEnd,
+        IReadOnlyList<CalendarEvent> storedEvents,
+        CalendarSnapshotBuildContext context,
+        CancellationToken cancellationToken)
+    {
+        BeforeBuildCalendarSnapshot?.Invoke(month, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         var calendarEvents = RecurrenceExpansionService
             .ExpandForRange(storedEvents, new DateTimeOffset(gridStart), new DateTimeOffset(gridEnd))
-            .Where(IsInVisibleCalendar)
+            .Where(item => IsInVisibleCalendar(item, context))
             .ToArray();
         cancellationToken.ThrowIfCancellationRequested();
-        var visibleEvents = calendarEvents.Where(IsVisible).ToArray();
-        ApplyDisplayColors(visibleEvents);
+        var visibleEvents = calendarEvents.Where(item => IsVisible(item, context)).ToArray();
+        ApplyDisplayColors(visibleEvents, context);
         return new CalendarRefreshSnapshot(month, gridStart, gridEnd, storedEvents, calendarEvents, visibleEvents);
     }
 
@@ -1557,21 +1573,52 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task PrefetchAdjacentMonthsAsync(CalendarRefreshRequest request)
     {
+        try
+        {
+            await Task.Delay(120, request.CancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            Debug.WriteLine($"Calendar prefetch canceled before start: generation={request.Generation}");
+            return;
+        }
+
+        var context = CreateCalendarSnapshotBuildContext();
         foreach (var month in new[] { request.Month.AddMonths(-1), request.Month.AddMonths(1) })
         {
             try
             {
                 request.CancellationToken.ThrowIfCancellationRequested();
-                var key = CreateCalendarCacheKey(month);
+                var key = CreateCalendarCacheKey(month, context);
                 if (_calendarCache.ContainsKey(key))
                 {
                     continue;
                 }
 
-                StoreCalendarCache(await LoadCalendarSnapshotAsync(month, request.CancellationToken));
+                Debug.WriteLine($"Calendar prefetch start: {month:yyyy-MM}, generation={request.Generation}");
+                var (gridStart, gridEnd) = DateRangeHelper.MonthGridRange(month, context.WeekStartsOnMonday);
+                var storedEvents = await _repository.LoadEventsAsync(
+                    new DateTimeOffset(gridStart),
+                    new DateTimeOffset(gridEnd),
+                    includeDeleted: true,
+                    request.CancellationToken);
+                request.CancellationToken.ThrowIfCancellationRequested();
+                var snapshot = await Task.Run(
+                    () => BuildCalendarSnapshot(month, gridStart, gridEnd, storedEvents, context, request.CancellationToken),
+                    request.CancellationToken);
+                request.CancellationToken.ThrowIfCancellationRequested();
+                if (!IsLatestCalendarRefresh(request) || _calendarCache.ContainsKey(key))
+                {
+                    Debug.WriteLine($"Calendar prefetch discarded: {month:yyyy-MM}, generation={request.Generation}");
+                    continue;
+                }
+
+                StoreCalendarCache(snapshot, key);
+                Debug.WriteLine($"Calendar prefetch complete: {month:yyyy-MM}, generation={request.Generation}");
             }
             catch (OperationCanceledException)
             {
+                Debug.WriteLine($"Calendar prefetch canceled: generation={request.Generation}");
                 return;
             }
             catch (Exception ex)
@@ -1584,14 +1631,14 @@ public sealed class MainViewModel : ObservableObject
 
     private CalendarCacheKey CreateCalendarCacheKey(DateTime month)
     {
+        return CreateCalendarCacheKey(month, CreateCalendarSnapshotBuildContext());
+    }
+
+    private CalendarCacheKey CreateCalendarCacheKey(DateTime month, CalendarSnapshotBuildContext context)
+    {
         var normalizedMonth = new DateTime(month.Year, month.Month, 1);
-        var visibleCalendars = string.Join(
-            "|",
-            AvailableCalendars
-                .Where(item => item.IsSelected)
-                .Select(item => item.Id)
-                .OrderBy(id => id, StringComparer.Ordinal));
-        return new CalendarCacheKey(normalizedMonth, _settings.WeekStartsOnMonday, visibleCalendars);
+        var visibleCalendars = string.Join("|", context.VisibleCalendarIds.OrderBy(id => id, StringComparer.Ordinal));
+        return new CalendarCacheKey(normalizedMonth, context.WeekStartsOnMonday, visibleCalendars);
     }
 
     private CalendarRefreshSnapshot? TryGetCalendarCache(DateTime month)
@@ -1608,7 +1655,12 @@ public sealed class MainViewModel : ObservableObject
 
     private void StoreCalendarCache(CalendarRefreshSnapshot snapshot)
     {
-        _calendarCache[CreateCalendarCacheKey(snapshot.Month)] = snapshot;
+        StoreCalendarCache(snapshot, CreateCalendarCacheKey(snapshot.Month));
+    }
+
+    private void StoreCalendarCache(CalendarRefreshSnapshot snapshot, CalendarCacheKey key)
+    {
+        _calendarCache[key] = snapshot;
         if (_calendarCache.Count <= 5)
         {
             return;
@@ -1620,9 +1672,9 @@ public sealed class MainViewModel : ObservableObject
             CreateCalendarCacheKey(CurrentMonth),
             CreateCalendarCacheKey(CurrentMonth.AddMonths(1))
         };
-        foreach (var key in _calendarCache.Keys.Where(key => !keep.Contains(key)).ToArray())
+        foreach (var cacheKey in _calendarCache.Keys.Where(candidate => !keep.Contains(candidate)).ToArray())
         {
-            _calendarCache.Remove(key);
+            _calendarCache.Remove(cacheKey);
             if (_calendarCache.Count <= 5)
             {
                 break;
@@ -1704,15 +1756,19 @@ public sealed class MainViewModel : ObservableObject
 
     private void ApplyDisplayColors(IEnumerable<CalendarEvent> events)
     {
-        var calendarNames = AvailableCalendars.ToDictionary(item => item.Id, item => item.Summary, StringComparer.Ordinal);
+        ApplyDisplayColors(events, CreateCalendarSnapshotBuildContext());
+    }
+
+    private void ApplyDisplayColors(IEnumerable<CalendarEvent> events, CalendarSnapshotBuildContext context)
+    {
         foreach (var calendarEvent in events)
         {
-            var colors = TagService.ResolveDisplayColors(calendarEvent, _eventColorPalette);
+            var colors = TagService.ResolveDisplayColors(calendarEvent, context.EventColorPalette);
             calendarEvent.DisplayColor = colors.Background;
             calendarEvent.DisplayForegroundColor = colors.Foreground;
             calendarEvent.ToolTipText = CalendarEventToolTipFormatter.Format(
                 calendarEvent,
-                calendarNames.GetValueOrDefault(calendarEvent.CalendarId));
+                context.CalendarNames.GetValueOrDefault(calendarEvent.CalendarId));
         }
     }
 
@@ -1722,9 +1778,31 @@ public sealed class MainViewModel : ObservableObject
             && !TagService.IsDayCellDirective(calendarEvent);
     }
 
+    private static bool IsVisible(CalendarEvent calendarEvent, CalendarSnapshotBuildContext context)
+    {
+        return IsInVisibleCalendar(calendarEvent, context)
+            && !TagService.IsDayCellDirective(calendarEvent);
+    }
+
     private bool IsInVisibleCalendar(CalendarEvent calendarEvent) =>
         AvailableCalendars.Count == 0
         || AvailableCalendars.Any(item => item.IsSelected && item.Id == calendarEvent.CalendarId);
+
+    private static bool IsInVisibleCalendar(CalendarEvent calendarEvent, CalendarSnapshotBuildContext context) =>
+        context.VisibleCalendarIds.Count == 0
+        || context.VisibleCalendarIds.Contains(calendarEvent.CalendarId);
+
+    private CalendarSnapshotBuildContext CreateCalendarSnapshotBuildContext()
+    {
+        return new CalendarSnapshotBuildContext(
+            _settings.WeekStartsOnMonday,
+            AvailableCalendars
+                .Where(item => item.IsSelected)
+                .Select(item => item.Id)
+                .ToHashSet(StringComparer.Ordinal),
+            AvailableCalendars.ToDictionary(item => item.Id, item => item.Summary, StringComparer.Ordinal),
+            _eventColorPalette.ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal));
+    }
 
     private void NavigatePrimary(int direction)
     {
@@ -2448,10 +2526,21 @@ public sealed class MainViewModel : ObservableObject
             }
 
             await _repository.SaveSettingsAsync(_settings);
-            _eventColorPalette = await _syncService.RefreshEventColorPaletteAsync();
-            await ReloadAvailableCalendarsAsync();
-            await RefreshCalendarAsync();
+            Status = "カレンダー再読み込み中...";
             var remaining = (await _repository.LoadDirtyEventsAsync()).Count;
+            try
+            {
+                _eventColorPalette = await _syncService.RefreshEventColorPaletteAsync();
+                await ReloadAvailableCalendarsAsync();
+                await RefreshCalendarAsync();
+            }
+            catch (Exception reloadEx)
+            {
+                Debug.WriteLine(reloadEx);
+                Status = $"同期は完了しましたが、カレンダー再読み込みに失敗しました: {reloadEx.Message} / 未同期残数 {remaining}";
+                return result;
+            }
+
             Status = $"同期が完了しました: {result.SummaryText} / 未同期残数 {remaining}";
             if (result.Failed > 0 || result.Conflicts > 0 || remaining > 0)
             {
@@ -2750,6 +2839,12 @@ internal sealed record CalendarRefreshRequest(
     CancellationToken CancellationToken);
 
 internal sealed record CalendarCacheKey(DateTime Month, bool WeekStartsOnMonday, string VisibleCalendarIds);
+
+internal sealed record CalendarSnapshotBuildContext(
+    bool WeekStartsOnMonday,
+    IReadOnlySet<string> VisibleCalendarIds,
+    IReadOnlyDictionary<string, string> CalendarNames,
+    IReadOnlyDictionary<string, EventDisplayColors> EventColorPalette);
 
 internal sealed record CalendarRefreshSnapshot(
     DateTime Month,

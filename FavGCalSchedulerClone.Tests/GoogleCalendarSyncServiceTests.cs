@@ -587,6 +587,29 @@ public sealed class GoogleCalendarSyncServiceTests
         Assert.NotNull(stored.GoogleEventId);
     }
 
+    [Fact]
+    public async Task MainViewModel_ShowsCalendarReloadingStatusAfterSyncBeforeRefresh()
+    {
+        var repository = await CreateRepositoryAsync();
+        await repository.SaveSettingsAsync(CreateSettings("primary"));
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository, new FakeGoogleCalendarApi()));
+        await viewModel.InitializeAsync();
+        var observedStatus = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        viewModel.BeforeLoadCalendarSnapshotAsync = (_, _) =>
+        {
+            if (viewModel.Status == "カレンダー再読み込み中...")
+            {
+                observedStatus.TrySetResult(viewModel.Status);
+            }
+
+            return Task.CompletedTask;
+        };
+
+        await viewModel.SynchronizeManuallyAsync();
+
+        Assert.Equal("カレンダー再読み込み中...", await observedStatus.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
     private static async Task<CalendarRepository> CreateRepositoryAsync()
     {
         var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));

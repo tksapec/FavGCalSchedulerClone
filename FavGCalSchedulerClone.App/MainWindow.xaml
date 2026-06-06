@@ -15,6 +15,7 @@
         <KeyBinding Key="Home" Command="{Binding TodayCommand}" />
         <KeyBinding Key="PageUp" Command="{Binding PreviousMonthCommand}" />
         <KeyBinding Key="PageDown" Command="{Binding NextMonthCommand}" />
+        <KeyBinding Key="G" Modifiers="Control" Command="{Binding ShowMonthJumpCommand}" />
         <KeyBinding Key="F8" Command="{Binding SyncCommand}" />
     </Window.InputBindings>
     <Window.Resources>
@@ -303,6 +304,8 @@
                 <Separator />
                 <MenuItem Header="大きく前へ(_-)" Command="{Binding PreviousYearCommand}" />
                 <MenuItem Header="大きく次へ(_+)" Command="{Binding NextYearCommand}" />
+                <Separator />
+                <MenuItem Header="年月を指定して移動(_G)..." InputGestureText="Ctrl+G" Command="{Binding ShowMonthJumpCommand}" />
             </MenuItem>
             <MenuItem Header="検索(_S)" Command="{Binding SearchCommand}" />
             <MenuItem Header="Googleカレンダー(_G)">

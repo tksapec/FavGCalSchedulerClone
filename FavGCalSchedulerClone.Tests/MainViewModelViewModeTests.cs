@@ -255,12 +255,75 @@ public sealed class MainViewModelViewModeTests
     }
 
     [Fact]
+    public async Task Prefetch_CancelsOlderGenerationWithoutStoringSnapshot()
+    {
+        var baseline = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        var target = baseline.AddMonths(4);
+        var blockedPrefetchMonth = target.AddMonths(-1);
+        var viewModel = await CreateViewModelAsync([
+            CreateEvent("blocked prefetch", blockedPrefetchMonth.AddDays(2))
+        ]);
+        viewModel.NavigationRefreshDelay = TimeSpan.Zero;
+        var prefetchStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var prefetchCanceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        viewModel.BeforeBuildCalendarSnapshot = (month, token) =>
+        {
+            if (month.Year != blockedPrefetchMonth.Year || month.Month != blockedPrefetchMonth.Month)
+            {
+                return;
+            }
+
+            prefetchStarted.TrySetResult();
+            while (!token.IsCancellationRequested)
+            {
+                Thread.Sleep(10);
+            }
+
+            prefetchCanceled.TrySetResult();
+            token.ThrowIfCancellationRequested();
+        };
+
+        viewModel.CurrentMonth = target;
+        await prefetchStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        viewModel.CurrentMonth = target.AddMonths(2);
+        await prefetchCanceled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.Delay(100);
+
+        Assert.Equal(target.AddMonths(2), viewModel.CurrentMonth);
+        Assert.False(viewModel.IsCalendarMonthCached(blockedPrefetchMonth));
+    }
+
+    [Fact]
     public async Task SaveSettings_InvalidatesCalendarCache()
     {
         var viewModel = await CreateViewModelAsync();
         await WaitUntilAsync(() => viewModel.CalendarCacheCount > 0);
         var settings = viewModel.CreateSettingsSnapshot();
         settings.WeekStartsOnMonday = !settings.WeekStartsOnMonday;
+        var loadCount = 0;
+        viewModel.BeforeLoadCalendarSnapshotAsync = (_, _) =>
+        {
+            loadCount++;
+            return Task.CompletedTask;
+        };
+
+        await viewModel.SaveApplicationSettingsAsync(settings);
+
+        Assert.True(loadCount > 0);
+        Assert.True(viewModel.CalendarCacheCount > 0);
+    }
+
+    [Fact]
+    public async Task SaveEventColorSettings_InvalidatesCalendarCache()
+    {
+        var viewModel = await CreateViewModelAsync();
+        await WaitUntilAsync(() => viewModel.CalendarCacheCount > 0);
+        var settings = viewModel.CreateSettingsSnapshot();
+        settings.EventColorSettings =
+        [
+            new EventColorSetting { ColorId = "5", Label = "Important", IsEnabled = true }
+        ];
         var loadCount = 0;
         viewModel.BeforeLoadCalendarSnapshotAsync = (_, _) =>
         {
@@ -289,6 +352,41 @@ public sealed class MainViewModelViewModeTests
         await viewModel.SaveTagsAsync();
 
         Assert.True(loadCount > 0);
+    }
+
+    [Fact]
+    public async Task ApplyCalendarSelection_InvalidatesCalendarCache()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        await repository.SaveSettingsAsync(new AppSettings { VisibleCalendarIds = ["primary", "team"] });
+        await repository.SaveEventAsync(CreateEvent("primary event", DateTime.Today));
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Title = "team event",
+            CalendarId = "team",
+            Start = new DateTimeOffset(DateTime.Today.Date.AddHours(9)),
+            End = new DateTimeOffset(DateTime.Today.Date.AddHours(10))
+        });
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        await viewModel.InitializeAsync();
+        await WaitUntilAsync(() => viewModel.CalendarCacheCount > 0);
+        var loadCount = 0;
+        viewModel.BeforeLoadCalendarSnapshotAsync = (_, _) =>
+        {
+            loadCount++;
+            return Task.CompletedTask;
+        };
+        viewModel.AvailableCalendars.Single(item => item.Id == "primary").IsSelected = false;
+        viewModel.AvailableCalendars.Single(item => item.Id == "team").IsSelected = true;
+
+        await viewModel.ApplyCalendarSelectionAsync();
+
+        Assert.True(loadCount > 0);
+        Assert.Contains(viewModel.SelectedDayEvents, item => item.Title == "team event");
+        Assert.DoesNotContain(viewModel.SelectedDayEvents, item => item.Title == "primary event");
     }
 
     [Fact]
