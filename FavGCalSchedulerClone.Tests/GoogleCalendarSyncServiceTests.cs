@@ -206,6 +206,37 @@ public sealed class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncAsync_RecordsFailedDirtyEventDiagnostics()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi { ThrowOnInsert = true };
+        var settings = CreateSettings("work");
+        settings.EnableSyncDiagnostics = true;
+        var local = new CalendarEvent
+        {
+            CalendarId = "work",
+            Title = "diagnostic target",
+            Start = new DateTimeOffset(2026, 1, 4, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 1, 4, 10, 0, 0, TimeSpan.Zero)
+        };
+        await repository.SaveEventAsync(local);
+        var service = new GoogleCalendarSyncService(repository, api);
+
+        var result = await service.SyncAsync(settings);
+        var diagnostics = await service.LoadDiagnosticsAsync(settings);
+
+        Assert.Equal(1, result.Failed);
+        var failure = Assert.Single(diagnostics.Failures);
+        Assert.Equal("diagnostic target", failure.Title);
+        Assert.Equal("work", failure.CalendarId);
+        Assert.Equal("作成", failure.Operation);
+        Assert.Equal("insert failed", failure.ExceptionMessage);
+        var dirty = Assert.Single(diagnostics.DirtyItems);
+        Assert.Equal(failure.LocalId, dirty.LocalId);
+        Assert.Equal("insert failed", dirty.ErrorMessage);
+    }
+
+    [Fact]
     public async Task SyncAsync_DoesNotMixCalendarsWithSameRemoteEventId()
     {
         var repository = await CreateRepositoryAsync();

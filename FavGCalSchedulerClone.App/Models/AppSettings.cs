@@ -26,6 +26,7 @@ public sealed class AppSettings
     public string? ReminderSoundFilePath { get; set; }
     public int ReminderSoundVolume { get; set; } = 50;
     public bool UseWindowsToastNotifications { get; set; } = true;
+    public bool ShowMessageBoxAfterToastNotification { get; set; } = true;
     public bool SyncAfterLocalChange { get; set; }
     public int? AutomaticSyncIntervalMinutes { get; set; }
     public DateTimeOffset? LastManualSyncAt { get; set; }

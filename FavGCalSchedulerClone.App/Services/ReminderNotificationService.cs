@@ -98,11 +98,11 @@ public sealed class ReminderNotificationService : IDisposable
                 {
                     fired[notification.OccurrenceKey] = current.ToString("O");
                     snoozed.Remove(notification.OccurrenceKey);
-                    await AddHistoryAsync(notification, current, null, deliverySucceeded: true, deliveryError: null);
+                    await AddHistoryAsync(notification, current, null, deliverySucceeded: true, deliveryMethod: result.DeliveryMethod, deliveryError: null);
                 }
                 else
                 {
-                    await AddHistoryAsync(notification, current, null, deliverySucceeded: false, deliveryError: result.ErrorMessage);
+                    await AddHistoryAsync(notification, current, null, deliverySucceeded: false, deliveryMethod: result.DeliveryMethod, deliveryError: result.ErrorMessage);
                     await _repository.SaveSettingValueAsync(ReminderLastErrorKey, $"{current:O} {result.ErrorMessage}");
                 }
             }
@@ -160,6 +160,11 @@ public sealed class ReminderNotificationService : IDisposable
 
     public async Task<bool> ShowTestNotificationAsync(CancellationToken cancellationToken = default)
     {
+        return await ShowTestNotificationAsync(null, cancellationToken);
+    }
+
+    public async Task<bool> ShowTestNotificationAsync(IReminderNotifier? notifier, CancellationToken cancellationToken = default)
+    {
         var current = DateTimeOffset.Now;
         var notification = new ReminderNotification(
             $"test:{current.UtcTicks}",
@@ -172,8 +177,8 @@ public sealed class ReminderNotificationService : IDisposable
             GoogleCalendarDefaults.PrimaryCalendarId,
             IsTodoLike: false);
 
-        var result = await TryDispatchNotificationAsync(notification, cancellationToken);
-        await AddHistoryAsync(notification, current, null, result.Succeeded, result.ErrorMessage);
+        var result = await TryDispatchNotificationAsync(notification, cancellationToken, notifier);
+        await AddHistoryAsync(notification, current, null, result.Succeeded, result.DeliveryMethod, result.ErrorMessage);
         if (!result.Succeeded)
         {
             await _repository.SaveSettingValueAsync(ReminderLastErrorKey, $"{current:O} {result.ErrorMessage}");
@@ -194,14 +199,18 @@ public sealed class ReminderNotificationService : IDisposable
         _gate.Dispose();
     }
 
-    private async Task<ReminderDeliveryResult> TryDispatchNotificationAsync(ReminderNotification notification, CancellationToken cancellationToken)
+    private async Task<ReminderDeliveryResult> TryDispatchNotificationAsync(
+        ReminderNotification notification,
+        CancellationToken cancellationToken,
+        IReminderNotifier? notifierOverride = null)
     {
         try
         {
             var dispatched = false;
-            if (_notifier is not null)
+            var notifier = notifierOverride ?? _notifier;
+            if (notifier is not null)
             {
-                await _notifier.ShowAsync(notification, cancellationToken);
+                await notifier.ShowAsync(notification, cancellationToken);
                 dispatched = true;
             }
 
@@ -212,13 +221,13 @@ public sealed class ReminderNotificationService : IDisposable
             }
 
             return dispatched
-                ? ReminderDeliveryResult.Success()
-                : ReminderDeliveryResult.Failure("No reminder notifier is configured.");
+                ? ReminderDeliveryResult.Success(notifier?.GetType().Name ?? "ReminderTriggered")
+                : ReminderDeliveryResult.Failure("none", "No reminder notifier is configured.");
         }
         catch (Exception ex)
         {
             Debug.WriteLine(ex);
-            return ReminderDeliveryResult.Failure(ex.Message);
+            return ReminderDeliveryResult.Failure((notifierOverride ?? _notifier)?.GetType().Name ?? "unknown", ex.Message);
         }
     }
 
@@ -329,6 +338,7 @@ public sealed class ReminderNotificationService : IDisposable
         DateTimeOffset notifiedAt,
         DateTimeOffset? snoozedUntil,
         bool deliverySucceeded,
+        string? deliveryMethod,
         string? deliveryError)
     {
         var history = (await LoadHistoryAsync()).ToList();
@@ -346,6 +356,7 @@ public sealed class ReminderNotificationService : IDisposable
             IsTodoLike = notification.IsTodoLike,
             SnoozedUntil = snoozedUntil,
             DeliverySucceeded = deliverySucceeded,
+            DeliveryMethod = deliveryMethod,
             DeliveryError = deliveryError
         });
 
@@ -404,8 +415,8 @@ public sealed record ReminderNotification(
     string CalendarId,
     bool IsTodoLike);
 
-internal sealed record ReminderDeliveryResult(bool Succeeded, string? ErrorMessage)
+internal sealed record ReminderDeliveryResult(bool Succeeded, string? DeliveryMethod, string? ErrorMessage)
 {
-    public static ReminderDeliveryResult Success() => new(true, null);
-    public static ReminderDeliveryResult Failure(string? errorMessage) => new(false, errorMessage);
+    public static ReminderDeliveryResult Success(string? deliveryMethod) => new(true, deliveryMethod, null);
+    public static ReminderDeliveryResult Failure(string? deliveryMethod, string? errorMessage) => new(false, deliveryMethod, errorMessage);
 }

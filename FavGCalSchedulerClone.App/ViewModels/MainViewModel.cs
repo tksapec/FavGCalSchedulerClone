@@ -48,6 +48,7 @@ public sealed class MainViewModel : ObservableObject
     private IReadOnlyList<string> _scheduleLocationHistory = [];
     private int _syncInProgress;
     private int _syncRerunRequested;
+    private bool _isSynchronizing;
     private LabelClipboardItem? _labelClipboard;
     private Func<SyncPreview, Task<bool>>? _confirmManualSyncPreviewAsync;
     private Func<Task>? _showAddScheduleAsync;
@@ -293,6 +294,12 @@ public sealed class MainViewModel : ObservableObject
         set => SetProperty(ref _status, value);
     }
 
+    public bool IsSynchronizing
+    {
+        get => _isSynchronizing;
+        private set => SetProperty(ref _isSynchronizing, value);
+    }
+
     public string Title
     {
         get => _title;
@@ -431,6 +438,7 @@ public sealed class MainViewModel : ObservableObject
     public string? ReminderSoundFilePath => _settings.ReminderSoundFilePath;
     public int ReminderSoundVolume => _settings.ReminderSoundVolume;
     public bool UseWindowsToastNotifications => _settings.UseWindowsToastNotifications;
+    public bool ShowMessageBoxAfterToastNotification => _settings.ShowMessageBoxAfterToastNotification;
     public string DefaultBackupFileName => $"FavGCalSchedulerClone-backup-{DateTime.Now:yyyyMMdd-HHmmss}.zip";
 
     public async Task InitializeAsync()
@@ -856,7 +864,7 @@ public sealed class MainViewModel : ObservableObject
             nameof(DefaultScheduleReminderMinutes), nameof(CalendarLabelFontSize),
             nameof(SideListFontSize), nameof(WindowOpacity), nameof(WeekdayHeaders),
             nameof(EnableReminderSound), nameof(ReminderSoundFilePath),
-            nameof(ReminderSoundVolume), nameof(UseWindowsToastNotifications),
+            nameof(ReminderSoundVolume), nameof(UseWindowsToastNotifications), nameof(ShowMessageBoxAfterToastNotification),
             nameof(EventColorOptions)
         })
         {
@@ -2020,6 +2028,7 @@ public sealed class MainViewModel : ObservableObject
             }
 
             Status = "Googleカレンダーと同期中...";
+            IsSynchronizing = true;
             var result = await _syncService.SyncAsync(_settings);
             var finishedAt = DateTimeOffset.Now;
             if (invocationKind == SyncInvocationKind.Manual)
@@ -2035,26 +2044,32 @@ public sealed class MainViewModel : ObservableObject
             _eventColorPalette = await _syncService.RefreshEventColorPaletteAsync();
             await ReloadAvailableCalendarsAsync();
             await RefreshCalendarAsync();
-            Status = $"同期が完了しました: 送信 {result.Pushed} 件、取得 {result.Pulled} 件。";
+            var remaining = (await _repository.LoadDirtyEventsAsync()).Count;
+            Status = $"同期が完了しました: {result.SummaryText} / 未同期残数 {remaining}";
+            if (result.Failed > 0 || result.Conflicts > 0 || remaining > 0)
+            {
+                Status += "。Google同期診断を確認してください。";
+            }
             return result;
         }
         catch (Exception ex) when (reportErrors)
         {
             Debug.WriteLine(ex);
             await _syncService.RecordFailedSyncAsync(ex.Message, _settings.EnableSyncDiagnostics);
+            Status = "同期に失敗しました。Google同期診断を確認してください。";
             throw;
         }
         catch (Exception ex) when (!reportErrors)
         {
             Debug.WriteLine(ex);
             await _syncService.RecordFailedSyncAsync(ex.Message, _settings.EnableSyncDiagnostics);
-            var operation = invocationKind == SyncInvocationKind.Automatic ? "自動同期" : "変更後同期";
-            Status = $"{operation}に失敗しました。未同期の変更は保持されています: {ex.Message}";
+            Status = $"同期に失敗しました。Google同期診断を確認してください。未同期の変更は保持されています: {ex.Message}";
             return null;
         }
         finally
         {
             Interlocked.Exchange(ref _syncInProgress, 0);
+            IsSynchronizing = false;
             if (Interlocked.Exchange(ref _syncRerunRequested, 0) != 0)
             {
                 await SynchronizeAsync(reportErrors: false, SyncInvocationKind.LocalChange);

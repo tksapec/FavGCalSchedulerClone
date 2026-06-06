@@ -81,10 +81,21 @@ public partial class MainWindow : Window
     {
         var fallback = new MessageBoxReminderNotifier(this);
         IReminderNotifier notifier = _viewModel.UseWindowsToastNotifications
-            ? new FallbackReminderNotifier(new WindowsToastReminderNotifier(), fallback)
+            ? new FallbackReminderNotifier(new WindowsToastReminderNotifier(), fallback, _viewModel.ShowMessageBoxAfterToastNotification)
             : fallback;
         return _viewModel.EnableReminderSound
             ? new SoundReminderNotifier(notifier, _viewModel.ReminderSoundFilePath, _viewModel.ReminderSoundVolume)
+            : notifier;
+    }
+
+    private IReminderNotifier CreateReminderNotifier(ReminderTestSettings settings)
+    {
+        var fallback = new MessageBoxReminderNotifier(this);
+        IReminderNotifier notifier = settings.UseWindowsToastNotifications
+            ? new FallbackReminderNotifier(new WindowsToastReminderNotifier(), fallback, settings.ShowMessageBoxAfterToastNotification)
+            : fallback;
+        return settings.EnableReminderSound
+            ? new SoundReminderNotifier(notifier, settings.ReminderSoundFilePath, settings.ReminderSoundVolume)
             : notifier;
     }
 
@@ -960,7 +971,7 @@ public partial class MainWindow : Window
     private async Task ShowSyncDiagnosticsDialogAsync()
     {
         var diagnostics = await _viewModel.LoadSyncDiagnosticsAsync();
-        SyncDialogs.ShowDiagnostics(this, diagnostics, _viewModel.ClearSyncDiagnosticsAsync);
+        SyncDialogs.ShowDiagnostics(this, diagnostics, _viewModel.ClearSyncDiagnosticsAsync, async () => await _viewModel.SynchronizeManuallyWithPreviewAsync());
     }
 
     private async Task OpenReminderHistoryItemAsync(ReminderHistoryItem item)
@@ -990,7 +1001,7 @@ public partial class MainWindow : Window
                 _viewModel.AuthorizeGoogleAsync,
                 _viewModel.ClearTokensAsync,
                 _viewModel.ReloadAvailableCalendarsAsync,
-                () => _reminderService.ShowTestNotificationAsync()));
+                settings => _reminderService.ShowTestNotificationAsync(CreateReminderNotifier(settings))));
         if (result is null)
         {
             return;

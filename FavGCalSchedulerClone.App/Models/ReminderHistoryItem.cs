@@ -14,10 +14,11 @@ public sealed class ReminderHistoryItem
     public bool IsTodoLike { get; set; }
     public DateTimeOffset? SnoozedUntil { get; set; }
     public bool DeliverySucceeded { get; set; } = true;
+    public string? DeliveryMethod { get; set; }
     public string? DeliveryError { get; set; }
 
     public string KindText => IsTodoLike ? "ToDo" : "予定";
     public string NotifiedAtText => NotifiedAt.ToString("yyyy/MM/dd HH:mm");
     public string SnoozedUntilText => SnoozedUntil is null ? "" : SnoozedUntil.Value.ToString("yyyy/MM/dd HH:mm");
-    public string DeliveryStatusText => DeliverySucceeded ? "OK" : $"Failed: {DeliveryError}";
+    public string DeliveryStatusText => DeliverySucceeded ? $"OK ({DeliveryMethod})" : $"Failed ({DeliveryMethod}): {DeliveryError}";
 }

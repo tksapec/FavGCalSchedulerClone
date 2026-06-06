@@ -168,11 +168,18 @@ internal static class SettingsDialog
         var testSound = new Button { Content = "テスト再生", Width = 100 };
         var stopSound = new Button { Content = "停止", Width = 80 };
         var testNotification = new Button { Content = "通知テスト", Width = 110 };
+        var toast = new CheckBox { Content = "Windowsトースト通知を使う", IsChecked = settings.UseWindowsToastNotifications, Margin = new Thickness(0, 18, 0, 0) };
+        var toastFallback = new CheckBox { Content = "トースト通知後にMessageBoxも表示する", IsChecked = settings.ShowMessageBoxAfterToastNotification, Margin = new Thickness(0, 8, 0, 0) };
         testSound.Click += (_, _) => request.PlayPreviewSound(soundPath.Text, (int)volume.Value);
         stopSound.Click += (_, _) => request.StopPreviewSound();
         testNotification.Click += async (_, _) =>
         {
-            var success = await request.ShowTestNotificationAsync();
+            var success = await request.ShowTestNotificationAsync(new ReminderTestSettings(
+                toast.IsChecked == true,
+                toastFallback.IsChecked == true,
+                soundEnabled.IsChecked == true,
+                string.IsNullOrWhiteSpace(soundPath.Text) ? null : soundPath.Text.Trim(),
+                (int)volume.Value));
             MessageBox.Show(
                 window,
                 success ? "通知テストを表示しました。" : "通知テストに失敗しました。通知一覧を確認してください。",
@@ -180,7 +187,6 @@ internal static class SettingsDialog
                 MessageBoxButton.OK,
                 success ? MessageBoxImage.Information : MessageBoxImage.Warning);
         };
-        var toast = new CheckBox { Content = "Windowsトースト通知を使う", IsChecked = settings.UseWindowsToastNotifications, Margin = new Thickness(0, 18, 0, 0) };
         notifyPage.Children.Add(soundEnabled);
         notifyPage.Children.Add(soundPath);
         notifyPage.Children.Add(browseSound);
@@ -192,6 +198,7 @@ internal static class SettingsDialog
         soundButtons.Children.Add(testNotification);
         notifyPage.Children.Add(soundButtons);
         notifyPage.Children.Add(toast);
+        notifyPage.Children.Add(toastFallback);
         tabs.Items.Add(Tab("通知設定", notifyPage));
 
         var accountPage = Page();
@@ -267,6 +274,7 @@ internal static class SettingsDialog
         settings.ReminderSoundFilePath = string.IsNullOrWhiteSpace(soundPath.Text) ? null : soundPath.Text.Trim();
         settings.ReminderSoundVolume = (int)volume.Value;
         settings.UseWindowsToastNotifications = toast.IsChecked == true;
+        settings.ShowMessageBoxAfterToastNotification = toastFallback.IsChecked == true;
         settings.OAuthClientJsonPath = string.IsNullOrWhiteSpace(oauthPath.Text) ? null : oauthPath.Text.Trim();
         settings.SyncAfterLocalChange = syncAfterChange.IsChecked == true;
         settings.ShowSyncPreviewBeforeManualSync = syncPreview.IsChecked == true;
@@ -335,6 +343,13 @@ internal sealed record SettingsDialogRequest(
     Func<Task> AuthorizeGoogleAsync,
     Func<Task> ClearTokensAsync,
     Func<Task> ReloadAvailableCalendarsAsync,
-    Func<Task<bool>> ShowTestNotificationAsync);
+    Func<ReminderTestSettings, Task<bool>> ShowTestNotificationAsync);
 
 internal sealed record SettingsDialogResult(AppSettings Settings, string OAuthClientJsonPath);
+
+internal sealed record ReminderTestSettings(
+    bool UseWindowsToastNotifications,
+    bool ShowMessageBoxAfterToastNotification,
+    bool EnableReminderSound,
+    string? ReminderSoundFilePath,
+    int ReminderSoundVolume);

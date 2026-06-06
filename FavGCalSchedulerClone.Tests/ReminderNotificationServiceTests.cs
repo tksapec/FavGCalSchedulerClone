@@ -262,11 +262,38 @@ public sealed class ReminderNotificationServiceTests
         Assert.Contains("No reminder notifier", item.DeliveryError);
     }
 
+    [Fact]
+    public async Task ShowTestNotificationAsync_UsesSuppliedNotifierBeforeSettingsAreSaved()
+    {
+        var repository = await CreateRepositoryAsync();
+        var service = new ReminderNotificationService(repository);
+        var notifier = new RecordingNotifier();
+
+        var success = await service.ShowTestNotificationAsync(notifier);
+
+        Assert.True(success);
+        Assert.Equal(1, notifier.Count);
+        var item = Assert.Single(await service.LoadHistoryAsync());
+        Assert.True(item.DeliverySucceeded);
+        Assert.Equal(nameof(RecordingNotifier), item.DeliveryMethod);
+    }
+
     private static async Task<CalendarRepository> CreateRepositoryAsync()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
         var repository = new CalendarRepository(dbPath);
         await repository.InitializeAsync();
         return repository;
+    }
+
+    private sealed class RecordingNotifier : IReminderNotifier
+    {
+        public int Count { get; private set; }
+
+        public Task ShowAsync(ReminderNotification notification, CancellationToken cancellationToken = default)
+        {
+            Count++;
+            return Task.CompletedTask;
+        }
     }
 }

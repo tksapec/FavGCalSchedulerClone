@@ -14,6 +14,9 @@ public sealed record SyncResult(
 {
     public static SyncResult Empty(string message) =>
         new(0, 0, 0, 0, 0, 0, 0, DateTimeOffset.Now, DateTimeOffset.Now, message);
+
+    public string SummaryText =>
+        $"送信 {Pushed} / 取得 {Pulled} / スキップ {Skipped} / 競合 {Conflicts} / 失敗 {Failed} / 削除 {Deleted} / 再作成 {Recreated}";
 }
 
 public sealed record SyncPreview(
@@ -47,17 +50,48 @@ public sealed record SyncCalendarDiagnostic(
     int DirtyCount);
 
 public sealed record SyncDirtyItem(
+    string LocalId,
     string Kind,
     string CalendarId,
     DateTimeOffset Start,
     string Title,
     string Operation,
     string? GoogleEventId,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    string? FailureReason,
+    string? ErrorMessage)
+{
+    public SyncDirtyItem(
+        string kind,
+        string calendarId,
+        DateTimeOffset start,
+        string title,
+        string operation,
+        string? googleEventId,
+        DateTimeOffset updatedAt)
+        : this("", kind, calendarId, start, title, operation, googleEventId, updatedAt, null, null)
+    {
+    }
+}
+
+public sealed record SyncFailureDiagnostic(
+    DateTimeOffset OccurredAt,
+    string Title,
+    DateTimeOffset Start,
+    string CalendarId,
+    string LocalId,
+    string? GoogleEventId,
+    string Operation,
+    string Kind,
+    string FailureReason,
+    string? HttpStatusCode,
+    string? GoogleErrorMessage,
+    string? ExceptionMessage);
 
 public sealed record SyncDiagnosticsSnapshot(
     SyncResult? LastResult,
     IReadOnlyList<SyncResult> History,
     IReadOnlyList<SyncCalendarDiagnostic> Calendars,
     int DirtyCount,
-    IReadOnlyList<SyncDirtyItem> DirtyItems);
+    IReadOnlyList<SyncDirtyItem> DirtyItems,
+    IReadOnlyList<SyncFailureDiagnostic> Failures);

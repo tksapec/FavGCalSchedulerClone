@@ -1,8 +1,10 @@
 using System.Collections.ObjectModel;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using FavGCalSchedulerClone.App.Models;
+using Microsoft.Win32;
 
 namespace FavGCalSchedulerClone.App.Views.Dialogs;
 
@@ -52,7 +54,7 @@ internal static class SyncDialogs
         return window.ShowDialog();
     }
 
-    public static void ShowDiagnostics(Window owner, SyncDiagnosticsSnapshot diagnostics, Func<Task> clearAsync)
+    public static void ShowDiagnostics(Window owner, SyncDiagnosticsSnapshot diagnostics, Func<Task> clearAsync, Func<Task>? retryFailuresAsync = null)
     {
         var window = CreateOwnedDialog(owner, "Google同期診断", 820, 540);
         var panel = new DockPanel { Margin = new Thickness(12), LastChildFill = true };
@@ -61,7 +63,7 @@ internal static class SyncDialogs
         var last = diagnostics.LastResult;
         var summaryText = last is null
             ? $"未同期変更: {diagnostics.DirtyCount} 件\n最終同期結果はありません。"
-            : $"未同期変更: {diagnostics.DirtyCount} 件\n最終同期: {last.FinishedAt:yyyy/MM/dd HH:mm:ss} / 送信 {last.Pushed} / 取得 {last.Pulled} / 競合 {last.Conflicts} / 失敗 {last.Failed}";
+            : $"未同期変更: {diagnostics.DirtyCount} 件\n最終同期: {last.FinishedAt:yyyy/MM/dd HH:mm:ss} / {last.SummaryText}";
         var summary = new TextBlock { Text = summaryText, Margin = new Thickness(0, 0, 0, 8), FontWeight = FontWeights.SemiBold };
         DockPanel.SetDock(summary, Dock.Top);
         panel.Children.Add(summary);
@@ -69,12 +71,28 @@ internal static class SyncDialogs
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0) };
         var clear = new Button { Content = "ログ削除", MinWidth = 96, Height = 28, Margin = new Thickness(0, 0, 8, 0) };
         var close = new Button { Content = "閉じる", MinWidth = 96, Height = 28 };
+        var retryFailures = new Button { Content = "失敗分を再同期", MinWidth = 116, Height = 28, Margin = new Thickness(0, 0, 8, 0), IsEnabled = retryFailuresAsync is not null && diagnostics.Failures.Count > 0 };
+        var exportDirty = new Button { Content = "未同期CSV出力", MinWidth = 116, Height = 28, Margin = new Thickness(0, 0, 8, 0) };
+        var exportLog = new Button { Content = "診断ログ出力", MinWidth = 116, Height = 28, Margin = new Thickness(0, 0, 8, 0) };
+        retryFailures.Click += async (_, _) =>
+        {
+            if (retryFailuresAsync is not null)
+            {
+                await retryFailuresAsync();
+                window.Close();
+            }
+        };
+        exportDirty.Click += (_, _) => ExportText(owner, "unsynced.csv", BuildDirtyCsv(diagnostics.DirtyItems));
+        exportLog.Click += (_, _) => ExportText(owner, "sync-diagnostics.txt", BuildDiagnosticsLog(diagnostics));
         clear.Click += async (_, _) =>
         {
             await clearAsync();
             window.Close();
         };
         close.Click += (_, _) => window.Close();
+        buttons.Children.Add(retryFailures);
+        buttons.Children.Add(exportDirty);
+        buttons.Children.Add(exportLog);
         buttons.Children.Add(clear);
         buttons.Children.Add(close);
         DockPanel.SetDock(buttons, Dock.Bottom);
@@ -107,7 +125,28 @@ internal static class SyncDialogs
         dirtyGrid.Columns.Add(new DataGridTextColumn { Header = "件名", Binding = new Binding(nameof(SyncDirtyItem.Title)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
         dirtyGrid.Columns.Add(new DataGridTextColumn { Header = "Google ID", Binding = new Binding(nameof(SyncDirtyItem.GoogleEventId)), Width = 140 });
         dirtyGrid.Columns.Add(new DataGridTextColumn { Header = "更新", Binding = new Binding(nameof(SyncDirtyItem.UpdatedAt)), Width = 150 });
+        dirtyGrid.Columns.Add(new DataGridTextColumn { Header = "失敗理由", Binding = new Binding(nameof(SyncDirtyItem.FailureReason)), Width = 180 });
+        dirtyGrid.Columns.Add(new DataGridTextColumn { Header = "詳細", Binding = new Binding(nameof(SyncDirtyItem.ErrorMessage)), Width = 220 });
         tabs.Items.Add(new TabItem { Header = "未同期", Content = dirtyGrid });
+
+        var failureGrid = new DataGrid
+        {
+            ItemsSource = new ObservableCollection<SyncFailureDiagnostic>(diagnostics.Failures),
+            AutoGenerateColumns = false,
+            CanUserAddRows = false,
+            IsReadOnly = true
+        };
+        failureGrid.Columns.Add(new DataGridTextColumn { Header = "時刻", Binding = new Binding(nameof(SyncFailureDiagnostic.OccurredAt)), Width = 150 });
+        failureGrid.Columns.Add(new DataGridTextColumn { Header = "操作", Binding = new Binding(nameof(SyncFailureDiagnostic.Operation)), Width = 70 });
+        failureGrid.Columns.Add(new DataGridTextColumn { Header = "種別", Binding = new Binding(nameof(SyncFailureDiagnostic.Kind)), Width = 70 });
+        failureGrid.Columns.Add(new DataGridTextColumn { Header = "カレンダー", Binding = new Binding(nameof(SyncFailureDiagnostic.CalendarId)), Width = 120 });
+        failureGrid.Columns.Add(new DataGridTextColumn { Header = "開始日時", Binding = new Binding(nameof(SyncFailureDiagnostic.Start)), Width = 150 });
+        failureGrid.Columns.Add(new DataGridTextColumn { Header = "件名", Binding = new Binding(nameof(SyncFailureDiagnostic.Title)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
+        failureGrid.Columns.Add(new DataGridTextColumn { Header = "Google ID", Binding = new Binding(nameof(SyncFailureDiagnostic.GoogleEventId)), Width = 130 });
+        failureGrid.Columns.Add(new DataGridTextColumn { Header = "HTTP", Binding = new Binding(nameof(SyncFailureDiagnostic.HttpStatusCode)), Width = 70 });
+        failureGrid.Columns.Add(new DataGridTextColumn { Header = "失敗理由", Binding = new Binding(nameof(SyncFailureDiagnostic.FailureReason)), Width = 220 });
+        failureGrid.Columns.Add(new DataGridTextColumn { Header = "例外", Binding = new Binding(nameof(SyncFailureDiagnostic.ExceptionMessage)), Width = 220 });
+        tabs.Items.Add(new TabItem { Header = "失敗詳細", Content = failureGrid });
 
         var historyGrid = new DataGrid
         {
@@ -158,5 +197,45 @@ internal static class SyncDialogs
         buttons.Children.Add(ok);
         buttons.Children.Add(cancel);
         return buttons;
+    }
+
+    private static void ExportText(Window owner, string fileName, string content)
+    {
+        var dialog = new SaveFileDialog { FileName = fileName, Filter = "Text files (*.txt;*.csv)|*.txt;*.csv|All files (*.*)|*.*" };
+        if (dialog.ShowDialog(owner) == true)
+        {
+            File.WriteAllText(dialog.FileName, content, Encoding.UTF8);
+        }
+    }
+
+    private static string BuildDirtyCsv(IEnumerable<SyncDirtyItem> items)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("LocalId,Kind,Operation,CalendarId,Start,Title,GoogleEventId,UpdatedAt,FailureReason,ErrorMessage");
+        foreach (var item in items)
+        {
+            builder.AppendLine(string.Join(",", Csv(item.LocalId), Csv(item.Kind), Csv(item.Operation), Csv(item.CalendarId), Csv(item.Start.ToString("O")), Csv(item.Title), Csv(item.GoogleEventId), Csv(item.UpdatedAt.ToString("O")), Csv(item.FailureReason), Csv(item.ErrorMessage)));
+        }
+
+        return builder.ToString();
+    }
+
+    private static string BuildDiagnosticsLog(SyncDiagnosticsSnapshot diagnostics)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine(diagnostics.LastResult?.SummaryText ?? "No sync result.");
+        builder.AppendLine($"DirtyCount={diagnostics.DirtyCount}");
+        foreach (var failure in diagnostics.Failures)
+        {
+            builder.AppendLine($"{failure.OccurredAt:O} {failure.Operation} {failure.Kind} {failure.CalendarId} {failure.LocalId} {failure.GoogleEventId} {failure.Title} {failure.FailureReason} {failure.HttpStatusCode} {failure.ExceptionMessage}");
+        }
+
+        return builder.ToString();
+    }
+
+    private static string Csv(string? value)
+    {
+        value ??= "";
+        return "\"" + value.Replace("\"", "\"\"") + "\"";
     }
 }

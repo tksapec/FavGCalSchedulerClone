@@ -316,7 +316,16 @@
         </Grid>
 
         <StatusBar DockPanel.Dock="Bottom" Background="#F8FAFC" BorderBrush="#CBD5E1" BorderThickness="1,1,0,0" Height="26">
-            <TextBlock Text="{Binding CalendarStatusText}" Foreground="#475569" />
+            <StatusBarItem>
+                <TextBlock Text="{Binding CalendarStatusText}" Foreground="#475569" />
+            </StatusBarItem>
+            <Separator />
+            <StatusBarItem>
+                <TextBlock Text="{Binding Status}" Foreground="#334155" />
+            </StatusBarItem>
+            <StatusBarItem HorizontalAlignment="Right">
+                <ProgressBar Width="90" Height="12" IsIndeterminate="{Binding IsSynchronizing}" />
+            </StatusBarItem>
         </StatusBar>
 
         <Grid Margin="8">
