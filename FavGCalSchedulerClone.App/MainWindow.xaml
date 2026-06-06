@@ -92,8 +92,8 @@
             <Setter Property="Background" Value="#34495E" />
             <Setter Property="BorderBrush" Value="#50657A" />
             <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Delay" Value="300" />
-            <Setter Property="Interval" Value="90" />
+            <Setter Property="Delay" Value="150" />
+            <Setter Property="Interval" Value="50" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="RepeatButton">

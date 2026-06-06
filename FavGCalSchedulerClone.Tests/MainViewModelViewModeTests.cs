@@ -117,8 +117,16 @@ public sealed class MainViewModelViewModeTests
         var viewModel = await CreateViewModelAsync();
         var baseline = viewModel.CurrentMonth;
         var selectedBaseline = viewModel.SelectedDay?.Date ?? baseline;
+        var loadCount = 0;
+        var saveCount = 0;
+        viewModel.NavigationRefreshDelay = TimeSpan.FromMilliseconds(200);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        viewModel.BeforeLoadCalendarSnapshotAsync = (_, token) => release.Task.WaitAsync(token);
+        viewModel.BeforeSaveDisplayMonth = _ => saveCount++;
+        viewModel.BeforeLoadCalendarSnapshotAsync = (_, token) =>
+        {
+            loadCount++;
+            return release.Task.WaitAsync(token);
+        };
 
         viewModel.NextMonthCommand.Execute(null);
         viewModel.NextMonthCommand.Execute(null);
@@ -130,7 +138,10 @@ public sealed class MainViewModelViewModeTests
         viewModel.NextYearCommand.Execute(null);
 
         Assert.Equal(baseline.AddMonths(3), viewModel.CurrentMonth);
+        Assert.Equal(0, loadCount);
+        Assert.Equal(0, saveCount);
         release.SetResult();
+        await WaitUntilAsync(() => loadCount >= 1 && saveCount == 1);
         await WaitUntilAsync(() => viewModel.SelectedDay?.Date == selectedBaseline.AddMonths(3).Date);
     }
 
@@ -139,12 +150,18 @@ public sealed class MainViewModelViewModeTests
     {
         var viewModel = await CreateViewModelAsync();
         var baseline = new DateTime(2026, 5, 15);
+        var loadCount = 0;
+        viewModel.NavigationRefreshDelay = TimeSpan.FromMilliseconds(200);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         viewModel.CurrentMonth = baseline;
         await Task.Delay(50);
         viewModel.SelectedDay = viewModel.CalendarDays.First(day => day.Date == baseline);
-        viewModel.BeforeLoadCalendarSnapshotAsync = (_, token) => release.Task.WaitAsync(token);
+        viewModel.BeforeLoadCalendarSnapshotAsync = (_, token) =>
+        {
+            loadCount++;
+            return release.Task.WaitAsync(token);
+        };
 
         viewModel.CurrentViewMode = CalendarViewMode.Week;
         viewModel.NextMonthCommand.Execute(null);
@@ -154,8 +171,10 @@ public sealed class MainViewModelViewModeTests
         viewModel.CurrentViewMode = CalendarViewMode.Day;
         viewModel.NextMonthCommand.Execute(null);
         Assert.Equal(baseline.AddDays(15).Date, viewModel.SelectedDay?.Date);
+        Assert.Equal(0, loadCount);
 
         release.SetResult();
+        await WaitUntilAsync(() => loadCount >= 1);
         await WaitUntilAsync(() => viewModel.SelectedDay?.Date == baseline.AddDays(15).Date);
     }
 
@@ -196,24 +215,30 @@ public sealed class MainViewModelViewModeTests
     }
 
     [Fact]
-    public async Task Navigation_UsesCachedMonthImmediatelyWhenReturning()
+    public async Task Navigation_ShowsShellImmediatelyAndAppliesEventsAfterFinalRefresh()
     {
         var currentMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
         var viewModel = await CreateViewModelAsync([
             CreateEvent("cached current", currentMonth.AddDays(2))
         ]);
         await WaitUntilAsync(() => viewModel.CalendarDays.Any(day => day.Events.Any(item => item.Title == "cached current")));
+        var loadStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        viewModel.BeforeLoadCalendarSnapshotAsync = (_, token) => release.Task.WaitAsync(token);
+        viewModel.BeforeLoadCalendarSnapshotAsync = (_, token) =>
+        {
+            loadStarted.TrySetResult();
+            return release.Task.WaitAsync(token);
+        };
 
         viewModel.NextMonthCommand.Execute(null);
         viewModel.PreviousMonthCommand.Execute(null);
 
         Assert.Equal(currentMonth, viewModel.CurrentMonth);
-        Assert.Contains(viewModel.CalendarDays.SelectMany(day => day.Events), item => item.Title == "cached current");
+        Assert.DoesNotContain(viewModel.CalendarDays.SelectMany(day => day.Events), item => item.Title == "cached current");
 
+        await loadStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         release.SetResult();
-        await WaitUntilAsync(() => viewModel.CurrentMonth == currentMonth);
+        await WaitUntilAsync(() => viewModel.CalendarDays.Any(day => day.Events.Any(item => item.Title == "cached current")));
     }
 
     [Fact]
