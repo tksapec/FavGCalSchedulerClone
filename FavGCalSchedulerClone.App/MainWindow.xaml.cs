@@ -1036,7 +1036,7 @@ public partial class MainWindow : Window
                 _viewModel.AuthorizeGoogleAsync,
                 _viewModel.ClearTokensAsync,
                 _viewModel.ReloadAvailableCalendarsAsync,
-                settings => _reminderService.ShowTestNotificationAsync(CreateReminderNotifier(settings)),
+                settings => _reminderService.ShowTestNotificationDetailedAsync(CreateReminderNotifier(settings)),
                 _toastInitializationService.CurrentStatus.ToDisplayText(),
                 WindowsToastInitializationService.AppUserModelId,
                 _toastInitializationService.CurrentExecutablePath));

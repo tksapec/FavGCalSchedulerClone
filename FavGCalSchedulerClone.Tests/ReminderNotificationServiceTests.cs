@@ -244,8 +244,36 @@ public sealed class ReminderNotificationServiceTests
 
         Assert.Equal(2, attempts);
         var history = await service.LoadHistoryAsync();
+        var item = Assert.Single(history);
+        Assert.False(item.DeliverySucceeded);
+        Assert.Equal(2, item.FailureCount);
+        Assert.NotNull(item.LastFailedAt);
+    }
+
+    [Fact]
+    public async Task CheckDueRemindersAsync_AddsNewFailureHistoryAfterAggregationWindow()
+    {
+        var repository = await CreateRepositoryAsync();
+        var service = new ReminderNotificationService(repository);
+        service.ReminderTriggered += _ => throw new InvalidOperationException("notification failed");
+
+        var start = new DateTimeOffset(2026, 5, 17, 12, 0, 0, TimeSpan.FromHours(9));
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "Retry reminder after window",
+            CalendarId = "primary",
+            Start = start,
+            End = start.AddHours(1),
+            ReminderMinutesBeforeStart = 0
+        });
+
+        await service.CheckDueRemindersAsync(start);
+        await service.CheckDueRemindersAsync(start.AddMinutes(6));
+
+        var history = await service.LoadHistoryAsync();
         Assert.Equal(2, history.Count);
         Assert.All(history, item => Assert.False(item.DeliverySucceeded));
+        Assert.All(history, item => Assert.Equal(1, item.FailureCount));
     }
 
     [Fact]
@@ -294,6 +322,23 @@ public sealed class ReminderNotificationServiceTests
         Assert.True(item.ToastVerified);
         Assert.Equal("Ready", item.ToastStatus);
         Assert.Contains("verified", item.DeliveryStatusText);
+    }
+
+    [Fact]
+    public async Task ShowTestNotificationDetailedAsync_ReturnsDispatchMetadata()
+    {
+        var repository = await CreateRepositoryAsync();
+        var service = new ReminderNotificationService(repository);
+        var notifier = new MetadataNotifier();
+
+        var result = await service.ShowTestNotificationDetailedAsync(notifier);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("Toast + MessageBox", result.DeliveryMethod);
+        Assert.True(result.UsedMessageBoxFallback);
+        Assert.True(result.ToastVerified);
+        Assert.Equal("Ready", result.ToastStatus);
+        Assert.Null(result.ErrorMessage);
     }
 
     private static async Task<CalendarRepository> CreateRepositoryAsync()

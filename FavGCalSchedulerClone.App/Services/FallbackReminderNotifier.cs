@@ -6,6 +6,7 @@ public sealed class FallbackReminderNotifier : IReminderNotifier, IReminderNotif
     private readonly IReminderNotifier _fallback;
     private readonly bool _alwaysShowFallback;
     private bool _lastUsedFallback;
+    private bool _lastPrimaryFailed;
 
     public FallbackReminderNotifier(IReminderNotifier primary, IReminderNotifier fallback, bool alwaysShowFallback = false)
     {
@@ -17,6 +18,7 @@ public sealed class FallbackReminderNotifier : IReminderNotifier, IReminderNotif
     public async Task ShowAsync(ReminderNotification notification, CancellationToken cancellationToken = default)
     {
         _lastUsedFallback = false;
+        _lastPrimaryFailed = false;
         try
         {
             await _primary.ShowAsync(notification, cancellationToken);
@@ -28,6 +30,7 @@ public sealed class FallbackReminderNotifier : IReminderNotifier, IReminderNotif
         }
         catch
         {
+            _lastPrimaryFailed = true;
             _lastUsedFallback = true;
             await _fallback.ShowAsync(notification, cancellationToken);
         }
@@ -39,11 +42,16 @@ public sealed class FallbackReminderNotifier : IReminderNotifier, IReminderNotif
         {
             var primary = _primary is IReminderNotifierMetadata primaryMetadata ? primaryMetadata.DeliveryMethodName : _primary.GetType().Name;
             var fallback = _fallback is IReminderNotifierMetadata fallbackMetadata ? fallbackMetadata.DeliveryMethodName : _fallback.GetType().Name;
-            return _lastUsedFallback || _alwaysShowFallback ? $"{primary} + {fallback}" : primary;
+            return _lastPrimaryFailed
+                ? $"{primary} failed -> {fallback}"
+                : _lastUsedFallback || _alwaysShowFallback
+                    ? $"{primary} + {fallback}"
+                    : primary;
         }
     }
 
-    public bool UsedMessageBoxFallback => _lastUsedFallback || _alwaysShowFallback || (_fallback is IReminderNotifierMetadata metadata && metadata.UsedMessageBoxFallback);
+    public bool UsedMessageBoxFallback => (_lastUsedFallback || _alwaysShowFallback)
+        && (_fallback is not IReminderNotifierMetadata metadata || metadata.UsedMessageBoxFallback);
     public bool ToastVerified => _primary is IReminderNotifierMetadata metadata && metadata.ToastVerified;
     public string? ToastStatus => _primary is IReminderNotifierMetadata metadata ? metadata.ToastStatus : null;
 }

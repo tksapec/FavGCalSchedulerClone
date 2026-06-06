@@ -19,6 +19,8 @@ public sealed class ReminderHistoryItem
     public bool ToastVerified { get; set; }
     public string? ToastStatus { get; set; }
     public string? DeliveryError { get; set; }
+    public int FailureCount { get; set; }
+    public DateTimeOffset? LastFailedAt { get; set; }
 
     public string KindText => IsTodoLike ? "ToDo" : "予定";
     public string NotifiedAtText => NotifiedAt.ToString("yyyy/MM/dd HH:mm");
@@ -27,7 +29,7 @@ public sealed class ReminderHistoryItem
 
     private string FormatDeliveryStatus()
     {
-        var status = DeliverySucceeded ? "OK" : "Failed";
+        var status = DeliverySucceeded ? "OK" : FailureCount > 1 ? $"Failed x{FailureCount}" : "Failed";
         var fallback = UsedMessageBoxFallback ? " + MessageBox" : "";
         var verified = ToastVerified ? " verified" : "";
         var detail = string.IsNullOrWhiteSpace(DeliveryError) ? ToastStatus : DeliveryError;

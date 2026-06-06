@@ -11,6 +11,7 @@ public sealed class ReminderNotificationService : IDisposable
     private const string ReminderHistoryKey = "reminder:history";
     private const string ReminderLastErrorKey = "reminder:last-error";
     private const int MaxHistoryCount = 50;
+    private static readonly TimeSpan FailureAggregationWindow = TimeSpan.FromMinutes(5);
     private readonly CalendarRepository _repository;
     private readonly Timer _timer;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -160,10 +161,15 @@ public sealed class ReminderNotificationService : IDisposable
 
     public async Task<bool> ShowTestNotificationAsync(CancellationToken cancellationToken = default)
     {
-        return await ShowTestNotificationAsync(null, cancellationToken);
+        return (await ShowTestNotificationDetailedAsync(null, cancellationToken)).Succeeded;
     }
 
     public async Task<bool> ShowTestNotificationAsync(IReminderNotifier? notifier, CancellationToken cancellationToken = default)
+    {
+        return (await ShowTestNotificationDetailedAsync(notifier, cancellationToken)).Succeeded;
+    }
+
+    public async Task<ReminderTestNotificationResult> ShowTestNotificationDetailedAsync(IReminderNotifier? notifier, CancellationToken cancellationToken = default)
     {
         var current = DateTimeOffset.Now;
         var notification = new ReminderNotification(
@@ -184,7 +190,13 @@ public sealed class ReminderNotificationService : IDisposable
             await _repository.SaveSettingValueAsync(ReminderLastErrorKey, $"{current:O} {result.ErrorMessage}");
         }
 
-        return result.Succeeded;
+        return new ReminderTestNotificationResult(
+            result.Succeeded,
+            result.DeliveryMethod,
+            result.UsedMessageBoxFallback,
+            result.ToastVerified,
+            result.ToastStatus,
+            result.ErrorMessage);
     }
 
     public void Dispose()
@@ -348,6 +360,24 @@ public sealed class ReminderNotificationService : IDisposable
         string? deliveryError)
     {
         var history = (await LoadHistoryAsync()).ToList();
+        if (!deliverySucceeded
+            && history.FirstOrDefault(item =>
+                !item.DeliverySucceeded
+                && string.Equals(item.OccurrenceKey, notification.OccurrenceKey, StringComparison.Ordinal)
+                && notifiedAt - (item.LastFailedAt ?? item.NotifiedAt) <= FailureAggregationWindow) is { } existingFailure)
+        {
+            existingFailure.FailureCount = Math.Max(1, existingFailure.FailureCount) + 1;
+            existingFailure.LastFailedAt = notifiedAt;
+            existingFailure.DeliveryMethod = deliveryMethod;
+            existingFailure.UsedMessageBoxFallback = usedMessageBoxFallback;
+            existingFailure.ToastVerified = toastVerified;
+            existingFailure.ToastStatus = toastStatus;
+            existingFailure.DeliveryError = deliveryError;
+            existingFailure.SnoozedUntil = snoozedUntil;
+            await SaveHistoryAsync(history.Take(MaxHistoryCount).ToList());
+            return;
+        }
+
         history.Insert(0, new ReminderHistoryItem
         {
             OccurrenceKey = notification.OccurrenceKey,
@@ -366,7 +396,9 @@ public sealed class ReminderNotificationService : IDisposable
             UsedMessageBoxFallback = usedMessageBoxFallback,
             ToastVerified = toastVerified,
             ToastStatus = toastStatus,
-            DeliveryError = deliveryError
+            DeliveryError = deliveryError,
+            FailureCount = deliverySucceeded ? 0 : 1,
+            LastFailedAt = deliverySucceeded ? null : notifiedAt
         });
 
         await SaveHistoryAsync(history.Take(MaxHistoryCount).ToList());
@@ -423,6 +455,14 @@ public sealed record ReminderNotification(
     DateTimeOffset OccurrenceStart,
     string CalendarId,
     bool IsTodoLike);
+
+public sealed record ReminderTestNotificationResult(
+    bool Succeeded,
+    string? DeliveryMethod,
+    bool UsedMessageBoxFallback,
+    bool ToastVerified,
+    string? ToastStatus,
+    string? ErrorMessage);
 
 internal sealed record ReminderDeliveryResult(
     bool Succeeded,
