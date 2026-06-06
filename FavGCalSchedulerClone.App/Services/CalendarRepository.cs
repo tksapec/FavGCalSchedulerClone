@@ -138,7 +138,11 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         await command.ExecuteNonQueryAsync();
     }
 
-    public async Task<IReadOnlyList<CalendarEvent>> LoadEventsAsync(DateTimeOffset start, DateTimeOffset end, bool includeDeleted = false)
+    public async Task<IReadOnlyList<CalendarEvent>> LoadEventsAsync(
+        DateTimeOffset start,
+        DateTimeOffset end,
+        bool includeDeleted = false,
+        CancellationToken cancellationToken = default)
     {
         await using var connection = OpenConnection();
         await using var command = connection.CreateCommand();
@@ -156,7 +160,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         command.Parameters.AddWithValue("$start", start.ToString("O"));
         command.Parameters.AddWithValue("$end", end.ToString("O"));
         command.Parameters.AddWithValue("$includeDeleted", includeDeleted ? 1 : 0);
-        return await ReadEventsAsync(command);
+        return await ReadEventsAsync(command, cancellationToken);
     }
 
     public async Task<IReadOnlyList<CalendarEvent>> LoadTodoEventsAsync()
@@ -468,12 +472,13 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         await command.ExecuteNonQueryAsync();
     }
 
-    private static async Task<IReadOnlyList<CalendarEvent>> ReadEventsAsync(SqliteCommand command)
+    private static async Task<IReadOnlyList<CalendarEvent>> ReadEventsAsync(SqliteCommand command, CancellationToken cancellationToken = default)
     {
         var events = new List<CalendarEvent>();
-        await using var reader = await command.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             events.Add(new CalendarEvent
             {
                 Id = reader.GetString(0),

@@ -5,7 +5,11 @@ namespace FavGCalSchedulerClone.App.Repositories;
 public interface IEventRepository
 {
     Task InitializeAsync();
-    Task<IReadOnlyList<CalendarEvent>> LoadEventsAsync(DateTimeOffset start, DateTimeOffset end, bool includeDeleted = false);
+    Task<IReadOnlyList<CalendarEvent>> LoadEventsAsync(
+        DateTimeOffset start,
+        DateTimeOffset end,
+        bool includeDeleted = false,
+        CancellationToken cancellationToken = default);
     Task<IReadOnlyList<CalendarEvent>> LoadTodoEventsAsync();
     Task<IReadOnlyList<CalendarEvent>> LoadDirtyEventsAsync();
     Task<CalendarEvent?> FindEventByGoogleEventIdAsync(string calendarId, string? googleEventId);

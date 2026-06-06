@@ -83,6 +83,38 @@
             </Setter>
         </Style>
 
+        <Style x:Key="MonthNavRepeatButton" TargetType="RepeatButton">
+            <Setter Property="MinWidth" Value="76" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="Padding" Value="8,0" />
+            <Setter Property="Margin" Value="3,0" />
+            <Setter Property="Foreground" Value="#FFFFFF" />
+            <Setter Property="Background" Value="#34495E" />
+            <Setter Property="BorderBrush" Value="#50657A" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Delay" Value="300" />
+            <Setter Property="Interval" Value="90" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RepeatButton">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1" CornerRadius="3">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="{StaticResource ChromeHoverBrush}" />
+                                <Setter Property="BorderBrush" Value="#6B7F93" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter Property="Background" Value="#1D2A38" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="DayCell" TargetType="Border">
             <Setter Property="Background" Value="{StaticResource WeekdayBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource GridLineBrush}" />
@@ -303,16 +335,16 @@
                 <ColumnDefinition Width="92" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <Button Grid.Column="1" Style="{StaticResource MonthNavButton}" Content="{Binding PreviousYearLabel}" Command="{Binding PreviousYearCommand}" />
-            <Button Grid.Column="2" Style="{StaticResource MonthNavButton}" Content="{Binding PreviousMonthLabel}" Command="{Binding PreviousMonthCommand}" />
+            <RepeatButton Grid.Column="1" Style="{StaticResource MonthNavRepeatButton}" Content="{Binding PreviousYearLabel}" Command="{Binding PreviousYearCommand}" />
+            <RepeatButton Grid.Column="2" Style="{StaticResource MonthNavRepeatButton}" Content="{Binding PreviousMonthLabel}" Command="{Binding PreviousMonthCommand}" />
             <StackPanel Grid.Column="3" HorizontalAlignment="Center" VerticalAlignment="Center">
                 <TextBlock Text="{Binding CurrentPeriodTitle}" Foreground="#FFFFFF" FontSize="15" FontWeight="SemiBold"
                            HorizontalAlignment="Center" />
                 <Button Style="{StaticResource MonthNavButton}" Content="今日" Command="{Binding TodayCommand}"
                         MinWidth="64" Height="20" FontSize="11" Padding="8,0" Margin="0,2,0,0" />
             </StackPanel>
-            <Button Grid.Column="4" Style="{StaticResource MonthNavButton}" Content="{Binding NextMonthLabel}" Command="{Binding NextMonthCommand}" />
-            <Button Grid.Column="5" Style="{StaticResource MonthNavButton}" Content="{Binding NextYearLabel}" Command="{Binding NextYearCommand}" />
+            <RepeatButton Grid.Column="4" Style="{StaticResource MonthNavRepeatButton}" Content="{Binding NextMonthLabel}" Command="{Binding NextMonthCommand}" />
+            <RepeatButton Grid.Column="5" Style="{StaticResource MonthNavRepeatButton}" Content="{Binding NextYearLabel}" Command="{Binding NextYearCommand}" />
         </Grid>
 
         <StatusBar DockPanel.Dock="Bottom" Background="#F8FAFC" BorderBrush="#CBD5E1" BorderThickness="1,1,0,0" Height="26">

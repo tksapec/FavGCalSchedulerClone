@@ -43,6 +43,9 @@ public sealed class MainViewModel : ObservableObject
     private string _editorCalendarId = GoogleCalendarDefaults.PrimaryCalendarId;
     private string? _editorColorId;
     private int _refreshGeneration;
+    private CancellationTokenSource? _calendarRefreshCts;
+    private DateTime? _navigationAnchorDate;
+    private readonly Dictionary<CalendarCacheKey, CalendarRefreshSnapshot> _calendarCache = [];
     private IReadOnlyDictionary<string, EventDisplayColors> _eventColorPalette = TagService.DefaultEventColorPalette;
     private IReadOnlyList<string> _scheduleTitleHistory = [];
     private IReadOnlyList<string> _scheduleLocationHistory = [];
@@ -168,6 +171,7 @@ public sealed class MainViewModel : ObservableObject
     public AsyncRelayCommand ShowSettingsCommand { get; }
     public AsyncRelayCommand ShowReminderHistoryCommand { get; }
     public AsyncRelayCommand ShowAboutCommand { get; }
+    internal Func<DateTime, CancellationToken, Task>? BeforeLoadCalendarSnapshotAsync { get; set; }
 
     public string MonthTitle => CurrentMonth.ToString("yyyy/MM", CultureInfo.InvariantCulture);
     public string JapaneseMonthTitle => CalendarStatusFormatter.FormatJapaneseMonthTitle(CurrentMonth);
@@ -220,6 +224,7 @@ public sealed class MainViewModel : ObservableObject
             {
                 OnPropertyChanged(nameof(MonthTitle));
                 OnPropertyChanged(nameof(JapaneseMonthTitle));
+                ShowImmediateCalendarForMonth(_currentMonth);
                 StartRefreshCalendar();
             }
         }
@@ -264,6 +269,7 @@ public sealed class MainViewModel : ObservableObject
                 OnPropertyChanged(nameof(CalendarStatusText));
                 if (value is not null)
                 {
+                    _navigationAnchorDate = value.Date;
                     StartDate = value.Date;
                     EndDate = value.Date;
                     Status = $"{value.Date:yyyy/MM/dd} を選択しました。";
@@ -472,7 +478,9 @@ public sealed class MainViewModel : ObservableObject
     public async Task GoToTodayAsync()
     {
         _pendingSelectedDate = DateTime.Today;
+        _navigationAnchorDate = DateTime.Today;
         SetCurrentMonthWithoutRefreshing(DateTime.Today);
+        ShowImmediateCalendarForMonth(CurrentMonth);
         await RefreshCalendarAsync();
         Status = "今日を表示しました。";
     }
@@ -494,7 +502,9 @@ public sealed class MainViewModel : ObservableObject
     public async Task NavigateToDateAsync(DateTime targetDate)
     {
         _pendingSelectedDate = targetDate.Date;
+        _navigationAnchorDate = targetDate.Date;
         SetCurrentMonthWithoutRefreshing(targetDate.Date);
+        ShowImmediateCalendarForMonth(CurrentMonth);
         await RefreshCalendarAsync();
     }
 
@@ -1254,14 +1264,18 @@ public sealed class MainViewModel : ObservableObject
 
     private void StartRefreshCalendar()
     {
-        _ = RefreshCalendarSafelyAsync();
+        _ = RefreshCalendarSafelyAsync(BeginCalendarRefresh());
     }
 
-    private async Task RefreshCalendarSafelyAsync()
+    private async Task RefreshCalendarSafelyAsync(CalendarRefreshRequest request)
     {
         try
         {
-            await RefreshCalendarPreservingSelectionAsync();
+            await RefreshCalendarPreservingSelectionAsync(request);
+        }
+        catch (OperationCanceledException)
+        {
+            // A newer navigation request superseded this refresh.
         }
         catch (Exception ex)
         {
@@ -1272,28 +1286,85 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task RefreshCalendarAsync()
     {
-        var generation = Interlocked.Increment(ref _refreshGeneration);
-        _settings.DisplayMonth = CurrentMonth;
-        await _repository.SaveSettingsAsync(_settings);
+        InvalidateCalendarCache();
+        await RefreshCalendarAsync(BeginCalendarRefresh());
+    }
 
-        var (gridStart, gridEnd) = DateRangeHelper.MonthGridRange(CurrentMonth, _settings.WeekStartsOnMonday);
-        var storedEvents = await _repository.LoadEventsAsync(new DateTimeOffset(gridStart), new DateTimeOffset(gridEnd), includeDeleted: true);
-        var calendarEvents = RecurrenceExpansionService
-            .ExpandForRange(storedEvents, new DateTimeOffset(gridStart), new DateTimeOffset(gridEnd))
-            .Where(IsInVisibleCalendar)
-            .ToArray();
-        if (generation != _refreshGeneration)
+    private async Task RefreshCalendarAsync(CalendarRefreshRequest request)
+    {
+        var selectedId = SelectedEvent?.Id;
+        await RefreshCalendarCoreAsync(request);
+        if (string.IsNullOrWhiteSpace(selectedId) || !IsLatestCalendarRefresh(request))
         {
             return;
         }
 
-        _storedEvents = storedEvents;
-        _dayDirectiveEvents = calendarEvents;
-        _visibleEvents = calendarEvents.Where(IsVisible).ToArray();
-        ApplyDisplayColors(_visibleEvents);
+        var refreshed = _visibleEvents.FirstOrDefault(item => string.Equals(item.Id, selectedId, StringComparison.Ordinal))
+            ?? _storedEvents.FirstOrDefault(item => string.Equals(item.Id, selectedId, StringComparison.Ordinal));
+        if (refreshed is not null)
+        {
+            SelectedEvent = refreshed;
+        }
+    }
+
+    private async Task RefreshCalendarCoreAsync(CalendarRefreshRequest request)
+    {
+        request.CancellationToken.ThrowIfCancellationRequested();
+        _settings.DisplayMonth = request.Month;
+        await _repository.SaveSettingsAsync(_settings);
+        request.CancellationToken.ThrowIfCancellationRequested();
+
+        var snapshot = await LoadCalendarSnapshotAsync(request.Month, request.CancellationToken);
+        if (!IsLatestCalendarRefresh(request))
+        {
+            return;
+        }
+
+        ApplyCalendarSnapshot(snapshot, request.PendingSelectedDate, clearPendingSelectedDate: true);
+        StoreCalendarCache(snapshot);
+        await RefreshTodosAsync();
+        if (IsLatestCalendarRefresh(request))
+        {
+            _ = PrefetchAdjacentMonthsAsync(request);
+        }
+    }
+
+    private async Task<CalendarRefreshSnapshot> LoadCalendarSnapshotAsync(DateTime month, CancellationToken cancellationToken)
+    {
+        if (BeforeLoadCalendarSnapshotAsync is not null)
+        {
+            await BeforeLoadCalendarSnapshotAsync(month, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+
+        var (gridStart, gridEnd) = DateRangeHelper.MonthGridRange(month, _settings.WeekStartsOnMonday);
+        var storedEvents = await _repository.LoadEventsAsync(
+            new DateTimeOffset(gridStart),
+            new DateTimeOffset(gridEnd),
+            includeDeleted: true,
+            cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        var calendarEvents = RecurrenceExpansionService
+            .ExpandForRange(storedEvents, new DateTimeOffset(gridStart), new DateTimeOffset(gridEnd))
+            .Where(IsInVisibleCalendar)
+            .ToArray();
+        cancellationToken.ThrowIfCancellationRequested();
+        var visibleEvents = calendarEvents.Where(IsVisible).ToArray();
+        ApplyDisplayColors(visibleEvents);
+        return new CalendarRefreshSnapshot(month, gridStart, gridEnd, storedEvents, calendarEvents, visibleEvents);
+    }
+
+    private void ApplyCalendarSnapshot(
+        CalendarRefreshSnapshot snapshot,
+        DateTime? pendingSelectedDate,
+        bool clearPendingSelectedDate)
+    {
+        _storedEvents = snapshot.StoredEvents;
+        _dayDirectiveEvents = snapshot.DayDirectiveEvents;
+        _visibleEvents = snapshot.VisibleEvents;
 
         CalendarDays.Clear();
-        for (var date = gridStart; date < gridEnd; date = date.AddDays(1))
+        for (var date = snapshot.GridStart; date < snapshot.GridEnd; date = date.AddDays(1))
         {
             CalendarDays.Add(CreateCalendarDay(date, _dayDirectiveEvents));
         }
@@ -1301,11 +1372,14 @@ public sealed class MainViewModel : ObservableObject
 
         CalendarDay? selectedDay;
         DateTime? visibleAnchorDate;
-        if (_pendingSelectedDate is { } pendingSelectedDate)
+        if (pendingSelectedDate is { } selectedDate)
         {
-            selectedDay = CalendarDays.FirstOrDefault(d => d.Date == pendingSelectedDate.Date) ?? FindOrCreateCalendarDay(pendingSelectedDate.Date);
+            selectedDay = CalendarDays.FirstOrDefault(d => d.Date == selectedDate.Date) ?? FindOrCreateCalendarDay(selectedDate.Date);
             visibleAnchorDate = selectedDay.Date;
-            _pendingSelectedDate = null;
+            if (clearPendingSelectedDate)
+            {
+                _pendingSelectedDate = null;
+            }
         }
         else
         {
@@ -1320,24 +1394,115 @@ public sealed class MainViewModel : ObservableObject
         UpdateSegmentSelection();
         RefreshSelectedDayEvents();
         RefreshSevenDayEvents();
-        await RefreshTodosAsync();
     }
 
-    private async Task RefreshCalendarPreservingSelectionAsync()
+    private async Task RefreshCalendarPreservingSelectionAsync(CalendarRefreshRequest request)
     {
-        var selectedId = SelectedEvent?.Id;
-        await RefreshCalendarAsync();
-        if (string.IsNullOrWhiteSpace(selectedId))
+        await RefreshCalendarAsync(request);
+    }
+
+    private CalendarRefreshRequest BeginCalendarRefresh()
+    {
+        _calendarRefreshCts?.Cancel();
+        _calendarRefreshCts = new CancellationTokenSource();
+        var generation = Interlocked.Increment(ref _refreshGeneration);
+        return new CalendarRefreshRequest(
+            generation,
+            CurrentMonth,
+            _pendingSelectedDate,
+            _calendarRefreshCts.Token);
+    }
+
+    private bool IsLatestCalendarRefresh(CalendarRefreshRequest request)
+    {
+        return request.Generation == _refreshGeneration
+            && !request.CancellationToken.IsCancellationRequested
+            && CurrentMonth.Year == request.Month.Year
+            && CurrentMonth.Month == request.Month.Month;
+    }
+
+    private void ShowImmediateCalendarForMonth(DateTime month)
+    {
+        var key = CreateCalendarCacheKey(month);
+        if (_calendarCache.TryGetValue(key, out var snapshot))
+        {
+            ApplyCalendarSnapshot(snapshot, _pendingSelectedDate, clearPendingSelectedDate: false);
+            return;
+        }
+
+        var (gridStart, gridEnd) = DateRangeHelper.MonthGridRange(month, _settings.WeekStartsOnMonday);
+        ApplyCalendarSnapshot(
+            new CalendarRefreshSnapshot(month, gridStart, gridEnd, [], [], []),
+            _pendingSelectedDate,
+            clearPendingSelectedDate: false);
+    }
+
+    private async Task PrefetchAdjacentMonthsAsync(CalendarRefreshRequest request)
+    {
+        foreach (var month in new[] { request.Month.AddMonths(-1), request.Month.AddMonths(1) })
+        {
+            try
+            {
+                request.CancellationToken.ThrowIfCancellationRequested();
+                var key = CreateCalendarCacheKey(month);
+                if (_calendarCache.ContainsKey(key))
+                {
+                    continue;
+                }
+
+                StoreCalendarCache(await LoadCalendarSnapshotAsync(month, request.CancellationToken));
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine(ex);
+                return;
+            }
+        }
+    }
+
+    private CalendarCacheKey CreateCalendarCacheKey(DateTime month)
+    {
+        var normalizedMonth = new DateTime(month.Year, month.Month, 1);
+        var visibleCalendars = string.Join(
+            "|",
+            AvailableCalendars
+                .Where(item => item.IsSelected)
+                .Select(item => item.Id)
+                .OrderBy(id => id, StringComparer.Ordinal));
+        return new CalendarCacheKey(normalizedMonth, _settings.WeekStartsOnMonday, visibleCalendars);
+    }
+
+    private void StoreCalendarCache(CalendarRefreshSnapshot snapshot)
+    {
+        _calendarCache[CreateCalendarCacheKey(snapshot.Month)] = snapshot;
+        if (_calendarCache.Count <= 5)
         {
             return;
         }
 
-        var refreshed = _visibleEvents.FirstOrDefault(item => string.Equals(item.Id, selectedId, StringComparison.Ordinal))
-            ?? _storedEvents.FirstOrDefault(item => string.Equals(item.Id, selectedId, StringComparison.Ordinal));
-        if (refreshed is not null)
+        var keep = new HashSet<CalendarCacheKey>
         {
-            SelectedEvent = refreshed;
+            CreateCalendarCacheKey(CurrentMonth.AddMonths(-1)),
+            CreateCalendarCacheKey(CurrentMonth),
+            CreateCalendarCacheKey(CurrentMonth.AddMonths(1))
+        };
+        foreach (var key in _calendarCache.Keys.Where(key => !keep.Contains(key)).ToArray())
+        {
+            _calendarCache.Remove(key);
+            if (_calendarCache.Count <= 5)
+            {
+                break;
+            }
         }
+    }
+
+    private void InvalidateCalendarCache()
+    {
+        _calendarCache.Clear();
     }
 
     private void RefreshSelectedDayEvents()
@@ -1433,7 +1598,7 @@ public sealed class MainViewModel : ObservableObject
 
     private void NavigatePrimary(int direction)
     {
-        var anchor = SelectedDay?.Date ?? CurrentMonth;
+        var anchor = GetNavigationAnchorDate();
         var target = CurrentViewMode switch
         {
             CalendarViewMode.Month => anchor.AddMonths(direction),
@@ -1446,7 +1611,7 @@ public sealed class MainViewModel : ObservableObject
 
     private void NavigateSecondary(int direction)
     {
-        var anchor = SelectedDay?.Date ?? CurrentMonth;
+        var anchor = GetNavigationAnchorDate();
         var target = CurrentViewMode switch
         {
             CalendarViewMode.Month => anchor.AddYears(direction),
@@ -1460,8 +1625,18 @@ public sealed class MainViewModel : ObservableObject
     private void NavigateToDate(DateTime targetDate)
     {
         _pendingSelectedDate = targetDate.Date;
+        _navigationAnchorDate = targetDate.Date;
         SetCurrentMonthWithoutRefreshing(targetDate.Date);
+        ShowImmediateCalendarForMonth(CurrentMonth);
         StartRefreshCalendar();
+    }
+
+    private DateTime GetNavigationAnchorDate()
+    {
+        return _pendingSelectedDate?.Date
+            ?? _navigationAnchorDate?.Date
+            ?? SelectedDay?.Date
+            ?? CurrentMonth;
     }
 
     private void RefreshVisibleCalendarDays(DateTime? anchorDate = null)
@@ -2435,3 +2610,19 @@ public sealed class MainViewModel : ObservableObject
 public sealed record EventColorSelectionItem(string? Id, string Label, string Background, string Foreground);
 
 internal sealed record LabelClipboardItem(CalendarEvent Event, bool Cut);
+
+internal sealed record CalendarRefreshRequest(
+    int Generation,
+    DateTime Month,
+    DateTime? PendingSelectedDate,
+    CancellationToken CancellationToken);
+
+internal sealed record CalendarCacheKey(DateTime Month, bool WeekStartsOnMonday, string VisibleCalendarIds);
+
+internal sealed record CalendarRefreshSnapshot(
+    DateTime Month,
+    DateTime GridStart,
+    DateTime GridEnd,
+    IReadOnlyList<CalendarEvent> StoredEvents,
+    IReadOnlyList<CalendarEvent> DayDirectiveEvents,
+    IReadOnlyList<CalendarEvent> VisibleEvents);
