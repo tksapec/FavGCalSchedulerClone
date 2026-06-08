@@ -41,6 +41,25 @@ public sealed class GoogleEventMapperTests
         Assert.Equal("Meeting #work", googleEvent.Summary);
         Assert.NotNull(googleEvent.Start.DateTimeDateTimeOffset);
         Assert.NotNull(googleEvent.End.DateTimeDateTimeOffset);
+        Assert.Equal(GoogleCalendarTimeZone.TokyoIanaId, googleEvent.Start.TimeZone);
+        Assert.Equal(GoogleCalendarTimeZone.TokyoIanaId, googleEvent.End.TimeZone);
+    }
+
+    [Fact]
+    public void ToGoogleEvent_MapsRecurringOriginalStartWithIanaTimeZone()
+    {
+        var local = new App.Models.CalendarEvent
+        {
+            Title = "Moved meeting",
+            Start = new DateTimeOffset(2026, 5, 16, 11, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 5, 16, 12, 0, 0, TimeSpan.Zero),
+            OriginalStart = new DateTimeOffset(2026, 5, 16, 9, 0, 0, TimeSpan.Zero),
+            IsAllDay = false
+        };
+
+        var googleEvent = GoogleEventMapper.ToGoogleEvent(local);
+
+        Assert.Equal(GoogleCalendarTimeZone.TokyoIanaId, googleEvent.OriginalStartTime?.TimeZone);
     }
 
     [Fact]

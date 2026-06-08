@@ -185,6 +185,12 @@ internal static class SettingsDialog
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 8, 0, 0)
         };
+        toast.Content = "右下ポップアップ通知を使う";
+        toast.IsChecked = true;
+        toast.IsEnabled = false;
+        toastFallback.Content = "MessageBox併用は使用しない";
+        toastFallback.IsChecked = false;
+        toastFallback.IsEnabled = false;
         testSound.Click += (_, _) => request.PlayPreviewSound(soundPath.Text, (int)volume.Value);
         stopSound.Click += (_, _) => request.StopPreviewSound();
         testNotification.Click += async (_, _) =>

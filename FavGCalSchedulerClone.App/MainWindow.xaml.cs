@@ -84,11 +84,9 @@ public partial class MainWindow : Window
 
     public IReminderNotifier CreateReminderNotifier()
     {
-        var fallback = new MessageBoxReminderNotifier(this);
-        var toastVerified = _viewModel.IsWindowsToastVerifiedForCurrentApp;
-        IReminderNotifier notifier = _viewModel.UseWindowsToastNotifications
-            ? new FallbackReminderNotifier(new WindowsToastReminderNotifier(_toastInitializationService, toastVerified), fallback, _viewModel.ShowMessageBoxAfterToastNotification)
-            : fallback;
+        IReminderNotifier notifier = new CustomPopupReminderNotifier(
+            this,
+            (occurrenceKey, minutes) => _reminderService.SnoozeAsync(occurrenceKey, minutes));
         return _viewModel.EnableReminderSound
             ? new SoundReminderNotifier(notifier, _viewModel.ReminderSoundFilePath, _viewModel.ReminderSoundVolume)
             : notifier;
@@ -96,10 +94,9 @@ public partial class MainWindow : Window
 
     private IReminderNotifier CreateReminderNotifier(ReminderTestSettings settings)
     {
-        var fallback = new MessageBoxReminderNotifier(this);
-        IReminderNotifier notifier = settings.UseWindowsToastNotifications
-            ? new FallbackReminderNotifier(new WindowsToastReminderNotifier(_toastInitializationService, toastVerified: true), fallback, settings.ShowMessageBoxAfterToastNotification)
-            : fallback;
+        IReminderNotifier notifier = new CustomPopupReminderNotifier(
+            this,
+            (occurrenceKey, minutes) => _reminderService.SnoozeAsync(occurrenceKey, minutes));
         return settings.EnableReminderSound
             ? new SoundReminderNotifier(notifier, settings.ReminderSoundFilePath, settings.ReminderSoundVolume)
             : notifier;

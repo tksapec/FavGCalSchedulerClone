@@ -819,7 +819,7 @@ public sealed class GoogleCalendarSyncService
         return new EventDateTime
         {
             DateTimeDateTimeOffset = value,
-            TimeZone = TimeZoneInfo.Local.Id
+            TimeZone = GoogleCalendarTimeZone.LocalIanaId
         };
     }
 

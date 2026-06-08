@@ -392,6 +392,26 @@ public sealed class ReminderNotificationServiceTests
     }
 
     [Fact]
+    public async Task CustomPopupReminderNotifier_ReportsPopupDeliveryWithoutMessageBoxFallback()
+    {
+        var displayed = false;
+        var notifier = new CustomPopupReminderNotifier(
+            (_, _) => Task.CompletedTask,
+            (_, _, _, _) =>
+            {
+                displayed = true;
+                return Task.CompletedTask;
+            });
+
+        await notifier.ShowAsync(CreateTestNotification());
+
+        Assert.True(displayed);
+        Assert.Equal("CustomPopup", notifier.DeliveryMethodName);
+        Assert.False(notifier.UsedMessageBoxFallback);
+        Assert.Equal(MessageBoxNotificationRole.None, notifier.MessageBoxRole);
+    }
+
+    [Fact]
     public async Task ShowTestNotificationDetailedAsync_RecordsMissingSoundFileWithoutFailingNotification()
     {
         var repository = await CreateRepositoryAsync();

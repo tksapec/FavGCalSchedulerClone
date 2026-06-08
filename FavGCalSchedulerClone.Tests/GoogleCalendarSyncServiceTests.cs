@@ -112,12 +112,18 @@ public sealed class GoogleCalendarSyncServiceTests
         Assert.False(created.IsDirty);
         Assert.NotNull(created.GoogleEventId);
         Assert.True(api.EventsByCalendar["work"].ContainsKey(created.GoogleEventId!));
+        var inserted = api.EventsByCalendar["work"][created.GoogleEventId!];
+        Assert.Equal(GoogleCalendarTimeZone.TokyoIanaId, inserted.Start.TimeZone);
+        Assert.Equal(GoogleCalendarTimeZone.TokyoIanaId, inserted.End.TimeZone);
 
         created.Title = "local update";
         created.IsDirty = true;
         await repository.SaveEventAsync(created);
         await service.SyncAsync(settings);
         Assert.Contains(api.Operations, item => item == $"update:work:{created.GoogleEventId}");
+        var updated = api.EventsByCalendar["work"][created.GoogleEventId!];
+        Assert.Equal(GoogleCalendarTimeZone.TokyoIanaId, updated.Start.TimeZone);
+        Assert.Equal(GoogleCalendarTimeZone.TokyoIanaId, updated.End.TimeZone);
 
         await repository.DeleteEventAsync(created);
         await service.SyncAsync(settings);

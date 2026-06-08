@@ -91,7 +91,7 @@ public static class GoogleEventMapper
         return new EventDateTime
         {
             DateTimeDateTimeOffset = value,
-            TimeZone = TimeZoneInfo.Local.Id
+            TimeZone = GoogleCalendarTimeZone.LocalIanaId
         };
     }
 }
