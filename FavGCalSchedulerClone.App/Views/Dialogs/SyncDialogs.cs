@@ -49,6 +49,7 @@ internal static class SyncDialogs
         grid.Columns.Add(new DataGridTextColumn { Header = "開始", Binding = new Binding(nameof(SyncPreviewItem.Start)), Width = 150 });
         grid.Columns.Add(new DataGridTextColumn { Header = "件名", Binding = new Binding(nameof(SyncPreviewItem.Title)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
         grid.Columns.Add(new DataGridTextColumn { Header = "詳細", Binding = new Binding(nameof(SyncPreviewItem.Detail)), Width = 220 });
+        grid.Columns.Add(new DataGridTextColumn { Header = "変更内容", Binding = new Binding(nameof(SyncPreviewItem.ChangeFieldsText)), Width = 160 });
         panel.Children.Add(grid);
 
         return window.ShowDialog();
@@ -146,6 +147,7 @@ internal static class SyncDialogs
         dirtyGrid.Columns.Add(new DataGridTextColumn { Header = "更新", Binding = new Binding(nameof(SyncDirtyItem.UpdatedAt)), Width = 150 });
         dirtyGrid.Columns.Add(new DataGridTextColumn { Header = "失敗理由", Binding = new Binding(nameof(SyncDirtyItem.FailureReason)), Width = 180 });
         dirtyGrid.Columns.Add(new DataGridTextColumn { Header = "詳細", Binding = new Binding(nameof(SyncDirtyItem.ErrorMessage)), Width = 220 });
+        dirtyGrid.Columns.Add(new DataGridTextColumn { Header = "変更内容", Binding = new Binding(nameof(SyncDirtyItem.ChangeFieldsText)), Width = 160 });
         var dirtyPanel = new DockPanel();
         var dirtyButtons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 8) };
         var openDirty = new Button { Content = "選択行を開く", MinWidth = 104, Height = 28, Margin = new Thickness(0, 0, 8, 0), IsEnabled = openDirtyItemAsync is not null };
@@ -304,10 +306,10 @@ internal static class SyncDialogs
     private static string BuildDirtyCsv(IEnumerable<SyncDirtyItem> items)
     {
         var builder = new StringBuilder();
-        builder.AppendLine("LocalId,Kind,Operation,CalendarId,Start,Title,GoogleEventId,UpdatedAt,FailureReason,ErrorMessage");
+        builder.AppendLine("LocalId,Kind,Operation,CalendarId,Start,Title,GoogleEventId,UpdatedAt,ChangeFields,FailureReason,ErrorMessage");
         foreach (var item in items)
         {
-            builder.AppendLine(string.Join(",", Csv(item.LocalId), Csv(item.Kind), Csv(item.Operation), Csv(item.CalendarId), Csv(item.Start.ToString("O")), Csv(item.Title), Csv(item.GoogleEventId), Csv(item.UpdatedAt.ToString("O")), Csv(item.FailureReason), Csv(item.ErrorMessage)));
+            builder.AppendLine(string.Join(",", Csv(item.LocalId), Csv(item.Kind), Csv(item.Operation), Csv(item.CalendarId), Csv(item.Start.ToString("O")), Csv(item.Title), Csv(item.GoogleEventId), Csv(item.UpdatedAt.ToString("O")), Csv(item.ChangeFields), Csv(item.FailureReason), Csv(item.ErrorMessage)));
         }
 
         return builder.ToString();
@@ -318,6 +320,10 @@ internal static class SyncDialogs
         var builder = new StringBuilder();
         builder.AppendLine(diagnostics.LastResult?.SummaryText ?? "No sync result.");
         builder.AppendLine($"DirtyCount={diagnostics.DirtyCount}");
+        foreach (var dirty in diagnostics.DirtyItems)
+        {
+            builder.AppendLine($"Dirty {dirty.LocalId} {dirty.CalendarId} {dirty.Operation} fields={dirty.ChangeFields ?? "Unknown"} {dirty.Title}");
+        }
         foreach (var failure in diagnostics.Failures)
         {
             builder.AppendLine($"{failure.OccurredAt:O} {failure.Direction} {failure.Operation} {failure.Kind} {failure.CalendarId} syncToken={failure.SyncTokenPresent} pageToken={failure.PageToken} category={failure.FailureCategory} {failure.LocalId} {failure.GoogleEventId} {failure.Title} {failure.FailureReason} {failure.HttpStatusCode} {failure.GoogleErrorMessage} {failure.ExceptionMessage}");

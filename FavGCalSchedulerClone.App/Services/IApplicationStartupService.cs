@@ -4,6 +4,6 @@ namespace FavGCalSchedulerClone.App.Services;
 
 public interface IApplicationStartupService
 {
-    Task InitializeAsync(Window owner, IReminderNotifier notifier);
+    Task InitializeAsync(Window owner, Func<IReminderNotifier> notifierFactory);
     void Stop();
 }

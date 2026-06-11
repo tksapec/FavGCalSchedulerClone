@@ -21,6 +21,7 @@ public sealed class CalendarEvent
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
     public DateTimeOffset? LastSyncedAt { get; set; }
     public bool IsDirty { get; set; } = true;
+    public string? DirtyFields { get; set; }
     public bool IsTodoLike { get; set; }
     public int? ReminderMinutesBeforeStart { get; set; }
     public string DisplayColor { get; set; } = "#FFFFFF";
@@ -67,6 +68,7 @@ public sealed class CalendarEvent
     public bool IsOverdueTodo => IsTodoLike && !IsTodoDone && Start.Date < DateTime.Today;
     public bool IsRecurringMaster => !string.IsNullOrWhiteSpace(RecurrenceJson) && !IsRecurrenceException;
     public bool IsRecurringSeriesItem => IsRecurringMaster || IsRecurrenceException || IsGeneratedOccurrence || !string.IsNullOrWhiteSpace(RecurringEventId) || !string.IsNullOrWhiteSpace(RecurringParentId);
+    public string DirtyFieldsDisplayText => Services.EventDirtyFieldTracker.ToDisplayText(DirtyFields);
 
     private static string SingleLine(string? value)
     {

@@ -44,10 +44,7 @@ internal sealed class CustomReminderPopupWindow : Window
         return owner.Dispatcher.InvokeAsync(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var popup = new CustomReminderPopupWindow(notification, snoozeAsync)
-            {
-                Owner = owner
-            };
+            var popup = new CustomReminderPopupWindow(notification, snoozeAsync);
             popup.Show();
         }).Task;
     }

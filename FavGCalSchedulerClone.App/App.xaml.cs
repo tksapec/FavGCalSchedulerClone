@@ -41,7 +41,7 @@ public partial class App : System.Windows.Application
         MainWindow = mainWindow;
         MainWindow.Show();
         _ = _serviceProvider.GetRequiredService<IApplicationStartupService>()
-            .InitializeAsync(mainWindow, mainWindow.CreateReminderNotifier());
+            .InitializeAsync(mainWindow, mainWindow.CreateReminderNotifier);
     }
 
     protected override void OnExit(ExitEventArgs e)

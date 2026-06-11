@@ -479,6 +479,11 @@ public sealed class GoogleCalendarSyncService
             .Where(e => e.CalendarId == calendarId)
             .Where(e => localIds is null || localIds.Contains(e.Id))
             .ToArray();
+        Debug.WriteLine($"PushDirtyEvents calendar={calendarId} count={dirtyEvents.Length}");
+        foreach (var dirtyEvent in dirtyEvents)
+        {
+            Debug.WriteLine($"  localId={dirtyEvent.Id} fields={dirtyEvent.DirtyFields ?? "Unknown"}");
+        }
 
         var ordered = dirtyEvents
             .OrderByDescending(item => item.IsRecurringMaster)
@@ -555,6 +560,7 @@ public sealed class GoogleCalendarSyncService
         }
 
         var googleEvent = GoogleEventMapper.ToGoogleEvent(localEvent);
+        Debug.WriteLine($"Push event Title={localEvent.Title} Description={localEvent.Description} Location={localEvent.Location} Start={localEvent.Start:O} End={localEvent.End:O} GoogleEventId={localEvent.GoogleEventId} CalendarId={calendarId} IsDirty={localEvent.IsDirty} DirtyFields={localEvent.DirtyFields}");
         if (string.IsNullOrWhiteSpace(localEvent.GoogleEventId))
         {
             var existingRemoteId = await FindExactRemoteMatchAsync(client, calendarId, localEvent, cancellationToken);
@@ -573,6 +579,7 @@ public sealed class GoogleCalendarSyncService
         {
             await client.UpdateEventAsync(calendarId, localEvent.GoogleEventId, googleEvent, cancellationToken);
             await _repository.MarkSyncedAsync(localEvent);
+            Debug.WriteLine($"Push update succeeded and marked synced: {localEvent.Id}");
             return SyncPushOutcome.Pushed;
         }
         catch (GoogleApiException ex) when (IsNotFound(ex))
@@ -832,7 +839,8 @@ public sealed class GoogleCalendarSyncService
             string.IsNullOrWhiteSpace(calendarEvent.Title) ? "(no title)" : calendarEvent.Title,
             calendarEvent.Start,
             kind,
-            detail);
+            detail,
+            calendarEvent.DirtyFields);
     }
 
     private static SyncDirtyItem ToDirtyItem(CalendarEvent calendarEvent, SyncFailureDiagnostic? failure)
@@ -847,7 +855,8 @@ public sealed class GoogleCalendarSyncService
             calendarEvent.GoogleEventId,
             calendarEvent.UpdatedAt,
             failure?.FailureReason,
-            failure?.ExceptionMessage ?? failure?.GoogleErrorMessage);
+            failure?.ExceptionMessage ?? failure?.GoogleErrorMessage,
+            calendarEvent.DirtyFields);
     }
 
     private static string GetPushOperation(CalendarEvent calendarEvent)

@@ -42,7 +42,11 @@ public sealed record SyncPreviewItem(
     string Title,
     DateTimeOffset? Start,
     string Kind,
-    string Detail);
+    string Detail,
+    string? ChangeFields = null)
+{
+    public string ChangeFieldsText => Services.EventDirtyFieldTracker.ToDisplayText(ChangeFields);
+}
 
 public sealed record SyncCalendarDiagnostic(
     string CalendarId,
@@ -59,8 +63,11 @@ public sealed record SyncDirtyItem(
     string? GoogleEventId,
     DateTimeOffset UpdatedAt,
     string? FailureReason,
-    string? ErrorMessage)
+    string? ErrorMessage,
+    string? ChangeFields = null)
 {
+    public string ChangeFieldsText => Services.EventDirtyFieldTracker.ToDisplayText(ChangeFields);
+
     public SyncDirtyItem(
         string kind,
         string calendarId,
@@ -69,7 +76,7 @@ public sealed record SyncDirtyItem(
         string operation,
         string? googleEventId,
         DateTimeOffset updatedAt)
-        : this("", kind, calendarId, start, title, operation, googleEventId, updatedAt, null, null)
+        : this("", kind, calendarId, start, title, operation, googleEventId, updatedAt, null, null, null)
     {
     }
 }

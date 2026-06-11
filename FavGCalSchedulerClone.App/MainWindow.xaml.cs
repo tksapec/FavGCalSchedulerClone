@@ -977,8 +977,11 @@ public partial class MainWindow : Window
 
     private async Task ShowReminderHistoryDialogAsync()
     {
-        var history = await _reminderService.LoadHistoryAsync();
-        ReminderHistoryDialog.Show(this, history, OpenReminderHistoryItemAsync);
+        await ReminderHistoryDialog.ShowAsync(
+            this,
+            async () => (await _reminderService.LoadHistoryAsync(), await _reminderService.LoadDiagnosticsAsync()),
+            () => _reminderService.CheckDueRemindersAsync(DateTimeOffset.Now),
+            OpenReminderHistoryItemAsync);
     }
 
     private async Task ShowSyncDiagnosticsDialogAsync()

@@ -42,7 +42,8 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
                 updated_at TEXT NOT NULL,
                 last_synced_at TEXT,
                 is_dirty INTEGER NOT NULL,
-                is_todo_like INTEGER NOT NULL
+                is_todo_like INTEGER NOT NULL,
+                dirty_fields TEXT
             );
             """);
         await EnsureEventColumnsAsync(connection);
@@ -149,7 +150,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         command.CommandText = """
             SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
                    calendar_id, title, description, location, start, end, is_all_day,
-                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
+                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields
             FROM events
             WHERE ((start < $end AND end > $start)
                 OR recurrence_json IS NOT NULL
@@ -170,7 +171,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         command.CommandText = """
             SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
                    calendar_id, title, description, location, start, end, is_all_day,
-                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
+                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields
             FROM events
             WHERE is_todo_like = 1 AND is_deleted = 0
             ORDER BY start, title
@@ -185,7 +186,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         command.CommandText = """
             SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
                    calendar_id, title, description, location, start, end, is_all_day,
-                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
+                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields
             FROM events
             WHERE is_dirty = 1
             ORDER BY updated_at
@@ -205,7 +206,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         command.CommandText = """
             SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
                    calendar_id, title, description, location, start, end, is_all_day,
-                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
+                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields
             FROM events
             WHERE calendar_id = $calendar_id AND google_event_id = $google_event_id
             LIMIT 1
@@ -222,7 +223,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         command.CommandText = """
             SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
                    calendar_id, title, description, location, start, end, is_all_day,
-                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
+                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields
             FROM events
             WHERE calendar_id = $calendar_id
               AND title = $title
@@ -252,7 +253,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         command.CommandText = """
             SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
                    calendar_id, title, description, location, start, end, is_all_day,
-                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
+                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields
             FROM events
             WHERE id = $id
             LIMIT 1
@@ -270,7 +271,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         command.CommandText = """
             SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
                    calendar_id, title, description, location, start, end, is_all_day,
-                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like
+                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields
             FROM events
             WHERE ($recurring_parent_id IS NOT NULL AND recurring_parent_id = $recurring_parent_id)
                OR ($recurring_event_id IS NOT NULL AND recurring_event_id = $recurring_event_id)
@@ -283,7 +284,9 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
 
     public async Task SaveEventAsync(CalendarEvent calendarEvent)
     {
+        var existing = await FindMasterByIdAsync(calendarEvent.Id);
         await PreserveExistingRemoteLinkAsync(calendarEvent);
+        calendarEvent.DirtyFields = EventDirtyFieldTracker.Merge(existing?.DirtyFields ?? calendarEvent.DirtyFields, existing, calendarEvent);
         calendarEvent.UpdatedAt = DateTimeOffset.Now;
         calendarEvent.IsTodoLike = TagService.IsTodoLike(calendarEvent);
         await UpsertEventAsync(calendarEvent);
@@ -299,6 +302,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         }
 
         calendarEvent.IsDirty = false;
+        calendarEvent.DirtyFields = null;
         calendarEvent.LastSyncedAt = DateTimeOffset.Now;
         calendarEvent.IsTodoLike = TagService.IsTodoLike(calendarEvent);
         await UpsertEventAsync(calendarEvent);
@@ -312,6 +316,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
             UPDATE events
             SET google_event_id = COALESCE($google_event_id, google_event_id),
                 is_dirty = 0,
+                dirty_fields = NULL,
                 last_synced_at = $last_synced_at
             WHERE id = $id
             """;
@@ -418,11 +423,11 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
             INSERT OR REPLACE INTO events(
                 id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
                 calendar_id, title, description, location, start, end, is_all_day,
-                color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like)
+                color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields)
             VALUES(
                 $id, $google_event_id, $recurring_event_id, $recurring_parent_id, $original_start, $is_recurrence_exception,
                 $calendar_id, $title, $description, $location, $start, $end, $is_all_day,
-                $color_id, $reminder_minutes_before_start, $recurrence_json, $is_deleted, $updated_at, $last_synced_at, $is_dirty, $is_todo_like)
+                $color_id, $reminder_minutes_before_start, $recurrence_json, $is_deleted, $updated_at, $last_synced_at, $is_dirty, $is_todo_like, $dirty_fields)
             """;
         AddEventParameters(command, calendarEvent);
         await command.ExecuteNonQueryAsync();
@@ -501,7 +506,8 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
                 UpdatedAt = DateTimeOffset.Parse(reader.GetString(17)),
                 LastSyncedAt = reader.IsDBNull(18) ? null : DateTimeOffset.Parse(reader.GetString(18)),
                 IsDirty = reader.GetInt32(19) != 0,
-                IsTodoLike = reader.GetInt32(20) != 0
+                IsTodoLike = reader.GetInt32(20) != 0,
+                DirtyFields = reader.IsDBNull(21) ? null : reader.GetString(21)
             });
         }
 
@@ -531,6 +537,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         command.Parameters.AddWithValue("$last_synced_at", calendarEvent.LastSyncedAt?.ToString("O") ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$is_dirty", calendarEvent.IsDirty ? 1 : 0);
         command.Parameters.AddWithValue("$is_todo_like", calendarEvent.IsTodoLike ? 1 : 0);
+        command.Parameters.AddWithValue("$dirty_fields", (object?)calendarEvent.DirtyFields ?? DBNull.Value);
     }
 
     private static async Task EnsureEventColumnsAsync(SqliteConnection connection)
@@ -540,6 +547,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         await EnsureColumnAsync(connection, "events", "original_start", "TEXT");
         await EnsureColumnAsync(connection, "events", "is_recurrence_exception", "INTEGER NOT NULL DEFAULT 0");
         await EnsureColumnAsync(connection, "events", "reminder_minutes_before_start", "INTEGER");
+        await EnsureColumnAsync(connection, "events", "dirty_fields", "TEXT");
     }
 
     private static async Task EnsureColumnAsync(SqliteConnection connection, string tableName, string columnName, string sqlDefinition)

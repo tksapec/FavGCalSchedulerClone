@@ -1,10 +1,75 @@
 using FavGCalSchedulerClone.App.Models;
 using FavGCalSchedulerClone.App.Services;
+using FavGCalSchedulerClone.App.ViewModels;
 
 namespace FavGCalSchedulerClone.Tests;
 
 public sealed class ReminderNotificationServiceTests
 {
+    [Fact]
+    public async Task StartAsync_IsIdempotentAndPublishesMonitoringState()
+    {
+        var repository = await CreateRepositoryAsync();
+        using var service = new ReminderNotificationService(repository, new RecordingNotifier());
+
+        await service.StartAsync();
+        await service.StartAsync();
+
+        var diagnostics = await service.LoadDiagnosticsAsync();
+        Assert.True(service.IsRunning);
+        Assert.True(diagnostics.IsRunning);
+        Assert.NotNull(diagnostics.LastCheckAt);
+        Assert.NotNull(diagnostics.NextCheckAt);
+
+        service.Stop();
+        Assert.False(service.IsRunning);
+    }
+
+    [Fact]
+    public async Task CheckDueRemindersAsync_RecordsReasonsWhenNothingIsDue()
+    {
+        var repository = await CreateRepositoryAsync();
+        var service = new ReminderNotificationService(repository, new RecordingNotifier());
+        var now = new DateTimeOffset(2026, 6, 10, 9, 0, 0, TimeSpan.FromHours(9));
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "Future reminder",
+            Start = now.AddHours(1),
+            End = now.AddHours(2),
+            ReminderMinutesBeforeStart = 10
+        });
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "No reminder",
+            Start = now.AddHours(2),
+            End = now.AddHours(3)
+        });
+
+        await service.CheckDueRemindersAsync(now);
+        var diagnostics = await service.LoadDiagnosticsAsync();
+
+        Assert.Equal(2, diagnostics.StoredEventsCount);
+        Assert.Equal(1, diagnostics.ReminderConfiguredCount);
+        Assert.Equal(0, diagnostics.DueCount);
+        Assert.Contains(diagnostics.Candidates, item => item.Title == "Future reminder" && item.Reason == "通知時刻未到達");
+        Assert.Contains(diagnostics.Candidates, item => item.Title == "No reminder" && item.Reason == "通知設定なし");
+    }
+
+    [Fact]
+    public async Task ApplicationStartupService_StartsReminderMonitoringWithoutToastInitialization()
+    {
+        var repository = await CreateRepositoryAsync();
+        var reminderService = new ReminderNotificationService(repository);
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        using var startup = new ApplicationStartupService(viewModel, reminderService);
+        var notifier = new RecordingNotifier();
+
+        await startup.InitializeAsync(null!, () => notifier);
+
+        Assert.True(reminderService.IsRunning);
+        Assert.Equal("通知監視を開始しました", viewModel.Status);
+    }
+
     [Fact]
     public async Task CheckDueRemindersAsync_TriggersForTimedEvent()
     {
@@ -61,6 +126,9 @@ public sealed class ReminderNotificationServiceTests
         await service.CheckDueRemindersAsync(now.AddMinutes(1));
 
         Assert.Equal(1, count);
+        var diagnostics = await service.LoadDiagnosticsAsync();
+        Assert.Equal(1, diagnostics.FiredExcludedCount);
+        Assert.Contains(diagnostics.Candidates, item => item.Title == "Standup" && item.Reason == "既に発火済み");
     }
 
     [Fact]
@@ -93,6 +161,9 @@ public sealed class ReminderNotificationServiceTests
 
         await service.CheckDueRemindersAsync(dueAt.AddMinutes(4));
         Assert.Empty(notifications);
+        var snoozedDiagnostics = await service.LoadDiagnosticsAsync();
+        Assert.Equal(1, snoozedDiagnostics.SnoozedExcludedCount);
+        Assert.Contains(snoozedDiagnostics.Candidates, item => item.Reason == "スヌーズ中");
 
         await service.CheckDueRemindersAsync(dueAt.AddMinutes(5));
         Assert.Single(notifications);

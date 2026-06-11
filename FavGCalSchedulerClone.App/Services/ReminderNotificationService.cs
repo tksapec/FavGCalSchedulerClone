@@ -10,13 +10,18 @@ public sealed class ReminderNotificationService : IDisposable
     private const string ReminderSnoozeKey = "reminder:snoozed";
     private const string ReminderHistoryKey = "reminder:history";
     private const string ReminderLastErrorKey = "reminder:last-error";
+    private const string ReminderDiagnosticsKey = "reminder:diagnostics";
     private const int MaxHistoryCount = 50;
+    private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan FailureAggregationWindow = TimeSpan.FromMinutes(5);
     private readonly CalendarRepository _repository;
     private readonly Timer _timer;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private IReminderNotifier? _notifier;
     private bool _disposed;
+    private bool _isRunning;
+    private DateTimeOffset? _startedAt;
+    private ReminderMonitoringSnapshot _diagnostics = ReminderMonitoringSnapshot.Stopped;
 
     public ReminderNotificationService(CalendarRepository repository, IReminderNotifier? notifier = null)
     {
@@ -26,6 +31,8 @@ public sealed class ReminderNotificationService : IDisposable
     }
 
     public event Func<ReminderNotification, Task>? ReminderTriggered;
+    public bool IsRunning => _isRunning;
+    public ReminderMonitoringSnapshot CurrentDiagnostics => _diagnostics;
 
     public void SetNotifier(IReminderNotifier notifier)
     {
@@ -34,13 +41,44 @@ public sealed class ReminderNotificationService : IDisposable
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
+        if (_isRunning)
+        {
+            return;
+        }
+
+        _isRunning = true;
+        _startedAt = DateTimeOffset.Now;
         await CheckDueRemindersAsync(DateTimeOffset.Now, cancellationToken);
-        _timer.Change(TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+        _timer.Change(CheckInterval, CheckInterval);
+        UpdateRuntimeState(DateTimeOffset.Now.Add(CheckInterval));
+        Debug.WriteLine("通知監視を開始しました");
     }
 
     public void Stop()
     {
         _timer.Change(Timeout.Infinite, Timeout.Infinite);
+        _isRunning = false;
+        UpdateRuntimeState(null);
+        _ = SaveDiagnosticsAsync();
+    }
+
+    public async Task<ReminderMonitoringSnapshot> LoadDiagnosticsAsync()
+    {
+        var json = await _repository.LoadSettingValueAsync(ReminderDiagnosticsKey);
+        if (!string.IsNullOrWhiteSpace(json))
+        {
+            try
+            {
+                _diagnostics = JsonSerializer.Deserialize<ReminderMonitoringSnapshot>(json) ?? _diagnostics;
+            }
+            catch (JsonException ex)
+            {
+                Debug.WriteLine(ex);
+            }
+        }
+
+        UpdateRuntimeState(_isRunning ? DateTimeOffset.Now.Add(CheckInterval) : null);
+        return _diagnostics;
     }
 
     public async Task CheckDueRemindersAsync(DateTimeOffset? now = null, CancellationToken cancellationToken = default)
@@ -58,7 +96,10 @@ public sealed class ReminderNotificationService : IDisposable
         catch (Exception ex)
         {
             Debug.WriteLine(ex);
-            await _repository.SaveSettingValueAsync(ReminderLastErrorKey, $"{DateTimeOffset.Now:O} {ex}");
+            var error = $"{DateTimeOffset.Now:O} {ex}";
+            await _repository.SaveSettingValueAsync(ReminderLastErrorKey, error);
+            _diagnostics = _diagnostics with { LastError = error, NextCheckAt = _isRunning ? DateTimeOffset.Now.Add(CheckInterval) : null };
+            await SaveDiagnosticsAsync();
         }
     }
 
@@ -82,27 +123,76 @@ public sealed class ReminderNotificationService : IDisposable
             var windowEnd = current.AddDays(30);
             var storedEvents = await _repository.LoadEventsAsync(windowStart, windowEnd, includeDeleted: false);
             var expandedEvents = RecurrenceExpansionService.ExpandForRange(storedEvents, windowStart, windowEnd);
-            var dueNotifications = expandedEvents
-                .Where(ShouldConsiderReminder)
-                .Select(item => CreateReminderNotification(item, current))
-                .Where(item => item is not null)
-                .Cast<ReminderNotification>()
-                .Where(item => IsDue(item, current, fired, snoozed))
-                .OrderBy(item => item.RemindAt)
-                .ThenBy(item => item.EventStart)
-                .ToArray();
+            var candidateDiagnostics = new List<ReminderCandidateDiagnostic>();
+            var dueNotifications = new List<ReminderNotification>();
+            var reminderConfiguredCount = 0;
+            var firedExcludedCount = 0;
+            var snoozedExcludedCount = 0;
+
+            foreach (var calendarEvent in expandedEvents)
+            {
+                if (calendarEvent.ReminderMinutesBeforeStart is not int reminderMinutes)
+                {
+                    candidateDiagnostics.Add(CreateCandidateDiagnostic(calendarEvent, current, null, null, false, false, null, "通知設定なし"));
+                    continue;
+                }
+
+                reminderConfiguredCount++;
+                var notification = CreateReminderNotification(calendarEvent, current);
+                if (notification is null)
+                {
+                    candidateDiagnostics.Add(CreateCandidateDiagnostic(calendarEvent, current, reminderMinutes, null, false, false, null, "通知情報を作成できません"));
+                    continue;
+                }
+
+                var isFired = fired.ContainsKey(notification.OccurrenceKey);
+                var snoozedUntil = TryGetSnoozedUntil(snoozed, notification.OccurrenceKey);
+                var isDue = notification.RemindAt <= current;
+                string reason;
+                if (calendarEvent.IsTodoDone)
+                {
+                    reason = "完了ToDo";
+                }
+                else if (snoozedUntil is not null && snoozedUntil > current)
+                {
+                    snoozedExcludedCount++;
+                    reason = "スヌーズ中";
+                }
+                else if (isFired && snoozedUntil is null)
+                {
+                    firedExcludedCount++;
+                    reason = "既に発火済み";
+                }
+                else if (!isDue)
+                {
+                    reason = "通知時刻未到達";
+                }
+                else
+                {
+                    reason = snoozedUntil is not null ? "スヌーズ期限到達" : "通知対象";
+                    dueNotifications.Add(notification);
+                }
+
+                candidateDiagnostics.Add(CreateCandidateDiagnostic(calendarEvent, current, reminderMinutes, notification, isDue, isFired, snoozedUntil, reason));
+            }
+
+            dueNotifications = dueNotifications.OrderBy(item => item.RemindAt).ThenBy(item => item.EventStart).ToList();
+            var succeededCount = 0;
+            var failedCount = 0;
 
             foreach (var notification in dueNotifications)
             {
                 var result = await TryDispatchNotificationAsync(notification, cancellationToken);
                 if (result.Succeeded)
                 {
+                    succeededCount++;
                     fired[notification.OccurrenceKey] = current.ToString("O");
                     snoozed.Remove(notification.OccurrenceKey);
                     await AddHistoryAsync(notification, current, null, deliverySucceeded: true, deliveryMethod: result.DeliveryMethod, result.UsedMessageBoxFallback, result.MessageBoxRole, result.ToastVerified, result.ToastStatus, result.SoundStatus, result.SoundError, deliveryError: null);
                 }
                 else
                 {
+                    failedCount++;
                     await AddHistoryAsync(notification, current, null, deliverySucceeded: false, deliveryMethod: result.DeliveryMethod, result.UsedMessageBoxFallback, result.MessageBoxRole, result.ToastVerified, result.ToastStatus, result.SoundStatus, result.SoundError, deliveryError: result.ErrorMessage);
                     await _repository.SaveSettingValueAsync(ReminderLastErrorKey, $"{current:O} {result.ErrorMessage}");
                 }
@@ -110,6 +200,21 @@ public sealed class ReminderNotificationService : IDisposable
 
             await SaveFiredStateAsync(fired);
             await SaveSnoozeStateAsync(snoozed);
+            var lastError = await _repository.LoadSettingValueAsync(ReminderLastErrorKey);
+            _diagnostics = new ReminderMonitoringSnapshot(
+                _isRunning, _startedAt, current, _isRunning ? current.Add(CheckInterval) : null,
+                storedEvents.Count, expandedEvents.Count, reminderConfiguredCount, candidateDiagnostics.Count,
+                dueNotifications.Count, firedExcludedCount, snoozedExcludedCount, succeededCount, failedCount,
+                lastError, candidateDiagnostics);
+            await SaveDiagnosticsAsync();
+            Debug.WriteLine($"""
+                Reminder check current={current:O}
+                  storedEvents={storedEvents.Count} expandedEvents={expandedEvents.Count}
+                  reminderConfigured={reminderConfiguredCount} candidates={candidateDiagnostics.Count} due={dueNotifications.Count}
+                  firedExcluded={firedExcludedCount} snoozedExcluded={snoozedExcludedCount}
+                  succeeded={succeededCount} failed={failedCount}
+                  zeroReason={(dueNotifications.Count == 0 ? string.Join(", ", candidateDiagnostics.GroupBy(item => item.Reason).Select(group => $"{group.Key}={group.Count()}")) : "n/a")}
+                """);
         }
         finally
         {
@@ -254,6 +359,36 @@ public sealed class ReminderNotificationService : IDisposable
         return !calendarEvent.IsDeleted
             && !calendarEvent.IsTodoDone
             && calendarEvent.ReminderMinutesBeforeStart is >= 0;
+    }
+
+    private static DateTimeOffset? TryGetSnoozedUntil(IReadOnlyDictionary<string, string> snoozed, string occurrenceKey)
+    {
+        return snoozed.TryGetValue(occurrenceKey, out var value) && DateTimeOffset.TryParse(value, out var parsed) ? parsed : null;
+    }
+
+    private static ReminderCandidateDiagnostic CreateCandidateDiagnostic(
+        CalendarEvent calendarEvent,
+        DateTimeOffset current,
+        int? reminderMinutes,
+        ReminderNotification? notification,
+        bool isDue,
+        bool isFired,
+        DateTimeOffset? snoozedUntil,
+        string reason)
+    {
+        return new ReminderCandidateDiagnostic(
+            calendarEvent.Id, calendarEvent.Title, notification?.OccurrenceKey ?? "", reminderMinutes,
+            calendarEvent.Start, notification?.RemindAt, current, isDue, isFired, snoozedUntil, reason);
+    }
+
+    private async Task SaveDiagnosticsAsync()
+    {
+        await _repository.SaveSettingValueAsync(ReminderDiagnosticsKey, JsonSerializer.Serialize(_diagnostics));
+    }
+
+    private void UpdateRuntimeState(DateTimeOffset? nextCheckAt)
+    {
+        _diagnostics = _diagnostics with { IsRunning = _isRunning, StartedAt = _startedAt, NextCheckAt = nextCheckAt };
     }
 
     private static ReminderNotification? CreateReminderNotification(CalendarEvent calendarEvent, DateTimeOffset now)

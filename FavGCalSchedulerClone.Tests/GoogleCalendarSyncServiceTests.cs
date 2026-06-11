@@ -134,6 +134,61 @@ public sealed class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task DescriptionOnlyEdit_IsDirtyPreviewedAndPushedToGoogle()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        var settings = CreateSettings("work");
+        await repository.SaveSettingsAsync(settings);
+        var original = new CalendarEvent
+        {
+            Id = "description-only",
+            CalendarId = "work",
+            GoogleEventId = "remote-description",
+            Title = "Existing event",
+            Description = "before",
+            Start = new DateTimeOffset(2026, 6, 10, 9, 0, 0, TimeSpan.FromHours(9)),
+            End = new DateTimeOffset(2026, 6, 10, 10, 0, 0, TimeSpan.FromHours(9)),
+            IsDirty = false,
+            UpdatedAt = DateTimeOffset.Now.AddDays(-1)
+        };
+        await repository.UpsertSyncedEventAsync(original);
+        api.UpsertRemote("work", new Event
+        {
+            Id = "remote-description",
+            Summary = original.Title,
+            Description = original.Description,
+            Start = new EventDateTime { DateTimeDateTimeOffset = original.Start },
+            End = new EventDateTime { DateTimeDateTimeOffset = original.End },
+            Status = "confirmed"
+        });
+        var service = new GoogleCalendarSyncService(repository, api);
+        var viewModel = new MainViewModel(repository, service);
+        await viewModel.InitializeAsync();
+        var storedOriginal = await repository.FindEventByGoogleEventIdAsync("work", "remote-description");
+        Assert.NotNull(storedOriginal);
+        var previousUpdatedAt = storedOriginal.UpdatedAt;
+
+        viewModel.SelectEvent(storedOriginal);
+        viewModel.Description = "after";
+        await viewModel.SaveCurrentEventAsync();
+
+        var dirty = Assert.Single(await repository.LoadDirtyEventsAsync(), item => item.Id == original.Id);
+        Assert.True(dirty.IsDirty);
+        Assert.True(dirty.UpdatedAt > previousUpdatedAt);
+        Assert.Equal("Description", dirty.DirtyFields);
+        var preview = await service.PreviewAsync(settings);
+        var previewItem = Assert.Single(preview.PushItems, item => item.LocalId == original.Id);
+        Assert.Equal("Description", previewItem.ChangeFields);
+
+        await service.SyncAsync(settings);
+
+        Assert.Contains(api.Operations, item => item == "update:work:remote-description");
+        Assert.Equal("after", api.EventsByCalendar["work"]["remote-description"].Description);
+        Assert.DoesNotContain(await repository.LoadDirtyEventsAsync(), item => item.Id == original.Id);
+    }
+
+    [Fact]
     public async Task SyncAsync_PullsRemoteCreateUpdateAndDelete()
     {
         var repository = await CreateRepositoryAsync();

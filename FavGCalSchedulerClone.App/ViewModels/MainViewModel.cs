@@ -2390,6 +2390,7 @@ public sealed class MainViewModel : ObservableObject
             UpdatedAt = source.UpdatedAt,
             LastSyncedAt = source.LastSyncedAt,
             IsDirty = source.IsDirty,
+            DirtyFields = source.DirtyFields,
             IsTodoLike = source.IsTodoLike,
             DisplayColor = source.DisplayColor,
             DisplayForegroundColor = source.DisplayForegroundColor,
