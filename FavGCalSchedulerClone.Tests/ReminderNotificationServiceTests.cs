@@ -26,7 +26,7 @@ public sealed class ReminderNotificationServiceTests
     }
 
     [Fact]
-    public async Task CheckDueRemindersAsync_RecordsReasonsWhenNothingIsDue()
+    public async Task CheckDueRemindersAsync_OmitsNoReminderRowsButKeepsTheirCount()
     {
         var repository = await CreateRepositoryAsync();
         var service = new ReminderNotificationService(repository, new RecordingNotifier());
@@ -50,9 +50,117 @@ public sealed class ReminderNotificationServiceTests
 
         Assert.Equal(2, diagnostics.StoredEventsCount);
         Assert.Equal(1, diagnostics.ReminderConfiguredCount);
+        Assert.Equal(1, diagnostics.NoReminderCount);
+        Assert.Equal(2, diagnostics.CandidateCount);
         Assert.Equal(0, diagnostics.DueCount);
         Assert.Contains(diagnostics.Candidates, item => item.Title == "Future reminder" && item.Reason == "通知時刻未到達");
+        Assert.DoesNotContain(diagnostics.Candidates, item => item.Title == "No reminder");
+    }
+
+    [Fact]
+    public async Task CheckDueRemindersDetailedAsync_IncludesAllCandidateReasons()
+    {
+        var repository = await CreateRepositoryAsync();
+        var service = new ReminderNotificationService(repository, new RecordingNotifier());
+        var now = new DateTimeOffset(2026, 6, 10, 9, 0, 0, TimeSpan.FromHours(9));
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "Future reminder",
+            Start = now.AddHours(1),
+            End = now.AddHours(2),
+            ReminderMinutesBeforeStart = 10
+        });
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "No reminder",
+            Start = now.AddHours(2),
+            End = now.AddHours(3)
+        });
+
+        await service.CheckDueRemindersDetailedAsync(now);
+        var diagnostics = await service.LoadDiagnosticsAsync();
+
+        Assert.Equal(2, diagnostics.CandidateCount);
+        Assert.Equal(2, diagnostics.Candidates.Count);
+        Assert.Contains(diagnostics.Candidates, item => item.Title == "Future reminder" && item.Reason == "通知時刻未到達");
         Assert.Contains(diagnostics.Candidates, item => item.Title == "No reminder" && item.Reason == "通知設定なし");
+    }
+
+    [Fact]
+    public async Task CheckDueRemindersAsync_PersistsUnchangedDiagnosticsAtMostEveryFiveMinutes()
+    {
+        var repository = await CreateRepositoryAsync();
+        var service = new ReminderNotificationService(repository, new RecordingNotifier());
+        var now = new DateTimeOffset(2026, 6, 10, 9, 0, 0, TimeSpan.FromHours(9));
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "Future reminder",
+            Start = now.AddHours(1),
+            End = now.AddHours(2),
+            ReminderMinutesBeforeStart = 10
+        });
+
+        await service.CheckDueRemindersAsync(now);
+        var firstJson = await repository.LoadSettingValueAsync("reminder:diagnostics");
+        await service.CheckDueRemindersAsync(now.AddSeconds(30));
+        var throttledJson = await repository.LoadSettingValueAsync("reminder:diagnostics");
+        await service.CheckDueRemindersAsync(now.AddMinutes(5));
+        var intervalJson = await repository.LoadSettingValueAsync("reminder:diagnostics");
+
+        Assert.NotNull(firstJson);
+        Assert.Equal(firstJson, throttledJson);
+        Assert.NotEqual(firstJson, intervalJson);
+    }
+
+    [Fact]
+    public async Task CheckDueRemindersAsync_PersistsMeaningfulChangesImmediately()
+    {
+        var repository = await CreateRepositoryAsync();
+        var service = new ReminderNotificationService(repository, new RecordingNotifier());
+        var now = new DateTimeOffset(2026, 6, 10, 9, 0, 0, TimeSpan.FromHours(9));
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "Future reminder",
+            Start = now.AddHours(1),
+            End = now.AddHours(2),
+            ReminderMinutesBeforeStart = 10
+        });
+        await service.CheckDueRemindersAsync(now);
+        var firstJson = await repository.LoadSettingValueAsync("reminder:diagnostics");
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "No reminder",
+            Start = now.AddHours(2),
+            End = now.AddHours(3)
+        });
+
+        await service.CheckDueRemindersAsync(now.AddSeconds(30));
+        var changedJson = await repository.LoadSettingValueAsync("reminder:diagnostics");
+
+        Assert.NotEqual(firstJson, changedJson);
+        Assert.Equal(1, service.CurrentDiagnostics.NoReminderCount);
+    }
+
+    [Fact]
+    public async Task CheckDueRemindersDetailedAsync_PersistsFullCandidatesImmediately()
+    {
+        var repository = await CreateRepositoryAsync();
+        var service = new ReminderNotificationService(repository, new RecordingNotifier());
+        var now = new DateTimeOffset(2026, 6, 10, 9, 0, 0, TimeSpan.FromHours(9));
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "No reminder",
+            Start = now.AddHours(1),
+            End = now.AddHours(2)
+        });
+        await service.CheckDueRemindersAsync(now);
+        var regularJson = await repository.LoadSettingValueAsync("reminder:diagnostics");
+
+        await service.CheckDueRemindersDetailedAsync(now.AddSeconds(30));
+        var detailedJson = await repository.LoadSettingValueAsync("reminder:diagnostics");
+
+        Assert.NotEqual(regularJson, detailedJson);
+        Assert.Contains(service.CurrentDiagnostics.Candidates, item => item.Title == "No reminder" && item.Reason == "通知設定なし");
     }
 
     [Fact]
@@ -319,6 +427,9 @@ public sealed class ReminderNotificationServiceTests
         Assert.False(item.DeliverySucceeded);
         Assert.Equal(2, item.FailureCount);
         Assert.NotNull(item.LastFailedAt);
+        var diagnostic = Assert.Single(service.CurrentDiagnostics.Candidates, candidate => candidate.Title == "Retry reminder");
+        Assert.Equal("通知エラー", diagnostic.Reason);
+        Assert.Equal("notification failed", diagnostic.ErrorMessage);
     }
 
     [Fact]

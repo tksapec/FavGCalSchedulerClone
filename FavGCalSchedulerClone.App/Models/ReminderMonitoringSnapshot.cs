@@ -8,6 +8,7 @@ public sealed record ReminderMonitoringSnapshot(
     int StoredEventsCount,
     int ExpandedEventsCount,
     int ReminderConfiguredCount,
+    int NoReminderCount,
     int CandidateCount,
     int DueCount,
     int FiredExcludedCount,
@@ -18,7 +19,7 @@ public sealed record ReminderMonitoringSnapshot(
     IReadOnlyList<ReminderCandidateDiagnostic> Candidates)
 {
     public static ReminderMonitoringSnapshot Stopped { get; } = new(
-        false, null, null, null, 0, 0, 0, 0, 0, 0, 0, 0, 0, null, []);
+        false, null, null, null, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, null, []);
 }
 
 public sealed record ReminderCandidateDiagnostic(
@@ -32,4 +33,5 @@ public sealed record ReminderCandidateDiagnostic(
     bool IsDue,
     bool IsFired,
     DateTimeOffset? SnoozedUntil,
-    string Reason);
+    string Reason,
+    string? ErrorMessage = null);

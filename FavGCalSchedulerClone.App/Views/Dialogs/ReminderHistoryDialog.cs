@@ -104,6 +104,7 @@ internal static class ReminderHistoryDialog
         grid.Columns.Add(new DataGridTextColumn { Header = "通知分", Binding = new Binding(nameof(ReminderCandidateDiagnostic.ReminderMinutesBeforeStart)), Width = 70 });
         grid.Columns.Add(new DataGridTextColumn { Header = "通知予定", Binding = new Binding(nameof(ReminderCandidateDiagnostic.RemindAt)) { StringFormat = "yyyy/MM/dd HH:mm:ss" }, Width = 150 });
         grid.Columns.Add(new DataGridTextColumn { Header = "判定理由", Binding = new Binding(nameof(ReminderCandidateDiagnostic.Reason)), Width = 150 });
+        grid.Columns.Add(new DataGridTextColumn { Header = "エラー", Binding = new Binding(nameof(ReminderCandidateDiagnostic.ErrorMessage)), Width = 240 });
         grid.Columns.Add(new DataGridCheckBoxColumn { Header = "期限到達", Binding = new Binding(nameof(ReminderCandidateDiagnostic.IsDue)), Width = 75 });
         grid.Columns.Add(new DataGridCheckBoxColumn { Header = "発火済み", Binding = new Binding(nameof(ReminderCandidateDiagnostic.IsFired)), Width = 75 });
         grid.Columns.Add(new DataGridTextColumn { Header = "スヌーズ期限", Binding = new Binding(nameof(ReminderCandidateDiagnostic.SnoozedUntil)) { StringFormat = "yyyy/MM/dd HH:mm:ss" }, Width = 150 });
@@ -115,7 +116,7 @@ internal static class ReminderHistoryDialog
     {
         return $"通知監視サービス: {(value.IsRunning ? "起動中" : "停止中")}  " +
                $"最終チェック: {FormatDate(value.LastCheckAt)}  次回チェック: {FormatDate(value.NextCheckAt)}\n" +
-               $"保存予定: {value.StoredEventsCount}  展開後: {value.ExpandedEventsCount}  通知設定あり: {value.ReminderConfiguredCount}  " +
+               $"保存予定: {value.StoredEventsCount}  展開後: {value.ExpandedEventsCount}  通知設定あり: {value.ReminderConfiguredCount}  通知設定なし: {value.NoReminderCount}  " +
                $"候補: {value.CandidateCount}  通知対象: {value.DueCount}  fired除外: {value.FiredExcludedCount}  snooze除外: {value.SnoozedExcludedCount}\n" +
                $"成功: {value.SucceededCount}  失敗: {value.FailedCount}  最後の通知エラー: {value.LastError ?? "なし"}";
     }

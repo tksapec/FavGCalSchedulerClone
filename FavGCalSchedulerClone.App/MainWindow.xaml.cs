@@ -935,7 +935,7 @@ public partial class MainWindow : Window
         await ReminderHistoryDialog.ShowAsync(
             this,
             async () => (await _reminderService.LoadHistoryAsync(), await _reminderService.LoadDiagnosticsAsync()),
-            () => _reminderService.CheckDueRemindersAsync(DateTimeOffset.Now),
+            () => _reminderService.CheckDueRemindersDetailedAsync(DateTimeOffset.Now),
             OpenReminderHistoryItemAsync);
     }
 

@@ -13,6 +13,7 @@ public sealed class ReminderNotificationService : IDisposable
     private const string ReminderDiagnosticsKey = "reminder:diagnostics";
     private const int MaxHistoryCount = 50;
     private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan DiagnosticsPersistenceInterval = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan FailureAggregationWindow = TimeSpan.FromMinutes(5);
     private readonly CalendarRepository _repository;
     private readonly Timer _timer;
@@ -21,6 +22,8 @@ public sealed class ReminderNotificationService : IDisposable
     private bool _disposed;
     private bool _isRunning;
     private DateTimeOffset? _startedAt;
+    private DateTimeOffset? _lastDiagnosticsSavedAt;
+    private string? _lastPersistedDiagnosticsSignature;
     private ReminderMonitoringSnapshot _diagnostics = ReminderMonitoringSnapshot.Stopped;
 
     public ReminderNotificationService(CalendarRepository repository, IReminderNotifier? notifier = null)
@@ -59,7 +62,7 @@ public sealed class ReminderNotificationService : IDisposable
         _timer.Change(Timeout.Infinite, Timeout.Infinite);
         _isRunning = false;
         UpdateRuntimeState(null);
-        _ = SaveDiagnosticsAsync();
+        _ = SaveDiagnosticsAsync(force: true);
     }
 
     public async Task<ReminderMonitoringSnapshot> LoadDiagnosticsAsync()
@@ -69,7 +72,16 @@ public sealed class ReminderNotificationService : IDisposable
         {
             try
             {
-                _diagnostics = JsonSerializer.Deserialize<ReminderMonitoringSnapshot>(json) ?? _diagnostics;
+                var persisted = JsonSerializer.Deserialize<ReminderMonitoringSnapshot>(json);
+                if (persisted is not null)
+                {
+                    _lastDiagnosticsSavedAt = persisted.LastCheckAt;
+                    _lastPersistedDiagnosticsSignature = CreateDiagnosticsSignature(persisted);
+                    if (_diagnostics.LastCheckAt is null || persisted.LastCheckAt > _diagnostics.LastCheckAt)
+                    {
+                        _diagnostics = persisted;
+                    }
+                }
             }
             catch (JsonException ex)
             {
@@ -83,9 +95,23 @@ public sealed class ReminderNotificationService : IDisposable
 
     public async Task CheckDueRemindersAsync(DateTimeOffset? now = null, CancellationToken cancellationToken = default)
     {
+        await CheckDueRemindersAsync(now, includeAllCandidates: false, forceDiagnosticsSave: false, cancellationToken);
+    }
+
+    public async Task CheckDueRemindersDetailedAsync(DateTimeOffset? now = null, CancellationToken cancellationToken = default)
+    {
+        await CheckDueRemindersAsync(now, includeAllCandidates: true, forceDiagnosticsSave: true, cancellationToken);
+    }
+
+    private async Task CheckDueRemindersAsync(
+        DateTimeOffset? now,
+        bool includeAllCandidates,
+        bool forceDiagnosticsSave,
+        CancellationToken cancellationToken)
+    {
         try
         {
-            await CheckDueRemindersCoreAsync(now, cancellationToken);
+            await CheckDueRemindersCoreAsync(now, includeAllCandidates, forceDiagnosticsSave, cancellationToken);
         }
         catch (ObjectDisposedException) when (_disposed)
         {
@@ -99,11 +125,15 @@ public sealed class ReminderNotificationService : IDisposable
             var error = $"{DateTimeOffset.Now:O} {ex}";
             await _repository.SaveSettingValueAsync(ReminderLastErrorKey, error);
             _diagnostics = _diagnostics with { LastError = error, NextCheckAt = _isRunning ? DateTimeOffset.Now.Add(CheckInterval) : null };
-            await SaveDiagnosticsAsync();
+            await SaveDiagnosticsAsync(force: true);
         }
     }
 
-    private async Task CheckDueRemindersCoreAsync(DateTimeOffset? now = null, CancellationToken cancellationToken = default)
+    private async Task CheckDueRemindersCoreAsync(
+        DateTimeOffset? now,
+        bool includeAllCandidates,
+        bool forceDiagnosticsSave,
+        CancellationToken cancellationToken)
     {
         if (_disposed)
         {
@@ -126,6 +156,7 @@ public sealed class ReminderNotificationService : IDisposable
             var candidateDiagnostics = new List<ReminderCandidateDiagnostic>();
             var dueNotifications = new List<ReminderNotification>();
             var reminderConfiguredCount = 0;
+            var noReminderCount = 0;
             var firedExcludedCount = 0;
             var snoozedExcludedCount = 0;
 
@@ -133,7 +164,11 @@ public sealed class ReminderNotificationService : IDisposable
             {
                 if (calendarEvent.ReminderMinutesBeforeStart is not int reminderMinutes)
                 {
-                    candidateDiagnostics.Add(CreateCandidateDiagnostic(calendarEvent, current, null, null, false, false, null, "通知設定なし"));
+                    noReminderCount++;
+                    if (includeAllCandidates)
+                    {
+                        candidateDiagnostics.Add(CreateCandidateDiagnostic(calendarEvent, current, null, null, false, false, null, "通知設定なし"));
+                    }
                     continue;
                 }
 
@@ -193,6 +228,15 @@ public sealed class ReminderNotificationService : IDisposable
                 else
                 {
                     failedCount++;
+                    var diagnosticIndex = candidateDiagnostics.FindIndex(item => item.OccurrenceKey == notification.OccurrenceKey);
+                    if (diagnosticIndex >= 0)
+                    {
+                        candidateDiagnostics[diagnosticIndex] = candidateDiagnostics[diagnosticIndex] with
+                        {
+                            Reason = "通知エラー",
+                            ErrorMessage = result.ErrorMessage
+                        };
+                    }
                     await AddHistoryAsync(notification, current, null, deliverySucceeded: false, deliveryMethod: result.DeliveryMethod, result.UsedMessageBoxFallback, result.MessageBoxRole, result.ToastVerified, result.ToastStatus, result.SoundStatus, result.SoundError, deliveryError: result.ErrorMessage);
                     await _repository.SaveSettingValueAsync(ReminderLastErrorKey, $"{current:O} {result.ErrorMessage}");
                 }
@@ -203,14 +247,14 @@ public sealed class ReminderNotificationService : IDisposable
             var lastError = await _repository.LoadSettingValueAsync(ReminderLastErrorKey);
             _diagnostics = new ReminderMonitoringSnapshot(
                 _isRunning, _startedAt, current, _isRunning ? current.Add(CheckInterval) : null,
-                storedEvents.Count, expandedEvents.Count, reminderConfiguredCount, candidateDiagnostics.Count,
+                storedEvents.Count, expandedEvents.Count, reminderConfiguredCount, noReminderCount, expandedEvents.Count,
                 dueNotifications.Count, firedExcludedCount, snoozedExcludedCount, succeededCount, failedCount,
                 lastError, candidateDiagnostics);
-            await SaveDiagnosticsAsync();
+            await SaveDiagnosticsAsync(forceDiagnosticsSave, current);
             Debug.WriteLine($"""
                 Reminder check current={current:O}
                   storedEvents={storedEvents.Count} expandedEvents={expandedEvents.Count}
-                  reminderConfigured={reminderConfiguredCount} candidates={candidateDiagnostics.Count} due={dueNotifications.Count}
+                  reminderConfigured={reminderConfiguredCount} noReminder={noReminderCount} candidates={expandedEvents.Count} savedCandidates={candidateDiagnostics.Count} detailed={includeAllCandidates} due={dueNotifications.Count}
                   firedExcluded={firedExcludedCount} snoozedExcluded={snoozedExcludedCount}
                   succeeded={succeededCount} failed={failedCount}
                   zeroReason={(dueNotifications.Count == 0 ? string.Join(", ", candidateDiagnostics.GroupBy(item => item.Reason).Select(group => $"{group.Key}={group.Count()}")) : "n/a")}
@@ -238,6 +282,21 @@ public sealed class ReminderNotificationService : IDisposable
             snoozed[occurrenceKey] = snoozeUntil.ToString("O");
             await SaveSnoozeStateAsync(snoozed);
             await MarkHistorySnoozedAsync(occurrenceKey, snoozeUntil);
+            var candidateIndex = _diagnostics.Candidates.ToList().FindIndex(item => item.OccurrenceKey == occurrenceKey);
+            if (candidateIndex >= 0)
+            {
+                var candidates = _diagnostics.Candidates.ToArray();
+                candidates[candidateIndex] = candidates[candidateIndex] with
+                {
+                    CheckedAt = current,
+                    IsDue = false,
+                    SnoozedUntil = snoozeUntil,
+                    Reason = "スヌーズ中"
+                };
+                _diagnostics = _diagnostics with { Candidates = candidates };
+            }
+
+            await SaveDiagnosticsAsync(force: true, current);
         }
         finally
         {
@@ -381,9 +440,35 @@ public sealed class ReminderNotificationService : IDisposable
             calendarEvent.Start, notification?.RemindAt, current, isDue, isFired, snoozedUntil, reason);
     }
 
-    private async Task SaveDiagnosticsAsync()
+    private async Task SaveDiagnosticsAsync(bool force = false, DateTimeOffset? current = null)
     {
+        var savedAt = current ?? DateTimeOffset.Now;
+        var signature = CreateDiagnosticsSignature(_diagnostics);
+        var intervalElapsed = _lastDiagnosticsSavedAt is null
+            || savedAt - _lastDiagnosticsSavedAt >= DiagnosticsPersistenceInterval;
+        if (!force
+            && !intervalElapsed
+            && string.Equals(signature, _lastPersistedDiagnosticsSignature, StringComparison.Ordinal))
+        {
+            return;
+        }
+
         await _repository.SaveSettingValueAsync(ReminderDiagnosticsKey, JsonSerializer.Serialize(_diagnostics));
+        _lastDiagnosticsSavedAt = savedAt;
+        _lastPersistedDiagnosticsSignature = signature;
+    }
+
+    private static string CreateDiagnosticsSignature(ReminderMonitoringSnapshot snapshot)
+    {
+        var normalized = snapshot with
+        {
+            LastCheckAt = null,
+            NextCheckAt = null,
+            Candidates = snapshot.Candidates
+                .Select(item => item with { CheckedAt = default })
+                .ToArray()
+        };
+        return JsonSerializer.Serialize(normalized);
     }
 
     private void UpdateRuntimeState(DateTimeOffset? nextCheckAt)
