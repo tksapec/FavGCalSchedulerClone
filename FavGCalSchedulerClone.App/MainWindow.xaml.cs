@@ -10,7 +10,6 @@ using FavGCalSchedulerClone.App.Models;
 using FavGCalSchedulerClone.App.Services;
 using FavGCalSchedulerClone.App.ViewModels;
 using FavGCalSchedulerClone.App.Views.Dialogs;
-using Microsoft.Toolkit.Uwp.Notifications;
 using Microsoft.Win32;
 
 namespace FavGCalSchedulerClone.App;
@@ -19,7 +18,6 @@ public partial class MainWindow : Window
 {
     private readonly MainViewModel _viewModel;
     private readonly ReminderNotificationService _reminderService;
-    private readonly WindowsToastInitializationService _toastInitializationService;
     private readonly DispatcherTimer _automaticSyncTimer;
     private MediaPlayer? _previewSoundPlayer;
     private bool _exitRequested;
@@ -28,12 +26,11 @@ public partial class MainWindow : Window
     private CalendarDay? _dragOverDay;
     private DialogUiFactory DialogUi => new(this, _viewModel.EventColorOptions, _viewModel.SideListFontSize);
 
-    public MainWindow(MainViewModel viewModel, ReminderNotificationService reminderService, WindowsToastInitializationService toastInitializationService)
+    public MainWindow(MainViewModel viewModel, ReminderNotificationService reminderService)
     {
         InitializeComponent();
         _viewModel = viewModel;
         _reminderService = reminderService;
-        _toastInitializationService = toastInitializationService;
         _automaticSyncTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
         _automaticSyncTimer.Tick += async (_, _) => await _viewModel.RunAutomaticSyncIfDueAsync();
         DataContext = _viewModel;
@@ -61,8 +58,6 @@ public partial class MainWindow : Window
                 return Task.CompletedTask;
             },
             ShowMonthJumpDialogAsync);
-        ToastNotificationManagerCompat.OnActivated += ToastNotificationManagerCompat_OnActivated;
-        WindowsToastActivationBridge.Activated += WindowsToastActivationBridge_Activated;
     }
 
     private void Window_Closing(object? sender, CancelEventArgs e)
@@ -73,8 +68,6 @@ public partial class MainWindow : Window
             _reminderService.Dispose();
             _automaticSyncTimer.Stop();
             StopPreviewSound();
-            ToastNotificationManagerCompat.OnActivated -= ToastNotificationManagerCompat_OnActivated;
-            WindowsToastActivationBridge.Activated -= WindowsToastActivationBridge_Activated;
             return;
         }
 
@@ -100,44 +93,6 @@ public partial class MainWindow : Window
         return settings.EnableReminderSound
             ? new SoundReminderNotifier(notifier, settings.ReminderSoundFilePath, settings.ReminderSoundVolume)
             : notifier;
-    }
-
-    private async void WindowsToastActivationBridge_Activated(object? sender, string arguments)
-    {
-        await HandleToastArgumentsAsync(arguments);
-    }
-
-    private async void ToastNotificationManagerCompat_OnActivated(ToastNotificationActivatedEventArgsCompat args)
-    {
-        await HandleToastArgumentsAsync(args.Argument);
-    }
-
-    private async Task HandleToastArgumentsAsync(string argument)
-    {
-        var arguments = ToastArguments.Parse(argument);
-        if (!arguments.TryGetValue("action", out var action)
-            || !arguments.TryGetValue("occurrenceKey", out var occurrenceKey))
-        {
-            return;
-        }
-
-        if (string.Equals(action, "snooze", StringComparison.OrdinalIgnoreCase)
-            && arguments.TryGetValue("minutes", out var minutesValue)
-            && int.TryParse(minutesValue, out var minutes))
-        {
-            await _reminderService.SnoozeAsync(occurrenceKey, minutes);
-            return;
-        }
-
-        if (string.Equals(action, "open", StringComparison.OrdinalIgnoreCase))
-        {
-            var history = await _reminderService.LoadHistoryAsync();
-            var item = history.FirstOrDefault(entry => string.Equals(entry.OccurrenceKey, occurrenceKey, StringComparison.Ordinal));
-            if (item is not null)
-            {
-                await Dispatcher.InvokeAsync(async () => await OpenReminderHistoryItemAsync(item));
-            }
-        }
     }
 
     private async void DayList_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
@@ -1037,12 +992,7 @@ public partial class MainWindow : Window
                 _viewModel.AuthorizeGoogleAsync,
                 _viewModel.ClearTokensAsync,
                 _viewModel.ReloadAvailableCalendarsAsync,
-                settings => _reminderService.ShowTestNotificationDetailedAsync(CreateReminderNotifier(settings)),
-                _viewModel.SaveToastVerificationAsync,
-                _viewModel.ClearToastVerificationAsync,
-                _toastInitializationService.CurrentStatus.ToDisplayText(),
-                WindowsToastInitializationService.AppUserModelId,
-                _toastInitializationService.CurrentExecutablePath));
+                settings => _reminderService.ShowTestNotificationDetailedAsync(CreateReminderNotifier(settings))));
         if (result is null)
         {
             return;

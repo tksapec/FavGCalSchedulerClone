@@ -471,9 +471,92 @@ public sealed class GoogleCalendarSyncServiceTests
 
         Assert.Equal(1, result.Pushed);
         Assert.DoesNotContain(api.Operations, item => item.StartsWith("insert:work:", StringComparison.Ordinal));
+        Assert.Contains("update:work:remote-existing", api.Operations);
         var stored = (await repository.LoadEventsAsync(local.Start.AddDays(-1), local.End.AddDays(1))).Single();
         Assert.False(stored.IsDirty);
         Assert.Equal("remote-existing", stored.GoogleEventId);
+    }
+
+    [Fact]
+    public async Task SyncDirtyEventsAsync_UpdatesDescriptionOnStructurallyMatchingRemoteEvent()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        var settings = CreateSettings("work");
+        var local = new CalendarEvent
+        {
+            CalendarId = "work",
+            Title = "description retry target",
+            Description = "remote description",
+            Location = "room",
+            Start = new DateTimeOffset(2026, 1, 8, 13, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 1, 8, 14, 0, 0, TimeSpan.Zero),
+        };
+        await repository.UpsertSyncedEventAsync(local);
+        local.Description = "local description";
+        local.IsDirty = true;
+        await repository.SaveEventAsync(local);
+        api.UpsertRemote("work", new Event
+        {
+            Id = "remote-description-match",
+            Summary = local.Title,
+            Description = "remote description",
+            Location = local.Location,
+            Start = DateTimeEvent(2026, 1, 8, 13),
+            End = DateTimeEvent(2026, 1, 8, 14),
+            Status = "confirmed"
+        });
+        var service = new GoogleCalendarSyncService(repository, api);
+
+        var result = await service.SyncDirtyEventsAsync(settings, new HashSet<string>(StringComparer.Ordinal) { local.Id });
+
+        Assert.Equal(1, result.Pushed);
+        Assert.DoesNotContain(api.Operations, item => item.StartsWith("insert:work:", StringComparison.Ordinal));
+        Assert.Contains("update:work:remote-description-match", api.Operations);
+        Assert.Equal("local description", api.EventsByCalendar["work"]["remote-description-match"].Description);
+        var stored = (await repository.LoadEventsAsync(local.Start.AddDays(-1), local.End.AddDays(1))).Single();
+        Assert.False(stored.IsDirty);
+        Assert.Null(stored.DirtyFields);
+        Assert.Equal("remote-description-match", stored.GoogleEventId);
+    }
+
+    [Fact]
+    public async Task SyncDirtyEventsAsync_KeepsDescriptionDirtyWhenMatchedRemoteUpdateFails()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi { ThrowOnUpdate = true };
+        var settings = CreateSettings("work");
+        var local = new CalendarEvent
+        {
+            CalendarId = "work",
+            Title = "failed description retry",
+            Description = "remote description",
+            Start = new DateTimeOffset(2026, 1, 8, 15, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 1, 8, 16, 0, 0, TimeSpan.Zero),
+        };
+        await repository.UpsertSyncedEventAsync(local);
+        local.Description = "local description";
+        local.IsDirty = true;
+        await repository.SaveEventAsync(local);
+        api.UpsertRemote("work", new Event
+        {
+            Id = "remote-description-failure",
+            Summary = local.Title,
+            Description = "remote description",
+            Start = DateTimeEvent(2026, 1, 8, 15),
+            End = DateTimeEvent(2026, 1, 8, 16),
+            Status = "confirmed"
+        });
+        var service = new GoogleCalendarSyncService(repository, api);
+
+        var result = await service.SyncDirtyEventsAsync(settings, new HashSet<string>(StringComparer.Ordinal) { local.Id });
+
+        Assert.Equal(1, result.Failed);
+        Assert.DoesNotContain(api.Operations, item => item.StartsWith("insert:work:", StringComparison.Ordinal));
+        var dirty = Assert.Single(await repository.LoadDirtyEventsAsync(), item => item.Id == local.Id);
+        Assert.True(dirty.IsDirty);
+        Assert.Equal("Description", dirty.DirtyFields);
+        Assert.Null(dirty.GoogleEventId);
     }
 
     [Fact]
@@ -703,6 +786,7 @@ public sealed class GoogleCalendarSyncServiceTests
         public Dictionary<string, Dictionary<string, Event>> EventsByCalendar { get; } = new(StringComparer.Ordinal);
         public List<string> Operations { get; } = [];
         public bool ThrowOnInsert { get; set; }
+        public bool ThrowOnUpdate { get; set; }
         public bool ThrowOnList { get; set; }
         public TaskCompletionSource? ListStarted { get; set; }
         public TaskCompletionSource? ContinueList { get; set; }
@@ -742,6 +826,11 @@ public sealed class GoogleCalendarSyncServiceTests
 
         public Task<Event> UpdateEventAsync(string calendarId, string eventId, Event googleEvent, CancellationToken cancellationToken = default)
         {
+            if (ThrowOnUpdate)
+            {
+                throw new InvalidOperationException("update failed");
+            }
+
             var copy = Clone(googleEvent);
             copy.Id = eventId;
             copy.Status ??= "confirmed";

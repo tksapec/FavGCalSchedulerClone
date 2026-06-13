@@ -74,7 +74,6 @@ public partial class App : System.Windows.Application
         services.AddSingleton<GoogleCalendarSyncService>();
         services.AddSingleton<IGoogleCalendarApi, GoogleCalendarApi>();
         services.AddSingleton<ReminderNotificationService>();
-        services.AddSingleton<WindowsToastInitializationService>();
         services.AddSingleton<BackupService>();
         services.AddSingleton<CalendarCsvService>();
         services.AddSingleton<FavGCalSchedulerImportService>();

@@ -522,7 +522,7 @@ public sealed class FavGCalSchedulerImportServiceTests
         var repository = new CalendarRepository(dbPath);
         var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
         await viewModel.InitializeAsync();
-        await viewModel.SaveApplicationSettingsAsync(0, false, false, false, true);
+        await viewModel.SaveApplicationSettingsAsync(0, false, false, false);
 
         await viewModel.ImportFavGCalSchedulerAsync(new FavGCalImportOptions(
             sourceFolder,

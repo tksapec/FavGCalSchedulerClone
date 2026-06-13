@@ -49,8 +49,7 @@ public sealed class MainViewModelTodoTests
             startupTabIndex: 3,
             confirmBeforeDelete: false,
             closeButtonExitsApplication: false,
-            defaultNewEventIsAllDay: false,
-            useWindowsToastNotifications: false);
+            defaultNewEventIsAllDay: false);
 
         var reloadedRepository = new CalendarRepository(dbPath);
         var reloaded = new MainViewModel(reloadedRepository, new GoogleCalendarSyncService(reloadedRepository));
@@ -61,78 +60,6 @@ public sealed class MainViewModelTodoTests
         Assert.False(reloaded.ConfirmBeforeDelete);
         Assert.False(reloaded.CloseButtonExitsApplication);
         Assert.False(reloaded.DefaultNewEventIsAllDay);
-        Assert.False(reloaded.UseWindowsToastNotifications);
-    }
-
-    [Fact]
-    public async Task SaveApplicationSettingsAsync_ForcesMessageBoxFallbackWhenToastOnlyIsUnverified()
-    {
-        var viewModel = await CreateViewModelAsync();
-        var settings = viewModel.CreateSettingsSnapshot();
-        settings.UseWindowsToastNotifications = true;
-        settings.ShowMessageBoxAfterToastNotification = false;
-        settings.ToastVerifiedAt = null;
-        settings.ToastVerifiedAumid = null;
-        settings.ToastVerifiedExecutablePath = null;
-
-        await viewModel.SaveApplicationSettingsAsync(settings);
-
-        Assert.True(viewModel.UseWindowsToastNotifications);
-        Assert.True(viewModel.ShowMessageBoxAfterToastNotification);
-        Assert.False(viewModel.IsWindowsToastVerifiedForCurrentApp);
-    }
-
-    [Fact]
-    public async Task SaveApplicationSettingsAsync_AllowsToastOnlyWhenCurrentAppWasVerified()
-    {
-        var viewModel = await CreateViewModelAsync();
-        var settings = viewModel.CreateSettingsSnapshot();
-        settings.UseWindowsToastNotifications = true;
-        settings.ShowMessageBoxAfterToastNotification = false;
-        settings.ToastVerifiedAt = DateTimeOffset.Now;
-        settings.ToastVerifiedAumid = WindowsToastInitializationService.AppUserModelId;
-        settings.ToastVerifiedExecutablePath = Environment.ProcessPath;
-
-        await viewModel.SaveApplicationSettingsAsync(settings);
-
-        Assert.True(viewModel.UseWindowsToastNotifications);
-        Assert.False(viewModel.ShowMessageBoxAfterToastNotification);
-        Assert.True(viewModel.IsWindowsToastVerifiedForCurrentApp);
-    }
-
-    [Fact]
-    public async Task SaveToastVerificationAsync_PersistsImmediately()
-    {
-        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
-        var repository = new CalendarRepository(dbPath);
-        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
-        await viewModel.InitializeAsync();
-        var verifiedAt = DateTimeOffset.Now;
-
-        await viewModel.SaveToastVerificationAsync(verifiedAt, WindowsToastInitializationService.AppUserModelId, Environment.ProcessPath ?? "");
-
-        var reloaded = await new CalendarRepository(dbPath).LoadSettingsAsync();
-        Assert.Equal(verifiedAt, reloaded.ToastVerifiedAt);
-        Assert.Equal(WindowsToastInitializationService.AppUserModelId, reloaded.ToastVerifiedAumid);
-        Assert.Equal(Environment.ProcessPath, reloaded.ToastVerifiedExecutablePath);
-    }
-
-    [Fact]
-    public async Task ClearToastVerificationAsync_ClearsVerificationAndEnablesMessageBoxFallbackImmediately()
-    {
-        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
-        var repository = new CalendarRepository(dbPath);
-        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
-        await viewModel.InitializeAsync();
-        await viewModel.SaveToastVerificationAsync(DateTimeOffset.Now, WindowsToastInitializationService.AppUserModelId, Environment.ProcessPath ?? "");
-
-        await viewModel.ClearToastVerificationAsync();
-
-        var reloaded = await new CalendarRepository(dbPath).LoadSettingsAsync();
-        Assert.Null(reloaded.ToastVerifiedAt);
-        Assert.Null(reloaded.ToastVerifiedAumid);
-        Assert.Null(reloaded.ToastVerifiedExecutablePath);
-        Assert.True(reloaded.ShowMessageBoxAfterToastNotification);
     }
 
     [Fact]
@@ -143,8 +70,7 @@ public sealed class MainViewModelTodoTests
             startupTabIndex: 0,
             confirmBeforeDelete: true,
             closeButtonExitsApplication: true,
-            defaultNewEventIsAllDay: false,
-            useWindowsToastNotifications: true);
+            defaultNewEventIsAllDay: false);
 
         viewModel.BeginNewEvent(DateTime.Today);
 
@@ -247,8 +173,7 @@ public sealed class MainViewModelTodoTests
             startupTabIndex: 99,
             confirmBeforeDelete: true,
             closeButtonExitsApplication: true,
-            defaultNewEventIsAllDay: true,
-            useWindowsToastNotifications: true);
+            defaultNewEventIsAllDay: true);
 
         Assert.Equal(4, viewModel.StartupTabIndex);
     }

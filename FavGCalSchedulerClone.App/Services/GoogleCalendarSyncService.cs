@@ -563,10 +563,13 @@ public sealed class GoogleCalendarSyncService
         Debug.WriteLine($"Push event Title={localEvent.Title} Description={localEvent.Description} Location={localEvent.Location} Start={localEvent.Start:O} End={localEvent.End:O} GoogleEventId={localEvent.GoogleEventId} CalendarId={calendarId} IsDirty={localEvent.IsDirty} DirtyFields={localEvent.DirtyFields}");
         if (string.IsNullOrWhiteSpace(localEvent.GoogleEventId))
         {
-            var existingRemoteId = await FindExactRemoteMatchAsync(client, calendarId, localEvent, cancellationToken);
-            if (!string.IsNullOrWhiteSpace(existingRemoteId))
+            var existingRemote = await FindExactRemoteMatchAsync(client, calendarId, localEvent, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(existingRemote?.Id))
             {
-                await _repository.MarkSyncedAsync(localEvent, existingRemoteId);
+                Debug.WriteLine($"Push matched existing Google event localId={localEvent.Id} googleEventId={existingRemote.Id} fields={localEvent.DirtyFields ?? "Unknown"}; updating before mark synced.");
+                await client.UpdateEventAsync(calendarId, existingRemote.Id, googleEvent, cancellationToken);
+                await _repository.MarkSyncedAsync(localEvent, existingRemote.Id);
+                Debug.WriteLine($"Push matched update succeeded and marked synced: localId={localEvent.Id} googleEventId={existingRemote.Id}");
                 return SyncPushOutcome.Pushed;
             }
 
@@ -651,7 +654,7 @@ public sealed class GoogleCalendarSyncService
         return ex.HttpStatusCode == System.Net.HttpStatusCode.NotFound;
     }
 
-    private static async Task<string?> FindExactRemoteMatchAsync(
+    private static async Task<Event?> FindExactRemoteMatchAsync(
         IGoogleCalendarClient client,
         string calendarId,
         CalendarEvent localEvent,
@@ -673,7 +676,7 @@ public sealed class GoogleCalendarSyncService
             var match = page.Items.FirstOrDefault(item => IsExactRemoteMatch(item, localEvent));
             if (!string.IsNullOrWhiteSpace(match?.Id))
             {
-                return match.Id;
+                return match;
             }
 
             pageToken = page.NextPageToken;

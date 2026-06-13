@@ -453,9 +453,6 @@ public sealed class MainViewModel : ObservableObject
     public bool EnableReminderSound => _settings.EnableReminderSound;
     public string? ReminderSoundFilePath => _settings.ReminderSoundFilePath;
     public int ReminderSoundVolume => _settings.ReminderSoundVolume;
-    public bool UseWindowsToastNotifications => _settings.UseWindowsToastNotifications;
-    public bool ShowMessageBoxAfterToastNotification => _settings.ShowMessageBoxAfterToastNotification;
-    public bool IsWindowsToastVerifiedForCurrentApp => IsWindowsToastVerifiedForCurrentAppSettings(_settings);
     public string DefaultBackupFileName => $"FavGCalSchedulerClone-backup-{DateTime.Now:yyyyMMdd-HHmmss}.zip";
 
     public async Task InitializeAsync()
@@ -853,14 +850,12 @@ public sealed class MainViewModel : ObservableObject
         int startupTabIndex,
         bool confirmBeforeDelete,
         bool closeButtonExitsApplication,
-        bool defaultNewEventIsAllDay,
-        bool useWindowsToastNotifications)
+        bool defaultNewEventIsAllDay)
     {
         _settings.StartupTabIndex = AppSettingsNormalizer.NormalizeTabIndex(startupTabIndex);
         _settings.ConfirmBeforeDelete = confirmBeforeDelete;
         _settings.CloseButtonExitsApplication = closeButtonExitsApplication;
         _settings.DefaultNewEventIsAllDay = defaultNewEventIsAllDay;
-        _settings.UseWindowsToastNotifications = useWindowsToastNotifications;
         await SaveApplicationSettingsAsync(_settings);
     }
 
@@ -872,15 +867,6 @@ public sealed class MainViewModel : ObservableObject
     public async Task SaveApplicationSettingsAsync(AppSettings settings)
     {
         _settings = AppSettingsNormalizer.Normalize(settings);
-        var forcedToastFallback = false;
-        if (_settings.UseWindowsToastNotifications
-            && !_settings.ShowMessageBoxAfterToastNotification
-            && !IsWindowsToastVerifiedForCurrentAppSettings(_settings))
-        {
-            _settings.ShowMessageBoxAfterToastNotification = true;
-            forcedToastFallback = true;
-        }
-
         SelectedTabIndex = _settings.StartupTabIndex;
         SelectedTodoTabIndex = _settings.StartupTodoTabIndex;
         CurrentViewMode = _settings.StartupCalendarViewMode;
@@ -894,46 +880,14 @@ public sealed class MainViewModel : ObservableObject
             nameof(DefaultScheduleReminderMinutes), nameof(CalendarLabelFontSize),
             nameof(SideListFontSize), nameof(WindowOpacity), nameof(WeekdayHeaders),
             nameof(EnableReminderSound), nameof(ReminderSoundFilePath),
-            nameof(ReminderSoundVolume), nameof(UseWindowsToastNotifications), nameof(ShowMessageBoxAfterToastNotification),
-            nameof(IsWindowsToastVerifiedForCurrentApp), nameof(EventColorOptions)
+            nameof(ReminderSoundVolume), nameof(EventColorOptions)
         })
         {
             OnPropertyChanged(propertyName);
         }
 
         await RefreshCalendarAsync();
-        Status = forcedToastFallback
-            ? "Windowsトースト通知は未確認のため、MessageBox併用へ戻して保存しました。"
-            : "アプリ設定を保存しました。";
-    }
-
-    public async Task SaveToastVerificationAsync(DateTimeOffset verifiedAt, string aumid, string executablePath)
-    {
-        _settings.ToastVerifiedAt = verifiedAt;
-        _settings.ToastVerifiedAumid = aumid;
-        _settings.ToastVerifiedExecutablePath = executablePath;
-        await _repository.SaveSettingsAsync(_settings);
-        OnPropertyChanged(nameof(IsWindowsToastVerifiedForCurrentApp));
-        Status = "Windowsトースト通知の確認済み状態を保存しました。";
-    }
-
-    public async Task ClearToastVerificationAsync()
-    {
-        _settings.ToastVerifiedAt = null;
-        _settings.ToastVerifiedAumid = null;
-        _settings.ToastVerifiedExecutablePath = null;
-        _settings.ShowMessageBoxAfterToastNotification = true;
-        await _repository.SaveSettingsAsync(_settings);
-        OnPropertyChanged(nameof(IsWindowsToastVerifiedForCurrentApp));
-        OnPropertyChanged(nameof(ShowMessageBoxAfterToastNotification));
-        Status = "Windowsトースト通知の確認済み状態を解除し、MessageBox併用を有効にしました。";
-    }
-
-    private static bool IsWindowsToastVerifiedForCurrentAppSettings(AppSettings settings)
-    {
-        return settings.ToastVerifiedAt is not null
-            && string.Equals(settings.ToastVerifiedAumid, WindowsToastInitializationService.AppUserModelId, StringComparison.Ordinal)
-            && string.Equals(settings.ToastVerifiedExecutablePath, Environment.ProcessPath, StringComparison.OrdinalIgnoreCase);
+        Status = "アプリ設定を保存しました。";
     }
 
     public async Task<IReadOnlyList<string>> LoadScheduleTitleHistoryAsync()
