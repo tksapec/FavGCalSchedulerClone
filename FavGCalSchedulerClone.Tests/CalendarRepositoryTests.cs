@@ -217,4 +217,36 @@ public sealed class CalendarRepositoryTests
         Assert.True(loaded.IsRecurrenceException);
         Assert.Equal(10, loaded.ReminderMinutesBeforeStart);
     }
+
+    [Fact]
+    public async Task SaveEventAsync_RoundTripsGoogleReminderMetadata()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        var item = new CalendarEvent
+        {
+            Id = "google-reminder",
+            Title = "Google reminder",
+            CalendarId = "primary",
+            Start = new DateTimeOffset(2026, 5, 16, 11, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 5, 16, 12, 0, 0, TimeSpan.Zero),
+            GoogleReminderMetadata = new GoogleReminderMetadata
+            {
+                UseDefault = false,
+                PopupMinutes = [10],
+                EmailMinutes = [30],
+                AdoptedReminderMinutes = 10,
+                Source = "explicit"
+            }
+        };
+
+        await repository.SaveEventAsync(item);
+        var loaded = await repository.FindEventByIdAsync(item.Id);
+
+        Assert.NotNull(loaded?.GoogleReminderMetadata);
+        Assert.Equal([10], loaded!.GoogleReminderMetadata!.PopupMinutes);
+        Assert.Equal([30], loaded.GoogleReminderMetadata.EmailMinutes);
+        Assert.Equal(10, loaded.GoogleReminderMetadata.AdoptedReminderMinutes);
+    }
 }

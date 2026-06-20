@@ -9,9 +9,18 @@ public static class GoogleEventMapper
 {
     public static LocalEvent FromGoogleEvent(Event googleEvent, string calendarId)
     {
+        return FromGoogleEvent(googleEvent, calendarId, defaultReminders: null);
+    }
+
+    public static LocalEvent FromGoogleEvent(
+        Event googleEvent,
+        string calendarId,
+        IReadOnlyList<GoogleReminderOverride>? defaultReminders)
+    {
         var isAllDay = googleEvent.Start?.Date is { Length: > 0 };
         var start = ParseEventDateTime(googleEvent.Start, isAllDay);
         var end = ParseEventDateTime(googleEvent.End, isAllDay);
+        var reminderMetadata = CreateReminderMetadata(googleEvent.Reminders, defaultReminders);
 
         var local = new LocalEvent
         {
@@ -34,7 +43,9 @@ public static class GoogleEventMapper
             RecurrenceJson = googleEvent.Recurrence is null ? null : JsonSerializer.Serialize(googleEvent.Recurrence),
             IsDeleted = string.Equals(googleEvent.Status, "cancelled", StringComparison.OrdinalIgnoreCase),
             UpdatedAt = googleEvent.UpdatedDateTimeOffset ?? DateTimeOffset.Now,
-            IsDirty = false
+            IsDirty = false,
+            ReminderMinutesBeforeStart = reminderMetadata.AdoptedReminderMinutes,
+            GoogleReminderMetadata = reminderMetadata
         };
         local.IsTodoLike = TagService.IsTodoLike(local);
         return local;
@@ -50,7 +61,8 @@ public static class GoogleEventMapper
             ColorId = localEvent.ColorId,
             Start = ToEventDateTime(localEvent.Start, localEvent.IsAllDay),
             End = ToEventDateTime(localEvent.End, localEvent.IsAllDay),
-            Status = localEvent.IsDeleted ? "cancelled" : "confirmed"
+            Status = localEvent.IsDeleted ? "cancelled" : "confirmed",
+            Reminders = ToGoogleReminders(localEvent.ReminderMinutesBeforeStart)
         };
 
         if (!string.IsNullOrWhiteSpace(localEvent.RecurrenceJson))
@@ -64,6 +76,74 @@ public static class GoogleEventMapper
         }
 
         return googleEvent;
+    }
+
+    private static GoogleReminderMetadata CreateReminderMetadata(
+        Event.RemindersData? reminders,
+        IReadOnlyList<GoogleReminderOverride>? defaultReminders)
+    {
+        var metadata = new GoogleReminderMetadata
+        {
+            UseDefault = reminders?.UseDefault,
+            Source = reminders?.UseDefault == true ? "default" : "explicit"
+        };
+        foreach (var item in reminders?.Overrides ?? [])
+        {
+            AddReminder(metadata.PopupMinutes, metadata.EmailMinutes, item.Method, item.Minutes);
+        }
+
+        foreach (var item in defaultReminders ?? [])
+        {
+            AddReminder(metadata.DefaultPopupMinutes, metadata.DefaultEmailMinutes, item.Method, item.Minutes);
+        }
+
+        var popupSource = reminders?.UseDefault == true ? metadata.DefaultPopupMinutes : metadata.PopupMinutes;
+        metadata.AdoptedReminderMinutes = popupSource.Count == 0 ? null : popupSource.Min();
+        if (reminders?.UseDefault == true && defaultReminders is null)
+        {
+            metadata.Source = "default-unavailable";
+        }
+
+        return metadata;
+    }
+
+    private static void AddReminder(ICollection<int> popup, ICollection<int> email, string? method, int? minutes)
+    {
+        if (minutes is null)
+        {
+            return;
+        }
+
+        if (string.Equals(method, "popup", StringComparison.OrdinalIgnoreCase))
+        {
+            popup.Add(minutes.Value);
+        }
+        else if (string.Equals(method, "email", StringComparison.OrdinalIgnoreCase))
+        {
+            email.Add(minutes.Value);
+        }
+    }
+
+    private static Event.RemindersData ToGoogleReminders(int? reminderMinutes)
+    {
+        var reminders = new Event.RemindersData
+        {
+            UseDefault = false,
+            Overrides = []
+        };
+        if (reminderMinutes is int minutes)
+        {
+            reminders.Overrides =
+            [
+                new EventReminder
+                {
+                    Method = "popup",
+                    Minutes = minutes
+                }
+            ];
+        }
+
+        return reminders;
     }
 
     private static DateTimeOffset ParseEventDateTime(EventDateTime? value, bool isAllDay)

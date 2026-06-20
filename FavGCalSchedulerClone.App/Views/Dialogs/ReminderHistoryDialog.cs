@@ -102,6 +102,12 @@ internal static class ReminderHistoryDialog
         grid.Columns.Add(new DataGridTextColumn { Header = "件名", Binding = new Binding(nameof(ReminderCandidateDiagnostic.Title)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
         grid.Columns.Add(new DataGridTextColumn { Header = "予定開始", Binding = new Binding(nameof(ReminderCandidateDiagnostic.EventStart)) { StringFormat = "yyyy/MM/dd HH:mm:ss" }, Width = 150 });
         grid.Columns.Add(new DataGridTextColumn { Header = "通知分", Binding = new Binding(nameof(ReminderCandidateDiagnostic.ReminderMinutesBeforeStart)), Width = 70 });
+        grid.Columns.Add(new DataGridCheckBoxColumn { Header = "G既定", Binding = new Binding(nameof(ReminderCandidateDiagnostic.GoogleReminderUseDefault)), Width = 60 });
+        grid.Columns.Add(new DataGridTextColumn { Header = "G popup", Binding = new Binding(nameof(ReminderCandidateDiagnostic.GooglePopupReminderText)), Width = 120 });
+        grid.Columns.Add(new DataGridTextColumn { Header = "G email", Binding = new Binding(nameof(ReminderCandidateDiagnostic.GoogleEmailReminderText)), Width = 120 });
+        grid.Columns.Add(new DataGridTextColumn { Header = "G既定通知", Binding = new Binding(nameof(ReminderCandidateDiagnostic.GoogleDefaultReminderText)), Width = 150 });
+        grid.Columns.Add(new DataGridTextColumn { Header = "採用通知分", Binding = new Binding(nameof(ReminderCandidateDiagnostic.AdoptedGoogleReminderMinutes)), Width = 80 });
+        grid.Columns.Add(new DataGridTextColumn { Header = "差分", Binding = new Binding(nameof(ReminderCandidateDiagnostic.ReminderDifferenceText)), Width = 150 });
         grid.Columns.Add(new DataGridTextColumn { Header = "通知予定", Binding = new Binding(nameof(ReminderCandidateDiagnostic.RemindAt)) { StringFormat = "yyyy/MM/dd HH:mm:ss" }, Width = 150 });
         grid.Columns.Add(new DataGridTextColumn { Header = "判定理由", Binding = new Binding(nameof(ReminderCandidateDiagnostic.Reason)), Width = 150 });
         grid.Columns.Add(new DataGridTextColumn { Header = "エラー", Binding = new Binding(nameof(ReminderCandidateDiagnostic.ErrorMessage)), Width = 240 });

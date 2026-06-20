@@ -1103,6 +1103,19 @@ public sealed class MainViewModel : ObservableObject
         return await _syncService.LoadDiagnosticsAsync(_settings);
     }
 
+    public async Task<int> RefreshGoogleReminderMetadataAsync()
+    {
+        await SaveOAuthPathAsync();
+        var now = DateTimeOffset.Now;
+        var updated = await _syncService.RefreshReminderMetadataAsync(
+            _settings,
+            now.AddDays(-1),
+            now.AddDays(30));
+        Status = $"Google通知設定を再取得しました: {updated} 件";
+        await RefreshCalendarAsync();
+        return updated;
+    }
+
     public async Task<CalendarEvent?> FindEventByIdAsync(string localId)
     {
         return await _repository.FindEventByIdAsync(localId);

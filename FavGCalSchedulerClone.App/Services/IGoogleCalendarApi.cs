@@ -35,7 +35,8 @@ public sealed record GoogleEventListRequest(
     DateTimeOffset? TimeMin,
     bool ShowDeleted,
     bool SingleEvents,
-    int MaxResults);
+    int MaxResults,
+    DateTimeOffset? TimeMax = null);
 
 public sealed record GoogleEventPage(
     IReadOnlyList<Event> Items,

@@ -66,7 +66,13 @@ public sealed class GoogleCalendarApi : IGoogleCalendarApi
             var page = await request.ExecuteAsync(cancellationToken);
             return (page.Items ?? [])
                 .Where(item => !string.IsNullOrWhiteSpace(item.Id))
-                .Select(item => new GoogleCalendarInfo(item.Id!, item.SummaryOverride ?? item.Summary ?? item.Id!))
+                .Select(item => new GoogleCalendarInfo(
+                    item.Id!,
+                    item.SummaryOverride ?? item.Summary ?? item.Id!,
+                    (item.DefaultReminders ?? [])
+                        .Where(reminder => !string.IsNullOrWhiteSpace(reminder.Method) && reminder.Minutes is not null)
+                        .Select(reminder => new GoogleReminderOverride(reminder.Method!, reminder.Minutes!.Value))
+                        .ToArray()))
                 .OrderBy(item => item.Summary, StringComparer.CurrentCultureIgnoreCase)
                 .ToArray();
         }
@@ -103,6 +109,7 @@ public sealed class GoogleCalendarApi : IGoogleCalendarApi
             if (string.IsNullOrWhiteSpace(request.SyncToken))
             {
                 list.TimeMinDateTimeOffset = request.TimeMin;
+                list.TimeMaxDateTimeOffset = request.TimeMax;
             }
             else
             {

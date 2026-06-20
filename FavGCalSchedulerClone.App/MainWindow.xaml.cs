@@ -935,7 +935,11 @@ public partial class MainWindow : Window
         await ReminderHistoryDialog.ShowAsync(
             this,
             async () => (await _reminderService.LoadHistoryAsync(), await _reminderService.LoadDiagnosticsAsync()),
-            () => _reminderService.CheckDueRemindersDetailedAsync(DateTimeOffset.Now),
+            async () =>
+            {
+                await _viewModel.RefreshGoogleReminderMetadataAsync();
+                await _reminderService.CheckDueRemindersDetailedAsync(DateTimeOffset.Now);
+            },
             OpenReminderHistoryItemAsync);
     }
 
@@ -950,7 +954,8 @@ public partial class MainWindow : Window
             OpenDirtyItemFromDiagnosticsAsync,
             async ids => await _viewModel.ResyncDirtyItemsAsync(ids),
             async ids => await _viewModel.MarkDirtyItemsSyncedAsync(ids),
-            async ids => await _viewModel.DiscardLocalChangesAsync(ids));
+            async ids => await _viewModel.DiscardLocalChangesAsync(ids),
+            _viewModel.RefreshGoogleReminderMetadataAsync);
     }
 
     private async Task OpenDirtyItemFromDiagnosticsAsync(string localId)

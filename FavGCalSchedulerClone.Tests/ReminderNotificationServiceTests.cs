@@ -164,6 +164,34 @@ public sealed class ReminderNotificationServiceTests
     }
 
     [Fact]
+    public async Task CheckDueRemindersAsync_IncludesGoogleEmailOnlyReminderDiagnostics()
+    {
+        var repository = await CreateRepositoryAsync();
+        var service = new ReminderNotificationService(repository, new RecordingNotifier());
+        var now = new DateTimeOffset(2026, 6, 10, 9, 0, 0, TimeSpan.FromHours(9));
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "Google email reminder",
+            Start = now.AddHours(1),
+            End = now.AddHours(2),
+            GoogleReminderMetadata = new GoogleReminderMetadata
+            {
+                UseDefault = false,
+                EmailMinutes = [30],
+                Source = "explicit"
+            }
+        });
+
+        await service.CheckDueRemindersAsync(now);
+        var diagnostic = Assert.Single(service.CurrentDiagnostics.Candidates);
+
+        Assert.Equal("Google email reminder", diagnostic.Title);
+        Assert.Equal("Googleメール通知のみ（本ツールのポップアップ通知対象外）", diagnostic.Reason);
+        Assert.Equal("30分前", diagnostic.GoogleEmailReminderText);
+        Assert.Equal("Googleメール通知のみ", diagnostic.ReminderDifferenceText);
+    }
+
+    [Fact]
     public async Task ApplicationStartupService_StartsReminderMonitoringWithoutToastInitialization()
     {
         var repository = await CreateRepositoryAsync();

@@ -478,6 +478,239 @@ public sealed class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncAsync_PullsGooglePopupReminderIntoLocalReminder()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        var settings = CreateSettings("work");
+        api.UpsertRemote("work", new Event
+        {
+            Id = "remote-popup",
+            Summary = "popup reminder",
+            Start = DateTimeEvent(2026, 1, 8, 9),
+            End = DateTimeEvent(2026, 1, 8, 10),
+            Status = "confirmed",
+            Reminders = new Event.RemindersData
+            {
+                UseDefault = false,
+                Overrides =
+                [
+                    new EventReminder { Method = "popup", Minutes = 30 },
+                    new EventReminder { Method = "popup", Minutes = 10 }
+                ]
+            }
+        });
+        var service = new GoogleCalendarSyncService(repository, api);
+
+        await service.SyncAsync(settings);
+
+        var stored = (await repository.LoadEventsAsync(
+            new DateTimeOffset(2026, 1, 8, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 1, 9, 0, 0, 0, TimeSpan.Zero))).Single();
+        Assert.Equal(10, stored.ReminderMinutesBeforeStart);
+        Assert.Equal([10, 30], stored.GoogleReminderMetadata!.PopupMinutes.Order().ToArray());
+    }
+
+    [Fact]
+    public async Task SyncAsync_PullsGoogleEmailOnlyReminderAsDiagnosticsMetadataOnly()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        var settings = CreateSettings("work");
+        api.UpsertRemote("work", new Event
+        {
+            Id = "remote-email",
+            Summary = "email reminder",
+            Start = DateTimeEvent(2026, 1, 8, 11),
+            End = DateTimeEvent(2026, 1, 8, 12),
+            Status = "confirmed",
+            Reminders = new Event.RemindersData
+            {
+                UseDefault = false,
+                Overrides = [new EventReminder { Method = "email", Minutes = 30 }]
+            }
+        });
+        var service = new GoogleCalendarSyncService(repository, api);
+
+        await service.SyncAsync(settings);
+
+        var stored = (await repository.LoadEventsAsync(
+            new DateTimeOffset(2026, 1, 8, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 1, 9, 0, 0, 0, TimeSpan.Zero))).Single();
+        Assert.Null(stored.ReminderMinutesBeforeStart);
+        Assert.True(stored.GoogleReminderMetadata!.HasEmailOnly);
+        Assert.Equal([30], stored.GoogleReminderMetadata.EmailMinutes);
+    }
+
+    [Fact]
+    public async Task SyncAsync_UsesGoogleDefaultPopupReminderWhenEventUsesDefaults()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        api.DefaultRemindersByCalendar["work"] =
+        [
+            new GoogleReminderOverride("email", 60),
+            new GoogleReminderOverride("popup", 15)
+        ];
+        var settings = CreateSettings("work");
+        api.UpsertRemote("work", new Event
+        {
+            Id = "remote-default",
+            Summary = "default reminder",
+            Start = DateTimeEvent(2026, 1, 8, 13),
+            End = DateTimeEvent(2026, 1, 8, 14),
+            Status = "confirmed",
+            Reminders = new Event.RemindersData { UseDefault = true }
+        });
+        var service = new GoogleCalendarSyncService(repository, api);
+
+        await service.SyncAsync(settings);
+
+        var stored = (await repository.LoadEventsAsync(
+            new DateTimeOffset(2026, 1, 8, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 1, 9, 0, 0, 0, TimeSpan.Zero))).Single();
+        Assert.Equal(15, stored.ReminderMinutesBeforeStart);
+        Assert.True(stored.GoogleReminderMetadata!.UseDefault);
+        Assert.Equal([15], stored.GoogleReminderMetadata.DefaultPopupMinutes);
+    }
+
+    [Fact]
+    public async Task SyncAsync_PushesLocalReminderWithoutEmailReminder()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        var settings = CreateSettings("work");
+        var local = new CalendarEvent
+        {
+            CalendarId = "work",
+            Title = "local reminder",
+            Start = new DateTimeOffset(2026, 1, 8, 15, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 1, 8, 16, 0, 0, TimeSpan.Zero),
+            ReminderMinutesBeforeStart = 10
+        };
+        await repository.SaveEventAsync(local);
+        var service = new GoogleCalendarSyncService(repository, api);
+
+        await service.SyncAsync(settings);
+
+        var remote = Assert.Single(api.EventsByCalendar["work"].Values);
+        Assert.False(remote.Reminders.UseDefault);
+        var reminder = Assert.Single(remote.Reminders.Overrides);
+        Assert.Equal("popup", reminder.Method);
+        Assert.Equal(10, reminder.Minutes);
+    }
+
+    [Fact]
+    public async Task SyncAsync_PushesNoReminderAsExplicitEmptyOverrides()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        var settings = CreateSettings("work");
+        var local = new CalendarEvent
+        {
+            CalendarId = "work",
+            Title = "local no reminder",
+            Start = new DateTimeOffset(2026, 1, 8, 17, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 1, 8, 18, 0, 0, TimeSpan.Zero)
+        };
+        await repository.SaveEventAsync(local);
+        var service = new GoogleCalendarSyncService(repository, api);
+
+        await service.SyncAsync(settings);
+
+        var remote = Assert.Single(api.EventsByCalendar["work"].Values);
+        Assert.False(remote.Reminders.UseDefault);
+        Assert.Empty(remote.Reminders.Overrides);
+    }
+
+    [Fact]
+    public async Task RefreshReminderMetadataAsync_UpdatesGoogleReminderMetadataWithoutFullPull()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        var settings = CreateSettings("work");
+        var local = new CalendarEvent
+        {
+            CalendarId = "work",
+            GoogleEventId = "remote-reminder-refresh",
+            Title = "refresh reminder",
+            Start = new DateTimeOffset(2026, 1, 8, 19, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 1, 8, 20, 0, 0, TimeSpan.Zero)
+        };
+        await repository.UpsertSyncedEventAsync(local);
+        api.UpsertRemote("work", new Event
+        {
+            Id = "remote-reminder-refresh",
+            Summary = "refresh reminder",
+            Start = DateTimeEvent(2026, 1, 8, 19),
+            End = DateTimeEvent(2026, 1, 8, 20),
+            Status = "confirmed",
+            Reminders = new Event.RemindersData
+            {
+                UseDefault = false,
+                Overrides = [new EventReminder { Method = "popup", Minutes = 20 }]
+            }
+        });
+        var service = new GoogleCalendarSyncService(repository, api);
+
+        var updated = await service.RefreshReminderMetadataAsync(
+            settings,
+            new DateTimeOffset(2026, 1, 8, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 1, 9, 0, 0, 0, TimeSpan.Zero));
+
+        var stored = await repository.FindEventByGoogleEventIdAsync("work", "remote-reminder-refresh");
+        Assert.Equal(1, updated);
+        Assert.Equal(20, stored!.ReminderMinutesBeforeStart);
+        Assert.Equal([20], stored.GoogleReminderMetadata!.PopupMinutes);
+    }
+
+    [Fact]
+    public async Task RefreshReminderMetadataAsync_PreservesDirtyLocalReminderMinutes()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        var settings = CreateSettings("work");
+        var local = new CalendarEvent
+        {
+            CalendarId = "work",
+            GoogleEventId = "remote-dirty-reminder",
+            Title = "dirty reminder",
+            Start = new DateTimeOffset(2026, 1, 8, 21, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 1, 8, 22, 0, 0, TimeSpan.Zero),
+            ReminderMinutesBeforeStart = 5
+        };
+        await repository.UpsertSyncedEventAsync(local);
+        local.ReminderMinutesBeforeStart = 10;
+        local.IsDirty = true;
+        await repository.SaveEventAsync(local);
+        api.UpsertRemote("work", new Event
+        {
+            Id = "remote-dirty-reminder",
+            Summary = "dirty reminder",
+            Start = DateTimeEvent(2026, 1, 8, 21),
+            End = DateTimeEvent(2026, 1, 8, 22),
+            Status = "confirmed",
+            Reminders = new Event.RemindersData
+            {
+                UseDefault = false,
+                Overrides = [new EventReminder { Method = "popup", Minutes = 30 }]
+            }
+        });
+        var service = new GoogleCalendarSyncService(repository, api);
+
+        var updated = await service.RefreshReminderMetadataAsync(
+            settings,
+            new DateTimeOffset(2026, 1, 8, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 1, 9, 0, 0, 0, TimeSpan.Zero));
+
+        var stored = await repository.FindEventByGoogleEventIdAsync("work", "remote-dirty-reminder");
+        Assert.Equal(1, updated);
+        Assert.True(stored!.IsDirty);
+        Assert.Equal(10, stored.ReminderMinutesBeforeStart);
+        Assert.Equal([30], stored.GoogleReminderMetadata!.PopupMinutes);
+    }
+
+    [Fact]
     public async Task SyncDirtyEventsAsync_UpdatesDescriptionOnStructurallyMatchingRemoteEvent()
     {
         var repository = await CreateRepositoryAsync();
@@ -784,6 +1017,7 @@ public sealed class GoogleCalendarSyncServiceTests
         private int _nextId = 1;
 
         public Dictionary<string, Dictionary<string, Event>> EventsByCalendar { get; } = new(StringComparer.Ordinal);
+        public Dictionary<string, IReadOnlyList<GoogleReminderOverride>> DefaultRemindersByCalendar { get; } = new(StringComparer.Ordinal);
         public List<string> Operations { get; } = [];
         public bool ThrowOnInsert { get; set; }
         public bool ThrowOnUpdate { get; set; }
@@ -805,7 +1039,13 @@ public sealed class GoogleCalendarSyncServiceTests
 
         public Task<IReadOnlyList<GoogleCalendarInfo>> ListCalendarsAsync(CancellationToken cancellationToken = default)
         {
-            IReadOnlyList<GoogleCalendarInfo> calendars = EventsByCalendar.Keys.Select(id => new GoogleCalendarInfo(id, id)).ToArray();
+            IReadOnlyList<GoogleCalendarInfo> calendars = EventsByCalendar.Keys
+                .Union(DefaultRemindersByCalendar.Keys, StringComparer.Ordinal)
+                .Select(id => new GoogleCalendarInfo(
+                    id,
+                    id,
+                    DefaultRemindersByCalendar.TryGetValue(id, out var reminders) ? reminders : null))
+                .ToArray();
             return Task.FromResult(calendars);
         }
 
@@ -928,7 +1168,16 @@ public sealed class GoogleCalendarSyncServiceTests
                 OriginalStartTime = Clone(source.OriginalStartTime),
                 RecurringEventId = source.RecurringEventId,
                 Recurrence = source.Recurrence?.ToArray(),
-                UpdatedDateTimeOffset = source.UpdatedDateTimeOffset
+                UpdatedDateTimeOffset = source.UpdatedDateTimeOffset,
+                Reminders = source.Reminders is null
+                    ? null
+                    : new Event.RemindersData
+                    {
+                        UseDefault = source.Reminders.UseDefault,
+                        Overrides = source.Reminders.Overrides?
+                            .Select(item => new EventReminder { Method = item.Method, Minutes = item.Minutes })
+                            .ToArray()
+                    }
             };
         }
 

@@ -113,6 +113,7 @@ public static class RecurrenceExpansionService
             IsDirty = source.IsDirty,
             IsTodoLike = source.IsTodoLike,
             ReminderMinutesBeforeStart = source.ReminderMinutesBeforeStart,
+            GoogleReminderMetadata = source.GoogleReminderMetadata,
             DisplayColor = source.DisplayColor,
             DisplayForegroundColor = source.DisplayForegroundColor,
             IsGeneratedOccurrence = source.IsGeneratedOccurrence

@@ -63,7 +63,8 @@ internal static class SyncDialogs
         Func<string, Task>? openDirtyItemAsync = null,
         Func<IReadOnlyList<string>, Task>? retryDirtyItemsAsync = null,
         Func<IReadOnlyList<string>, Task>? markDirtyItemsSyncedAsync = null,
-        Func<IReadOnlyList<string>, Task>? discardDirtyItemsAsync = null)
+        Func<IReadOnlyList<string>, Task>? discardDirtyItemsAsync = null,
+        Func<Task<int>>? refreshGoogleRemindersAsync = null)
     {
         var window = CreateOwnedDialog(owner, "Google同期診断", 820, 540);
         var panel = new DockPanel { Margin = new Thickness(12), LastChildFill = true };
@@ -83,6 +84,7 @@ internal static class SyncDialogs
         var retryFailures = new Button { Content = "失敗分を再同期", MinWidth = 116, Height = 28, Margin = new Thickness(0, 0, 8, 0), IsEnabled = retryFailuresAsync is not null && diagnostics.Failures.Any(item => !string.IsNullOrWhiteSpace(item.LocalId)) };
         var exportDirty = new Button { Content = "未同期CSV出力", MinWidth = 116, Height = 28, Margin = new Thickness(0, 0, 8, 0) };
         var exportLog = new Button { Content = "診断ログ出力", MinWidth = 116, Height = 28, Margin = new Thickness(0, 0, 8, 0) };
+        var refreshReminders = new Button { Content = "Google通知設定を再取得", MinWidth = 150, Height = 28, Margin = new Thickness(0, 0, 8, 0), IsEnabled = refreshGoogleRemindersAsync is not null };
         retryFailures.Click += async (_, _) =>
         {
             if (retryFailuresAsync is not null)
@@ -100,6 +102,15 @@ internal static class SyncDialogs
                 window.Close();
             }
         };
+        refreshReminders.Click += async (_, _) =>
+        {
+            if (refreshGoogleRemindersAsync is not null)
+            {
+                var updated = await refreshGoogleRemindersAsync();
+                MessageBox.Show(owner, $"Google通知設定を再取得しました: {updated} 件", "Google通知設定", MessageBoxButton.OK, MessageBoxImage.Information);
+                window.Close();
+            }
+        };
         exportDirty.Click += (_, _) => ExportText(owner, "unsynced.csv", BuildDirtyCsv(diagnostics.DirtyItems));
         exportLog.Click += (_, _) => ExportText(owner, "sync-diagnostics.txt", BuildDiagnosticsLog(diagnostics));
         clear.Click += async (_, _) =>
@@ -109,6 +120,7 @@ internal static class SyncDialogs
         };
         close.Click += (_, _) => window.Close();
         buttons.Children.Add(retryFailures);
+        buttons.Children.Add(refreshReminders);
         buttons.Children.Add(exportDirty);
         buttons.Children.Add(exportLog);
         buttons.Children.Add(clear);

@@ -24,6 +24,7 @@ public sealed class CalendarEvent
     public string? DirtyFields { get; set; }
     public bool IsTodoLike { get; set; }
     public int? ReminderMinutesBeforeStart { get; set; }
+    public GoogleReminderMetadata? GoogleReminderMetadata { get; set; }
     public string DisplayColor { get; set; } = "#FFFFFF";
     public string DisplayForegroundColor { get; set; } = "#111827";
     public string ToolTipText { get; set; } = "";

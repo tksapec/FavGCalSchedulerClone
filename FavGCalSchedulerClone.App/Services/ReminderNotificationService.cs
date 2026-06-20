@@ -162,12 +162,21 @@ public sealed class ReminderNotificationService : IDisposable
 
             foreach (var calendarEvent in expandedEvents)
             {
+                var googleReminderReason = GetGoogleReminderDiagnosticReason(calendarEvent);
                 if (calendarEvent.ReminderMinutesBeforeStart is not int reminderMinutes)
                 {
                     noReminderCount++;
-                    if (includeAllCandidates)
+                    if (includeAllCandidates || calendarEvent.GoogleReminderMetadata?.HasGoogleReminder == true)
                     {
-                        candidateDiagnostics.Add(CreateCandidateDiagnostic(calendarEvent, current, null, null, false, false, null, "通知設定なし"));
+                        candidateDiagnostics.Add(CreateCandidateDiagnostic(
+                            calendarEvent,
+                            current,
+                            null,
+                            null,
+                            false,
+                            false,
+                            null,
+                            googleReminderReason ?? "通知設定なし"));
                     }
                     continue;
                 }
@@ -200,7 +209,7 @@ public sealed class ReminderNotificationService : IDisposable
                 }
                 else if (!isDue)
                 {
-                    reason = "通知時刻未到達";
+                    reason = googleReminderReason ?? "通知時刻未到達";
                 }
                 else
                 {
@@ -437,7 +446,94 @@ public sealed class ReminderNotificationService : IDisposable
     {
         return new ReminderCandidateDiagnostic(
             calendarEvent.Id, calendarEvent.Title, notification?.OccurrenceKey ?? "", reminderMinutes,
-            calendarEvent.Start, notification?.RemindAt, current, isDue, isFired, snoozedUntil, reason);
+            calendarEvent.Start, notification?.RemindAt, current, isDue, isFired, snoozedUntil, reason,
+            calendarEvent.GoogleReminderMetadata?.UseDefault,
+            FormatMinutes(calendarEvent.GoogleReminderMetadata?.PopupMinutes),
+            FormatMinutes(calendarEvent.GoogleReminderMetadata?.EmailMinutes),
+            FormatDefaultReminders(calendarEvent.GoogleReminderMetadata),
+            calendarEvent.GoogleReminderMetadata?.AdoptedReminderMinutes,
+            GetReminderDifferenceText(calendarEvent));
+    }
+
+    private static string? GetGoogleReminderDiagnosticReason(CalendarEvent calendarEvent)
+    {
+        var metadata = calendarEvent.GoogleReminderMetadata;
+        if (metadata is null || !metadata.HasGoogleReminder)
+        {
+            return null;
+        }
+
+        if (metadata.HasEmailOnly)
+        {
+            return "Googleメール通知のみ（本ツールのポップアップ通知対象外）";
+        }
+
+        if (metadata.AdoptedReminderMinutes != calendarEvent.ReminderMinutesBeforeStart)
+        {
+            return "通知設定差分あり";
+        }
+
+        if (metadata.UseDefault == true)
+        {
+            return "Google既定通知あり";
+        }
+
+        return null;
+    }
+
+    private static string GetReminderDifferenceText(CalendarEvent calendarEvent)
+    {
+        var metadata = calendarEvent.GoogleReminderMetadata;
+        if (metadata is null || !metadata.HasGoogleReminder)
+        {
+            return "";
+        }
+
+        if (metadata.HasEmailOnly)
+        {
+            return "Googleメール通知のみ";
+        }
+
+        if (metadata.AdoptedReminderMinutes != calendarEvent.ReminderMinutesBeforeStart)
+        {
+            return "通知設定差分あり";
+        }
+
+        return "";
+    }
+
+    private static string FormatDefaultReminders(GoogleReminderMetadata? metadata)
+    {
+        if (metadata is null)
+        {
+            return "";
+        }
+
+        var parts = new List<string>();
+        var popup = FormatMinutes(metadata.DefaultPopupMinutes);
+        if (!string.IsNullOrWhiteSpace(popup))
+        {
+            parts.Add($"popup {popup}");
+        }
+
+        var email = FormatMinutes(metadata.DefaultEmailMinutes);
+        if (!string.IsNullOrWhiteSpace(email))
+        {
+            parts.Add($"email {email}");
+        }
+
+        if (metadata.UseDefault == true && parts.Count == 0)
+        {
+            return "使用（分数未取得）";
+        }
+
+        return string.Join(", ", parts);
+    }
+
+    private static string FormatMinutes(IEnumerable<int>? values)
+    {
+        var minutes = values?.Distinct().Order().ToArray() ?? [];
+        return minutes.Length == 0 ? "" : string.Join(", ", minutes.Select(item => $"{item}分前"));
     }
 
     private async Task SaveDiagnosticsAsync(bool force = false, DateTimeOffset? current = null)

@@ -34,4 +34,10 @@ public sealed record ReminderCandidateDiagnostic(
     bool IsFired,
     DateTimeOffset? SnoozedUntil,
     string Reason,
+    bool? GoogleReminderUseDefault = null,
+    string GooglePopupReminderText = "",
+    string GoogleEmailReminderText = "",
+    string GoogleDefaultReminderText = "",
+    int? AdoptedGoogleReminderMinutes = null,
+    string ReminderDifferenceText = "",
     string? ErrorMessage = null);
