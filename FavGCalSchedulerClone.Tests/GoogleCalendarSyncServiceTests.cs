@@ -711,6 +711,41 @@ public sealed class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task RefreshReminderMetadataAsync_UpsertsMissingRemoteEvents()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        var settings = CreateSettings("work");
+        api.UpsertRemote("work", new Event
+        {
+            Id = "remote-reminder-new",
+            Summary = "remote reminder new",
+            Start = DateTimeEvent(2026, 1, 8, 19),
+            End = DateTimeEvent(2026, 1, 8, 20),
+            Status = "confirmed",
+            Reminders = new Event.RemindersData
+            {
+                UseDefault = false,
+                Overrides = [new EventReminder { Method = "popup", Minutes = 15 }]
+            }
+        });
+        var service = new GoogleCalendarSyncService(repository, api);
+
+        var updated = await service.RefreshReminderMetadataAsync(
+            settings,
+            new DateTimeOffset(2026, 1, 8, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 1, 9, 0, 0, 0, TimeSpan.Zero));
+
+        var stored = await repository.FindEventByGoogleEventIdAsync("work", "remote-reminder-new");
+        Assert.Equal(1, updated);
+        Assert.NotNull(stored);
+        Assert.Equal("remote reminder new", stored.Title);
+        Assert.False(stored.IsDirty);
+        Assert.Equal(15, stored.ReminderMinutesBeforeStart);
+        Assert.Equal([15], stored.GoogleReminderMetadata!.PopupMinutes);
+    }
+
+    [Fact]
     public async Task SyncDirtyEventsAsync_UpdatesDescriptionOnStructurallyMatchingRemoteEvent()
     {
         var repository = await CreateRepositoryAsync();
@@ -987,6 +1022,71 @@ public sealed class GoogleCalendarSyncServiceTests
         Assert.Equal("カレンダー再読み込み中...", await observedStatus.Task.WaitAsync(TimeSpan.FromSeconds(5)));
     }
 
+    [Fact]
+    public async Task MainViewModel_ManualSyncRefreshesGoogleReminderMetadataAfterSync()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        api.UpsertRemote("primary", new Event
+        {
+            Id = "remote-manual-reminder-refresh",
+            Summary = "manual reminder refresh",
+            Start = DateTimeEvent(2026, 1, 8, 19),
+            End = DateTimeEvent(2026, 1, 8, 20),
+            Status = "confirmed",
+            Reminders = new Event.RemindersData
+            {
+                UseDefault = false,
+                Overrides = [new EventReminder { Method = "popup", Minutes = 25 }]
+            }
+        });
+        await repository.SaveSettingsAsync(CreateSettings("primary"));
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository, api));
+        await viewModel.InitializeAsync();
+
+        await viewModel.SynchronizeManuallyAsync();
+
+        Assert.Contains(api.ListRequests, request =>
+            request.CalendarId == "primary"
+            && request.TimeMax is not null
+            && request.ShowDeleted == false);
+        Assert.Contains("Google通知設定再取得", viewModel.Status);
+        Assert.Contains("1", viewModel.Status);
+    }
+
+    [Fact]
+    public async Task MainViewModel_AutomaticSyncDoesNotRefreshGoogleReminderMetadataEveryRun()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        api.UpsertRemote("primary", new Event
+        {
+            Id = "remote-auto-reminder-refresh",
+            Summary = "auto reminder refresh",
+            Start = DateTimeEvent(2026, 1, 8, 19),
+            End = DateTimeEvent(2026, 1, 8, 20),
+            Status = "confirmed",
+            Reminders = new Event.RemindersData
+            {
+                UseDefault = false,
+                Overrides = [new EventReminder { Method = "popup", Minutes = 25 }]
+            }
+        });
+        var settings = CreateSettings("primary");
+        settings.AutomaticSyncIntervalMinutes = 1;
+        await repository.SaveSettingsAsync(settings);
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository, api));
+        await viewModel.InitializeAsync();
+        api.ListRequests.Clear();
+
+        await viewModel.RunAutomaticSyncIfDueAsync();
+
+        Assert.DoesNotContain(api.ListRequests, request =>
+            request.CalendarId == "primary"
+            && request.TimeMax is not null
+            && request.ShowDeleted == false);
+    }
+
     private static async Task<CalendarRepository> CreateRepositoryAsync()
     {
         var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
@@ -1019,6 +1119,7 @@ public sealed class GoogleCalendarSyncServiceTests
         public Dictionary<string, Dictionary<string, Event>> EventsByCalendar { get; } = new(StringComparer.Ordinal);
         public Dictionary<string, IReadOnlyList<GoogleReminderOverride>> DefaultRemindersByCalendar { get; } = new(StringComparer.Ordinal);
         public List<string> Operations { get; } = [];
+        public List<GoogleEventListRequest> ListRequests { get; } = [];
         public bool ThrowOnInsert { get; set; }
         public bool ThrowOnUpdate { get; set; }
         public bool ThrowOnList { get; set; }
@@ -1098,6 +1199,7 @@ public sealed class GoogleCalendarSyncServiceTests
 
         public async Task<GoogleEventPage> ListEventsAsync(GoogleEventListRequest request, CancellationToken cancellationToken = default)
         {
+            ListRequests.Add(request);
             if (ThrowOnList)
             {
                 throw new InvalidOperationException("list failed");

@@ -116,7 +116,15 @@ public sealed class GoogleCalendarSyncService
         return _googleCalendarApi.ClearTokensAsync();
     }
 
-    public async Task<SyncResult> SyncAsync(AppSettings settings, CancellationToken cancellationToken = default)
+    public Task<SyncResult> SyncAsync(AppSettings settings, CancellationToken cancellationToken = default)
+    {
+        return SyncAsync(settings, refreshReminderMetadataAfterSync: false, cancellationToken);
+    }
+
+    public async Task<SyncResult> SyncAsync(
+        AppSettings settings,
+        bool refreshReminderMetadataAfterSync,
+        CancellationToken cancellationToken = default)
     {
         var startedAt = DateTimeOffset.Now;
         EnsureOAuthSettings(settings);
@@ -147,6 +155,43 @@ public sealed class GoogleCalendarSyncService
             failed += pull.Failed;
         }
 
+        var reminderRefreshMessage = string.Empty;
+        if (refreshReminderMetadataAfterSync)
+        {
+            try
+            {
+                var now = DateTimeOffset.Now;
+                var reminderRefresh = await RefreshRemoteEventsAndReminderMetadataCoreAsync(
+                    client,
+                    reminderDefaults,
+                    settings,
+                    now.AddDays(-1),
+                    now.AddDays(30),
+                    cancellationToken);
+                reminderRefreshMessage = $" / Google通知設定再取得: {reminderRefresh.TotalAffected} 件";
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Debug.WriteLine(ex);
+                reminderRefreshMessage = $" / Google通知設定再取得失敗: {ex.Message}";
+                failures.Add(new SyncFailureDiagnostic(
+                    DateTimeOffset.Now,
+                    "Google通知設定再取得",
+                    DateTimeOffset.Now,
+                    string.Empty,
+                    string.Empty,
+                    null,
+                    "Google通知設定再取得",
+                    "ReminderMetadataRefresh",
+                    ex.Message,
+                    null,
+                    null,
+                    ex.Message,
+                    Direction: "Pull",
+                    FailureCategory: "ReminderMetadataRefresh"));
+            }
+        }
+
         var result = new SyncResult(
             pushed,
             pulled,
@@ -158,6 +203,11 @@ public sealed class GoogleCalendarSyncService
             startedAt,
             DateTimeOffset.Now,
             $"送信 {pushed} / 取得 {pulled} / スキップ {skipped} / 競合 {conflicts} / 失敗 {failed} / 削除 {deleted} / 再作成 {recreated}");
+        if (!string.IsNullOrWhiteSpace(reminderRefreshMessage))
+        {
+            result = result with { Message = result.Message + reminderRefreshMessage };
+        }
+
         await SaveFailureDiagnosticsAsync(failures);
         await SaveSyncResultAsync(result, settings.EnableSyncDiagnostics);
         return result;
@@ -323,11 +373,40 @@ public sealed class GoogleCalendarSyncService
         DateTimeOffset timeMax,
         CancellationToken cancellationToken = default)
     {
+        var result = await RefreshRemoteEventsAndReminderMetadataAsync(settings, timeMin, timeMax, cancellationToken);
+        return result.TotalAffected;
+    }
+
+    public async Task<GoogleReminderRefreshResult> RefreshRemoteEventsAndReminderMetadataAsync(
+        AppSettings settings,
+        DateTimeOffset timeMin,
+        DateTimeOffset timeMax,
+        CancellationToken cancellationToken = default)
+    {
         EnsureOAuthSettings(settings);
 
         var client = await _googleCalendarApi.CreateClientAsync(settings.OAuthClientJsonPath!, cancellationToken);
         var reminderDefaults = await LoadCalendarReminderDefaultsAsync(client, cancellationToken);
+        return await RefreshRemoteEventsAndReminderMetadataCoreAsync(
+            client,
+            reminderDefaults,
+            settings,
+            timeMin,
+            timeMax,
+            cancellationToken);
+    }
+
+    private async Task<GoogleReminderRefreshResult> RefreshRemoteEventsAndReminderMetadataCoreAsync(
+        IGoogleCalendarClient client,
+        IReadOnlyDictionary<string, IReadOnlyList<GoogleReminderOverride>> reminderDefaults,
+        AppSettings settings,
+        DateTimeOffset timeMin,
+        DateTimeOffset timeMax,
+        CancellationToken cancellationToken)
+    {
         var updated = 0;
+        var upserted = 0;
+        var skipped = 0;
 
         foreach (var calendarId in await ResolveTargetCalendarIdsAsync(settings))
         {
@@ -351,6 +430,7 @@ public sealed class GoogleCalendarSyncService
                     if (string.IsNullOrWhiteSpace(googleEvent.Id)
                         || string.Equals(googleEvent.Status, "cancelled", StringComparison.OrdinalIgnoreCase))
                     {
+                        skipped++;
                         continue;
                     }
 
@@ -358,13 +438,23 @@ public sealed class GoogleCalendarSyncService
                         googleEvent,
                         calendarId,
                         GetDefaultReminders(reminderDefaults, calendarId));
-                    if (await _repository.UpdateGoogleReminderMetadataAsync(
+                    var local = await _repository.FindEventByGoogleEventIdAsync(calendarId, googleEvent.Id);
+                    if (local is null)
+                    {
+                        await _repository.UpsertSyncedEventAsync(mapped);
+                        upserted++;
+                    }
+                    else if (await _repository.UpdateGoogleReminderMetadataAsync(
                             calendarId,
                             googleEvent.Id,
                             mapped.ReminderMinutesBeforeStart,
                             mapped.GoogleReminderMetadata))
                     {
                         updated++;
+                    }
+                    else
+                    {
+                        skipped++;
                     }
                 }
 
@@ -373,8 +463,9 @@ public sealed class GoogleCalendarSyncService
             while (!string.IsNullOrWhiteSpace(pageToken));
         }
 
-        Debug.WriteLine($"RefreshReminderMetadata updated={updated} range={timeMin:O}..{timeMax:O}");
-        return updated;
+        var result = new GoogleReminderRefreshResult(updated, upserted, skipped);
+        Debug.WriteLine($"RefreshReminderMetadata updated={updated} upserted={upserted} skipped={skipped} range={timeMin:O}..{timeMax:O}");
+        return result;
     }
 
     public async Task<SyncPreview> PreviewAsync(AppSettings settings, CancellationToken cancellationToken = default)
@@ -1171,6 +1262,11 @@ public enum GoogleNotFoundSyncAction
 
 internal sealed record SyncPushSummary(int Pushed, int Failed, int Deleted, int Recreated);
 internal sealed record SyncPullSummary(int Pulled, int Skipped, int Conflicts, int Failed);
+public sealed record GoogleReminderRefreshResult(int UpdatedExisting, int UpsertedMissing, int Skipped)
+{
+    public int TotalAffected => UpdatedExisting + UpsertedMissing;
+}
+
 internal sealed record SyncPushOutcome(bool Success, bool Deleted, bool Recreated)
 {
     public static SyncPushOutcome Pushed { get; } = new(true, false, false);

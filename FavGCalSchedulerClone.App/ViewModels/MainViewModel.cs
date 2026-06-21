@@ -2790,7 +2790,9 @@ public sealed class MainViewModel : ObservableObject
 
             Status = "Googleカレンダーと同期中...";
             IsSynchronizing = true;
-            var result = await _syncService.SyncAsync(_settings);
+            var result = await _syncService.SyncAsync(
+                _settings,
+                refreshReminderMetadataAfterSync: invocationKind == SyncInvocationKind.Manual);
             var finishedAt = DateTimeOffset.Now;
             if (invocationKind == SyncInvocationKind.Manual)
             {
@@ -2817,7 +2819,7 @@ public sealed class MainViewModel : ObservableObject
                 return result;
             }
 
-            Status = $"同期が完了しました: {result.SummaryText} / 未同期残数 {remaining}";
+            Status = $"同期が完了しました: {result.Message} / 未同期残数 {remaining}";
             if (result.Failed > 0 || result.Conflicts > 0 || remaining > 0)
             {
                 Status += "。Google同期診断を確認してください。";
