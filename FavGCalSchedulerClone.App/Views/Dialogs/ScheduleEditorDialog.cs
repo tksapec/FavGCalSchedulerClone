@@ -103,12 +103,31 @@ internal static class ScheduleEditorDialog
         dayCount.LostFocus += (_, _) => UpdateEndDateFromCount();
         UpdateDayCount();
 
+        void ApplyDateShortcut(DateTime date)
+        {
+            startDate.SelectedDate = date.Date;
+            endDate.SelectedDate = date.Date;
+            dayCount.Text = "1";
+        }
+
+        void ApplyRelativeTimeShortcut(TimeSpan offset, TimeSpan duration)
+        {
+            var start = DateTime.Now.Add(offset);
+            startDate.SelectedDate = start.Date;
+            endDate.SelectedDate = start.Date;
+            startTime.Text = start.ToString("HH:mm", CultureInfo.InvariantCulture);
+            endTime.Text = start.Add(duration).ToString("HH:mm", CultureInfo.InvariantCulture);
+            isAllDay.IsChecked = false;
+            dayCount.Text = "1";
+        }
+
         var timeGroup = new GroupBox { Header = "開始時間／終了時間", Margin = new Thickness(0, 0, ui.X(10), ui.Y(10)), Padding = ui.Thickness(14, 14, 14, 6) };
         var timeGrid = new Grid();
         timeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ui.X(230)) });
         timeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ui.X(28)) });
         timeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ui.X(230)) });
         timeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        timeGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         timeGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         timeGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         timeGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -132,12 +151,33 @@ internal static class ScheduleEditorDialog
         Grid.SetRow(isAllDay, 2);
         Grid.SetColumn(isAllDay, 3);
         timeGrid.Children.Add(isAllDay);
+        var quickTimePanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, ui.Y(2), 0, ui.Y(8)) };
+        quickTimePanel.Children.Add(ShortcutButton("今日", () => ApplyDateShortcut(DateTime.Today)));
+        quickTimePanel.Children.Add(ShortcutButton("明日", () => ApplyDateShortcut(DateTime.Today.AddDays(1))));
+        quickTimePanel.Children.Add(ShortcutButton("来週", () => ApplyDateShortcut(DateTime.Today.AddDays(7))));
+        quickTimePanel.Children.Add(ShortcutButton("30分後", () => ApplyRelativeTimeShortcut(TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(30))));
+        quickTimePanel.Children.Add(ShortcutButton("1時間", () => ApplyRelativeTimeShortcut(TimeSpan.Zero, TimeSpan.FromHours(1))));
+        Grid.SetRow(quickTimePanel, 3);
+        Grid.SetColumnSpan(quickTimePanel, 4);
+        timeGrid.Children.Add(quickTimePanel);
         timeGroup.Content = timeGrid;
 
         var alarmGroup = new GroupBox { Header = "アラーム", Margin = new Thickness(0, 0, 0, ui.Y(10)), Padding = ui.Thickness(14, 14, 14, 6) };
         var alarmGrid = new Grid();
         alarmGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        alarmGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        alarmGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         ui.AddLabeledField(alarmGrid, 0, 0, "通知時間", reminder);
+        var quickReminderPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, ui.Y(8)) };
+        quickReminderPanel.Children.Add(ShortcutButton("なし", () => reminder.SelectedValue = null));
+        quickReminderPanel.Children.Add(ShortcutButton("開始時", () => reminder.SelectedValue = 0));
+        quickReminderPanel.Children.Add(ShortcutButton("5分前", () => reminder.SelectedValue = 5));
+        quickReminderPanel.Children.Add(ShortcutButton("10分前", () => reminder.SelectedValue = 10));
+        quickReminderPanel.Children.Add(ShortcutButton("30分前", () => reminder.SelectedValue = 30));
+        quickReminderPanel.Children.Add(ShortcutButton("1時間前", () => reminder.SelectedValue = 60));
+        Grid.SetRow(quickReminderPanel, 1);
+        Grid.SetColumn(quickReminderPanel, 0);
+        alarmGrid.Children.Add(quickReminderPanel);
         alarmGroup.Content = alarmGrid;
 
         var upper = new Grid();
@@ -218,6 +258,20 @@ internal static class ScheduleEditorDialog
         };
         combo.LostKeyboardFocus += (_, _) => combo.Text = NormalizeTimeText(combo.Text);
         return combo;
+    }
+
+    private static Button ShortcutButton(string text, Action action)
+    {
+        var button = new Button
+        {
+            Content = text,
+            MinWidth = 54,
+            Height = 24,
+            Padding = new Thickness(6, 0, 6, 0),
+            Margin = new Thickness(0, 0, 4, 0)
+        };
+        button.Click += (_, _) => action();
+        return button;
     }
 
     internal static string NormalizeTimeText(string? value)

@@ -10,6 +10,7 @@ public sealed class CalendarDay : INotifyPropertyChanged
     private bool _isDropTarget;
     private bool _isHoliday;
     private bool _isWorkdayOverride;
+    private int _hiddenEventCount;
 
     public DateTime Date
     {
@@ -79,6 +80,26 @@ public sealed class CalendarDay : INotifyPropertyChanged
     }
     public ObservableCollection<CalendarEvent> Events { get; } = [];
     public ObservableCollection<CalendarEventSegment> Segments { get; } = [];
+    public int HiddenEventCount
+    {
+        get => _hiddenEventCount;
+        set
+        {
+            if (_hiddenEventCount == value)
+            {
+                return;
+            }
+
+            _hiddenEventCount = Math.Max(0, value);
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HiddenEventCount)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasHiddenEvents)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HiddenEventText)));
+        }
+    }
+
+    public bool HasHiddenEvents => HiddenEventCount > 0;
+    public string HiddenEventText => HiddenEventCount > 0 ? $"他 {HiddenEventCount} 件" : "";
+
     public bool IsDropTarget
     {
         get => _isDropTarget;

@@ -12,11 +12,13 @@ internal static class ReminderHistoryDialog
         Window owner,
         Func<Task<(IReadOnlyList<ReminderHistoryItem> History, ReminderMonitoringSnapshot Diagnostics)>> loadAsync,
         Func<Task> checkNowAsync,
+        Func<Task> createTwoMinuteTestEventAsync,
         Func<ReminderHistoryItem, Task> openAsync)
     {
         var historyItems = new ObservableCollection<ReminderHistoryItem>();
         var candidateItems = new ObservableCollection<ReminderCandidateDiagnostic>();
         var status = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10) };
+        var reasonSummary = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10), FontWeight = FontWeights.SemiBold };
         var window = new Window
         {
             Owner = owner,
@@ -31,15 +33,19 @@ internal static class ReminderHistoryDialog
         window.Content = root;
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0) };
+        var createTest = new Button { Content = "2分後テスト予定を作成", MinWidth = 160, Height = 30, Margin = new Thickness(0, 0, 8, 0) };
         var checkNow = new Button { Content = "通知判定を今すぐ実行", MinWidth = 160, Height = 30, Margin = new Thickness(0, 0, 8, 0) };
         var close = new Button { Content = "閉じる", MinWidth = 96, Height = 30 };
         close.Click += (_, _) => window.Close();
+        buttons.Children.Add(createTest);
         buttons.Children.Add(checkNow);
         buttons.Children.Add(close);
         DockPanel.SetDock(buttons, Dock.Bottom);
         root.Children.Add(buttons);
         DockPanel.SetDock(status, Dock.Top);
         root.Children.Add(status);
+        DockPanel.SetDock(reasonSummary, Dock.Top);
+        root.Children.Add(reasonSummary);
 
         var historyGrid = CreateHistoryGrid(historyItems, openAsync, window);
         var candidateGrid = CreateCandidateGrid(candidateItems);
@@ -56,6 +62,7 @@ internal static class ReminderHistoryDialog
             candidateItems.Clear();
             foreach (var item in data.Diagnostics.Candidates) candidateItems.Add(item);
             status.Text = FormatStatus(data.Diagnostics);
+            reasonSummary.Text = FormatReasonSummary(data.Diagnostics);
         }
 
         checkNow.Click += async (_, _) =>
@@ -69,6 +76,20 @@ internal static class ReminderHistoryDialog
             finally
             {
                 checkNow.IsEnabled = true;
+            }
+        };
+
+        createTest.Click += async (_, _) =>
+        {
+            createTest.IsEnabled = false;
+            try
+            {
+                await createTwoMinuteTestEventAsync();
+                await ReloadAsync();
+            }
+            finally
+            {
+                createTest.IsEnabled = true;
             }
         };
 
@@ -116,6 +137,22 @@ internal static class ReminderHistoryDialog
         grid.Columns.Add(new DataGridTextColumn { Header = "スヌーズ期限", Binding = new Binding(nameof(ReminderCandidateDiagnostic.SnoozedUntil)) { StringFormat = "yyyy/MM/dd HH:mm:ss" }, Width = 150 });
         grid.Columns.Add(new DataGridTextColumn { Header = "OccurrenceKey", Binding = new Binding(nameof(ReminderCandidateDiagnostic.OccurrenceKey)), Width = 240 });
         return grid;
+    }
+
+    private static string FormatReasonSummary(ReminderMonitoringSnapshot value)
+    {
+        if (value.Candidates.Count == 0)
+        {
+            return "通知候補はありません。手動判定を実行すると詳細候補を確認できます。";
+        }
+
+        var reasons = value.Candidates
+            .GroupBy(item => string.IsNullOrWhiteSpace(item.Reason) ? "理由なし" : item.Reason)
+            .OrderByDescending(group => group.Count())
+            .ThenBy(group => group.Key, StringComparer.CurrentCulture)
+            .Take(4)
+            .Select(group => $"{group.Key}: {group.Count()}件");
+        return "通知されない理由サマリー: " + string.Join(" / ", reasons);
     }
 
     private static string FormatStatus(ReminderMonitoringSnapshot value)

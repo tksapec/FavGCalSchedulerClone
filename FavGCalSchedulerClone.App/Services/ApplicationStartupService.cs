@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Threading;
+using FavGCalSchedulerClone.App;
 using FavGCalSchedulerClone.App.ViewModels;
 
 namespace FavGCalSchedulerClone.App.Services;
@@ -45,6 +46,10 @@ public sealed class ApplicationStartupService : IApplicationStartupService, IDis
         try
         {
             _automaticSyncTimer.Start();
+            if (owner is MainWindow mainWindow)
+            {
+                mainWindow.StartOperationalStatusRefresh();
+            }
         }
         catch (Exception ex)
         {

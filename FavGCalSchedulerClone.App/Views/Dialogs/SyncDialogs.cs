@@ -42,7 +42,8 @@ internal static class SyncDialogs
             CanUserAddRows = false,
             IsReadOnly = true,
             HeadersVisibility = DataGridHeadersVisibility.Column,
-            RowHeight = 24
+            RowHeight = 24,
+            RowStyle = CreatePreviewRowStyle()
         };
         grid.Columns.Add(new DataGridTextColumn { Header = "種別", Binding = new Binding(nameof(SyncPreviewItem.Kind)), Width = 90 });
         grid.Columns.Add(new DataGridTextColumn { Header = "カレンダー", Binding = new Binding(nameof(SyncPreviewItem.CalendarId)), Width = 120 });
@@ -250,6 +251,17 @@ internal static class SyncDialogs
         panel.Children.Add(tabs);
 
         window.ShowDialog();
+    }
+
+    private static Style CreatePreviewRowStyle()
+    {
+        var style = new Style(typeof(DataGridRow));
+        style.Triggers.Add(new DataTrigger { Binding = new Binding(nameof(SyncPreviewItem.Kind)), Value = "push", Setters = { new Setter(Control.BackgroundProperty, System.Windows.Media.Brushes.Honeydew) } });
+        style.Triggers.Add(new DataTrigger { Binding = new Binding(nameof(SyncPreviewItem.Kind)), Value = "pull", Setters = { new Setter(Control.BackgroundProperty, System.Windows.Media.Brushes.AliceBlue) } });
+        style.Triggers.Add(new DataTrigger { Binding = new Binding(nameof(SyncPreviewItem.Kind)), Value = "delete", Setters = { new Setter(Control.BackgroundProperty, System.Windows.Media.Brushes.MistyRose) } });
+        style.Triggers.Add(new DataTrigger { Binding = new Binding(nameof(SyncPreviewItem.Kind)), Value = "remote-delete", Setters = { new Setter(Control.BackgroundProperty, System.Windows.Media.Brushes.MistyRose) } });
+        style.Triggers.Add(new DataTrigger { Binding = new Binding(nameof(SyncPreviewItem.Kind)), Value = "error", Setters = { new Setter(Control.BackgroundProperty, System.Windows.Media.Brushes.LemonChiffon) } });
+        return style;
     }
 
     private static Window CreateOwnedDialog(Window owner, string title, double width, double height) =>

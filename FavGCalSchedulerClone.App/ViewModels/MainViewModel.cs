@@ -52,6 +52,8 @@ public sealed class MainViewModel : ObservableObject
     private IReadOnlyList<string> _scheduleLocationHistory = [];
     private int _syncInProgress;
     private int _syncRerunRequested;
+    private int _calendarSelectionInProgress;
+    private int _calendarSelectionRerunRequested;
     private bool _isSynchronizing;
     private LabelClipboardItem? _labelClipboard;
     private Func<SyncPreview, Task<bool>>? _confirmManualSyncPreviewAsync;
@@ -69,6 +71,10 @@ public sealed class MainViewModel : ObservableObject
     private Func<Task>? _showReminderHistoryAsync;
     private Func<Task>? _showAboutAsync;
     private Func<Task>? _showMonthJumpAsync;
+    private string _syncStatusText = "同期: 未確認";
+    private string _reminderStatusText = "通知監視: 未確認";
+    private string _lastErrorStatusText = "";
+    private TodoQuickFilter _todoQuickFilter = TodoQuickFilter.All;
 
     public MainViewModel(CalendarRepository repository, GoogleCalendarSyncService syncService)
         : this(repository, syncService, new BackupService(), new CalendarCsvService(), new FavGCalSchedulerImportService(repository))
@@ -101,6 +107,8 @@ public sealed class MainViewModel : ObservableObject
         DeleteEventCommand = CreateAsyncCommand(() => DeleteEventWithRecurrenceAsync(null), () => SelectedEvent is not null);
         MarkSelectedTodoDoneCommand = CreateAsyncCommand(MarkSelectedTodoDoneAsync, () => SelectedEvent?.IsTodoLike == true && !SelectedEvent.IsTodoDone);
         SyncCommand = CreateAsyncCommand(SynchronizeManuallyWithPreviewAsync);
+        SyncDirtyCommand = CreateAsyncCommand(SynchronizeDirtyOnlyAsync);
+        RefreshGoogleRemindersCommand = CreateAsyncCommand(async () => await RefreshGoogleReminderMetadataAsync());
         ReloadCalendarListCommand = CreateAsyncCommand(ReloadAvailableCalendarsAsync);
         BrowseOAuthClientCommand = CreateAsyncCommand(BrowseOAuthClientAsync);
         AuthorizeCommand = CreateAsyncCommand(AuthorizeAsync);
@@ -120,6 +128,15 @@ public sealed class MainViewModel : ObservableObject
         ShowReminderHistoryCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_showReminderHistoryAsync));
         ShowAboutCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_showAboutAsync));
         ShowMonthJumpCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_showMonthJumpAsync));
+        ShowAllTodosCommand = CreateAsyncCommand(() => SetTodoQuickFilterAsync(TodoQuickFilter.All));
+        ShowTodayTodosCommand = CreateAsyncCommand(() => SetTodoQuickFilterAsync(TodoQuickFilter.Today));
+        ShowOverdueTodosCommand = CreateAsyncCommand(() => SetTodoQuickFilterAsync(TodoQuickFilter.Overdue));
+        ShowThisWeekTodosCommand = CreateAsyncCommand(() => SetTodoQuickFilterAsync(TodoQuickFilter.ThisWeek));
+        ShowHighPriorityTodosCommand = CreateAsyncCommand(() => SetTodoQuickFilterAsync(TodoQuickFilter.HighPriority));
+        IncreaseSelectedTodoProgressCommand = CreateAsyncCommand(() => UpdateSelectedTodoAsync(progressDelta: 10), () => SelectedEvent?.IsTodoLike == true && !SelectedEvent.IsTodoDone);
+        SetSelectedTodoPriorityACommand = CreateAsyncCommand(() => UpdateSelectedTodoAsync(priority: "A"), () => SelectedEvent?.IsTodoLike == true && !SelectedEvent.IsTodoDone);
+        SetSelectedTodoPriorityBCommand = CreateAsyncCommand(() => UpdateSelectedTodoAsync(priority: "B"), () => SelectedEvent?.IsTodoLike == true && !SelectedEvent.IsTodoDone);
+        SetSelectedTodoPriorityCCommand = CreateAsyncCommand(() => UpdateSelectedTodoAsync(priority: "C"), () => SelectedEvent?.IsTodoLike == true && !SelectedEvent.IsTodoDone);
     }
 
     private AsyncRelayCommand CreateAsyncCommand(Func<Task> execute, Func<bool>? canExecute = null) =>
@@ -156,6 +173,8 @@ public sealed class MainViewModel : ObservableObject
     public AsyncRelayCommand DeleteEventCommand { get; }
     public AsyncRelayCommand MarkSelectedTodoDoneCommand { get; }
     public AsyncRelayCommand SyncCommand { get; }
+    public AsyncRelayCommand SyncDirtyCommand { get; }
+    public AsyncRelayCommand RefreshGoogleRemindersCommand { get; }
     public AsyncRelayCommand ReloadCalendarListCommand { get; }
     public AsyncRelayCommand BrowseOAuthClientCommand { get; }
     public AsyncRelayCommand AuthorizeCommand { get; }
@@ -175,6 +194,15 @@ public sealed class MainViewModel : ObservableObject
     public AsyncRelayCommand ShowReminderHistoryCommand { get; }
     public AsyncRelayCommand ShowAboutCommand { get; }
     public AsyncRelayCommand ShowMonthJumpCommand { get; }
+    public AsyncRelayCommand ShowAllTodosCommand { get; }
+    public AsyncRelayCommand ShowTodayTodosCommand { get; }
+    public AsyncRelayCommand ShowOverdueTodosCommand { get; }
+    public AsyncRelayCommand ShowThisWeekTodosCommand { get; }
+    public AsyncRelayCommand ShowHighPriorityTodosCommand { get; }
+    public AsyncRelayCommand IncreaseSelectedTodoProgressCommand { get; }
+    public AsyncRelayCommand SetSelectedTodoPriorityACommand { get; }
+    public AsyncRelayCommand SetSelectedTodoPriorityBCommand { get; }
+    public AsyncRelayCommand SetSelectedTodoPriorityCCommand { get; }
     internal Func<DateTime, CancellationToken, Task>? BeforeLoadCalendarSnapshotAsync { get; set; }
     internal Action<DateTime, CancellationToken>? BeforeBuildCalendarSnapshot { get; set; }
     internal Action<DateTime>? BeforeSaveDisplayMonth { get; set; }
@@ -299,6 +327,10 @@ public sealed class MainViewModel : ObservableObject
                 LoadEditor(value);
                 DeleteEventCommand.RaiseCanExecuteChanged();
                 MarkSelectedTodoDoneCommand.RaiseCanExecuteChanged();
+                IncreaseSelectedTodoProgressCommand.RaiseCanExecuteChanged();
+                SetSelectedTodoPriorityACommand.RaiseCanExecuteChanged();
+                SetSelectedTodoPriorityBCommand.RaiseCanExecuteChanged();
+                SetSelectedTodoPriorityCCommand.RaiseCanExecuteChanged();
                 OnPropertyChanged(nameof(CanCutSelectedEventLabel));
             }
         }
@@ -313,8 +345,53 @@ public sealed class MainViewModel : ObservableObject
     public bool IsSynchronizing
     {
         get => _isSynchronizing;
-        private set => SetProperty(ref _isSynchronizing, value);
+        private set
+        {
+            if (SetProperty(ref _isSynchronizing, value))
+            {
+                SyncStatusText = value ? "同期: 実行中..." : SyncStatusText;
+            }
+        }
     }
+
+    public string SyncStatusText
+    {
+        get => _syncStatusText;
+        private set => SetProperty(ref _syncStatusText, value);
+    }
+
+    public string ReminderStatusText
+    {
+        get => _reminderStatusText;
+        private set => SetProperty(ref _reminderStatusText, value);
+    }
+
+    public string LastErrorStatusText
+    {
+        get => _lastErrorStatusText;
+        private set => SetProperty(ref _lastErrorStatusText, value);
+    }
+
+    public TodoQuickFilter TodoQuickFilter
+    {
+        get => _todoQuickFilter;
+        private set
+        {
+            if (SetProperty(ref _todoQuickFilter, value))
+            {
+                OnPropertyChanged(nameof(TodoQuickFilterText));
+            }
+        }
+    }
+
+    public string TodoQuickFilterText => TodoQuickFilter switch
+    {
+        TodoQuickFilter.Today => "ToDo: 今日",
+        TodoQuickFilter.Overdue => "ToDo: 期限切れ",
+        TodoQuickFilter.ThisWeek => "ToDo: 今週",
+        TodoQuickFilter.HighPriority => "ToDo: 高優先度",
+        _ => "ToDo: すべて"
+    };
 
     public string Title
     {
@@ -474,7 +551,28 @@ public sealed class MainViewModel : ObservableObject
         await ReloadAvailableCalendarsAsync();
         SetCurrentMonthWithoutRefreshing(_settings.DisplayMonth);
         await RefreshCalendarAsync();
+        await RefreshOperationalStatusAsync(null);
         Status = "準備完了";
+    }
+
+    public async Task RefreshOperationalStatusAsync(ReminderMonitoringSnapshot? reminderDiagnostics)
+    {
+        var diagnostics = await _syncService.LoadDiagnosticsAsync(_settings);
+        SyncStatusText = diagnostics.LastResult is null
+            ? $"同期: 未同期 {diagnostics.DirtyCount} 件 / 最終同期なし"
+            : $"同期: 未同期 {diagnostics.DirtyCount} 件 / 最終 {diagnostics.LastResult.FinishedAt:MM/dd HH:mm}";
+        if (reminderDiagnostics is not null)
+        {
+            ReminderStatusText = FormatReminderStatus(reminderDiagnostics);
+        }
+
+        LastErrorStatusText = BuildLastErrorStatus(diagnostics, reminderDiagnostics);
+    }
+
+    public void UpdateReminderOperationalStatus(ReminderMonitoringSnapshot reminderDiagnostics)
+    {
+        ReminderStatusText = FormatReminderStatus(reminderDiagnostics);
+        LastErrorStatusText = BuildLastErrorStatus(null, reminderDiagnostics);
     }
 
     public void NewEvent()
@@ -762,6 +860,53 @@ public sealed class MainViewModel : ObservableObject
         MarkSelectedTodoDoneCommand.RaiseCanExecuteChanged();
         Status = "ToDoを処理済みにしました。同期するとGoogleカレンダーへ反映されます。";
         await SyncAfterLocalChangeAsync();
+    }
+
+    public async Task SetTodoQuickFilterAsync(TodoQuickFilter filter)
+    {
+        TodoQuickFilter = filter;
+        await RefreshTodosAsync();
+    }
+
+    public async Task UpdateSelectedTodoAsync(string? priority = null, int? progressDelta = null)
+    {
+        if (SelectedEvent is not { IsTodoLike: true } todoEvent || todoEvent.IsTodoDone)
+        {
+            return;
+        }
+
+        var metadata = todoEvent.TodoMetadata;
+        var nextPriority = string.IsNullOrWhiteSpace(priority) ? metadata?.Priority ?? "A" : priority;
+        var nextProgress = Math.Clamp((metadata?.Progress ?? 0) + (progressDelta ?? 0), 0, 100);
+        todoEvent.Description = TagService.UpdateTodoMarker(todoEvent.Description, nextPriority, nextProgress);
+        todoEvent.IsDirty = true;
+        await _repository.SaveEventAsync(todoEvent);
+        await RefreshCalendarAsync();
+        SelectedEvent = _visibleEvents.FirstOrDefault(item => item.Id == todoEvent.Id) ?? todoEvent;
+        Status = $"ToDoを更新しました: 優先度 {nextPriority} / 進捗 {nextProgress}%";
+        await SyncAfterLocalChangeAsync();
+    }
+
+    public async Task<CalendarEvent> CreateTwoMinuteReminderTestEventAsync()
+    {
+        var start = DateTimeOffset.Now.AddMinutes(2);
+        var testEvent = new CalendarEvent
+        {
+            CalendarId = ResolveEditorCalendarId(),
+            Title = "通知確認テスト",
+            Description = "2分後の通知確認用に作成されました。",
+            Start = start,
+            End = start.AddMinutes(30),
+            IsAllDay = false,
+            ReminderMinutesBeforeStart = 0,
+            IsDirty = true
+        };
+        await _repository.SaveEventAsync(testEvent);
+        await RefreshCalendarAsync();
+        SelectedEvent = _visibleEvents.FirstOrDefault(item => item.Id == testEvent.Id) ?? testEvent;
+        Status = "2分後の通知確認テスト予定を作成しました。";
+        await RefreshOperationalStatusAsync(null);
+        return testEvent;
     }
 
     public async Task<IReadOnlyList<CalendarEvent>> LoadYearEventsAsync(DateTime yearInView)
@@ -1097,6 +1242,24 @@ public sealed class MainViewModel : ObservableObject
         return await SynchronizeManuallyAsync();
     }
 
+    public async Task<SyncResult> SynchronizeDirtyOnlyAsync()
+    {
+        var dirtyIds = (await _repository.LoadDirtyEventsAsync())
+            .Select(item => item.Id)
+            .ToArray();
+        if (dirtyIds.Length == 0)
+        {
+            var empty = SyncResult.Empty("未同期の予定はありません。");
+            Status = empty.Message;
+            await RefreshOperationalStatusAsync(null);
+            return empty;
+        }
+
+        var result = await ResyncDirtyItemsAsync(dirtyIds);
+        await RefreshOperationalStatusAsync(null);
+        return result;
+    }
+
     public async Task<SyncDiagnosticsSnapshot> LoadSyncDiagnosticsAsync()
     {
         await SaveOAuthPathAsync();
@@ -1113,6 +1276,7 @@ public sealed class MainViewModel : ObservableObject
             now.AddDays(30));
         Status = $"Google通知設定を再取得しました: {updated} 件";
         await RefreshCalendarAsync();
+        await RefreshOperationalStatusAsync(null);
         return updated;
     }
 
@@ -1225,6 +1389,29 @@ public sealed class MainViewModel : ObservableObject
 
     public async Task ApplyCalendarSelectionAsync()
     {
+        if (Interlocked.Exchange(ref _calendarSelectionInProgress, 1) != 0)
+        {
+            Interlocked.Exchange(ref _calendarSelectionRerunRequested, 1);
+            return;
+        }
+
+        try
+        {
+            do
+            {
+                Interlocked.Exchange(ref _calendarSelectionRerunRequested, 0);
+                await ApplyCalendarSelectionCoreAsync();
+            }
+            while (Interlocked.Exchange(ref _calendarSelectionRerunRequested, 0) != 0);
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _calendarSelectionInProgress, 0);
+        }
+    }
+
+    private async Task ApplyCalendarSelectionCoreAsync()
+    {
         if (!AvailableCalendars.Any(item => item.IsSelected) && AvailableCalendars.Count > 0)
         {
             AvailableCalendars[0].IsSelected = true;
@@ -1237,8 +1424,36 @@ public sealed class MainViewModel : ObservableObject
         {
             EditorCalendarId = _settings.ActiveCalendarId;
         }
-        await _repository.SaveSettingsAsync(_settings);
-        await RefreshCalendarAsync();
+
+        try
+        {
+            await _repository.SaveSettingsAsync(_settings);
+        }
+        catch (Exception ex)
+        {
+            Status = $"表示カレンダー設定を保存できませんでした: {ex.Message}";
+            throw new InvalidOperationException(Status, ex);
+        }
+
+        try
+        {
+            await RefreshCalendarAsync();
+        }
+        catch (Exception ex)
+        {
+            Status = $"表示カレンダーは保存しましたが、カレンダー再読込に失敗しました: {ex.Message}";
+            throw new InvalidOperationException(Status, ex);
+        }
+
+        try
+        {
+            await RefreshOperationalStatusAsync(null);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(ex);
+            Status = $"表示カレンダーを更新しました。状態表示の更新に失敗しました: {ex.Message}";
+        }
     }
 
     private void StartRefreshCalendar()
@@ -1395,6 +1610,8 @@ public sealed class MainViewModel : ObservableObject
             {
                 day.Events.Add(calendarEvent);
             }
+
+            day.HiddenEventCount = Math.Max(0, eventsForDate.Count - day.Events.Count);
         }
         CalendarSegmentLayoutService.PopulateSegments(CalendarDays, _visibleEvents);
 
@@ -1561,6 +1778,7 @@ public sealed class MainViewModel : ObservableObject
         if (clearEvents)
         {
             day.Events.Clear();
+            day.HiddenEventCount = 0;
             day.Segments.Clear();
         }
     }
@@ -1735,6 +1953,7 @@ public sealed class MainViewModel : ObservableObject
 
         foreach (var item in events
                      .Where(item => !item.IsTodoDone && TodoDisplayFilter.IsWithinDisplayPeriod(item, _settings.IncompleteTodoDisplayPeriodMonths, DateTime.Today))
+                     .Where(PassesTodoQuickFilter)
                      .OrderBy(item => item.Start)
                      .ThenBy(item => item.TodoPriority)
                      .Take(100))
@@ -1752,6 +1971,46 @@ public sealed class MainViewModel : ObservableObject
         {
             CompletedTodoEvents.Add(item);
         }
+    }
+
+    private bool PassesTodoQuickFilter(CalendarEvent item)
+    {
+        var today = DateTime.Today;
+        return TodoQuickFilter switch
+        {
+            TodoQuickFilter.Today => item.Start.Date == today,
+            TodoQuickFilter.Overdue => item.Start.Date < today,
+            TodoQuickFilter.ThisWeek => item.Start.Date >= today && item.Start.Date < today.AddDays(7),
+            TodoQuickFilter.HighPriority => string.Equals(item.TodoPriority, "A", StringComparison.OrdinalIgnoreCase)
+                                            || string.Equals(item.TodoPriority, "B", StringComparison.OrdinalIgnoreCase),
+            _ => true
+        };
+    }
+
+    private static string FormatReminderStatus(ReminderMonitoringSnapshot value) =>
+        $"通知監視: {(value.IsRunning ? "起動中" : "停止中")} / 次回 {FormatStatusDate(value.NextCheckAt)}";
+
+    private static string FormatStatusDate(DateTimeOffset? value) => value?.ToString("MM/dd HH:mm") ?? "未定";
+
+    private static string BuildLastErrorStatus(SyncDiagnosticsSnapshot? sync, ReminderMonitoringSnapshot? reminder)
+    {
+        if (reminder?.LastError is { Length: > 0 } reminderError)
+        {
+            return $"通知エラー: {TrimStatusError(reminderError)}";
+        }
+
+        if (sync?.LastResult is { Failed: > 0 } result)
+        {
+            return $"同期エラー: {result.Failed} 件";
+        }
+
+        return "";
+    }
+
+    private static string TrimStatusError(string value)
+    {
+        var normalized = value.Replace("\r\n", " ").Replace('\r', ' ').Replace('\n', ' ').Trim();
+        return normalized.Length <= 80 ? normalized : normalized[..80] + "...";
     }
 
     private async Task ReloadScheduleHistoryAsync()
@@ -1896,6 +2155,8 @@ public sealed class MainViewModel : ObservableObject
         {
             day.Events.Add(calendarEvent);
         }
+
+        day.HiddenEventCount = Math.Max(0, _visibleEvents.Count(e => DateRangeHelper.OccursOn(e, date)) - day.Events.Count);
 
         return day;
     }
@@ -2581,6 +2842,7 @@ public sealed class MainViewModel : ObservableObject
         {
             Interlocked.Exchange(ref _syncInProgress, 0);
             IsSynchronizing = false;
+            await RefreshOperationalStatusAsync(null);
             if (Interlocked.Exchange(ref _syncRerunRequested, 0) != 0)
             {
                 await SynchronizeAsync(reportErrors: false, SyncInvocationKind.LocalChange);

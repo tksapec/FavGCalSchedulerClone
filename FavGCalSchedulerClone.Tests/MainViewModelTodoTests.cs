@@ -245,6 +245,71 @@ public sealed class MainViewModelTodoTests
     }
 
     [Fact]
+    public async Task ApplyCalendarSelectionAsync_RestoresFirstCalendarWhenAllUnchecked()
+    {
+        var viewModel = await CreateViewModelAsync();
+        foreach (var calendar in viewModel.AvailableCalendars)
+        {
+            calendar.IsSelected = false;
+        }
+
+        await viewModel.ApplyCalendarSelectionAsync();
+
+        Assert.True(viewModel.AvailableCalendars[0].IsSelected);
+        var settings = viewModel.CreateSettingsSnapshot();
+        Assert.Equal([viewModel.AvailableCalendars[0].Id], settings.VisibleCalendarIds);
+    }
+
+    [Fact]
+    public async Task ApplyCalendarSelectionAsync_CoalescesConcurrentRequests()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        await repository.SaveSettingsAsync(new AppSettings { VisibleCalendarIds = ["primary", "team"] });
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "Primary event",
+            CalendarId = "primary",
+            Start = new DateTimeOffset(DateTime.Today.AddHours(9)),
+            End = new DateTimeOffset(DateTime.Today.AddHours(10))
+        });
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "Team event",
+            CalendarId = "team",
+            Start = new DateTimeOffset(DateTime.Today.AddHours(11)),
+            End = new DateTimeOffset(DateTime.Today.AddHours(12))
+        });
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        await viewModel.InitializeAsync();
+        viewModel.AvailableCalendars.Single(item => item.Id == "primary").IsSelected = false;
+        viewModel.AvailableCalendars.Single(item => item.Id == "team").IsSelected = true;
+
+        await Task.WhenAll(
+            viewModel.ApplyCalendarSelectionAsync(),
+            viewModel.ApplyCalendarSelectionAsync(),
+            viewModel.ApplyCalendarSelectionAsync());
+
+        Assert.Single(viewModel.SelectedDayEvents);
+        Assert.Equal("Team event", viewModel.SelectedDayEvents[0].Title);
+        var settings = await repository.LoadSettingsAsync();
+        Assert.Equal(["team"], settings.VisibleCalendarIds);
+    }
+
+    [Fact]
+    public async Task ApplyCalendarSelectionAsync_ReportsRefreshFailure()
+    {
+        var viewModel = await CreateViewModelAsync();
+        viewModel.BeforeLoadCalendarSnapshotAsync = (_, _) => throw new InvalidOperationException("refresh failed");
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => viewModel.ApplyCalendarSelectionAsync());
+
+        Assert.Contains("再読込", viewModel.Status);
+        Assert.Contains("refresh failed", exception.Message);
+    }
+
+    [Fact]
     public async Task SaveTodoAsync_UsesEditorCalendarIdAsSaveTarget()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
@@ -650,6 +715,81 @@ public sealed class MainViewModelTodoTests
 
         Assert.Contains("4桁数字", viewModel.Status);
         Assert.Contains("0900", viewModel.Status);
+    }
+
+    [Fact]
+    public async Task SetTodoQuickFilterAsync_FiltersIncompleteTodos()
+    {
+        var viewModel = await CreateViewModelAsync();
+        await viewModel.SaveTodoAsync(DateTime.Today.AddDays(-1), "A", 10, "Overdue", "body");
+        await viewModel.SaveTodoAsync(DateTime.Today, "C", 10, "Today", "body");
+        await viewModel.SaveTodoAsync(DateTime.Today.AddDays(3), "B", 10, "High", "body");
+
+        await viewModel.SetTodoQuickFilterAsync(TodoQuickFilter.Today);
+        Assert.Single(viewModel.TodoEvents);
+        Assert.Equal("Today", viewModel.TodoEvents[0].Title);
+
+        await viewModel.SetTodoQuickFilterAsync(TodoQuickFilter.HighPriority);
+        Assert.Equal(["High", "Overdue"], viewModel.TodoEvents.Select(item => item.Title).Order().ToArray());
+    }
+
+    [Fact]
+    public async Task UpdateSelectedTodoAsync_ChangesProgressAndPriority()
+    {
+        var viewModel = await CreateViewModelAsync();
+        await viewModel.SaveTodoAsync(DateTime.Today, "C", 20, "Quick edit", "body");
+        viewModel.SelectedEvent = viewModel.TodoEvents.Single();
+
+        await viewModel.UpdateSelectedTodoAsync(priority: "A");
+        await viewModel.UpdateSelectedTodoAsync(progressDelta: 10);
+
+        var updated = viewModel.TodoEvents.Single();
+        Assert.Equal("A", updated.TodoPriority);
+        Assert.Equal(30, updated.TodoProgress);
+        Assert.True(updated.IsDirty);
+    }
+
+    [Fact]
+    public async Task CreateTwoMinuteReminderTestEventAsync_CreatesStartTimeReminder()
+    {
+        var viewModel = await CreateViewModelAsync();
+
+        var created = await viewModel.CreateTwoMinuteReminderTestEventAsync();
+
+        Assert.False(created.IsAllDay);
+        Assert.Equal(0, created.ReminderMinutesBeforeStart);
+        Assert.InRange(created.Start, DateTimeOffset.Now.AddSeconds(90), DateTimeOffset.Now.AddMinutes(3));
+        Assert.Contains(viewModel.SelectedDayEvents, item => item.Id == created.Id);
+    }
+
+    [Fact]
+    public async Task RefreshOperationalStatusAsync_ExposesDirtyAndReminderState()
+    {
+        var viewModel = await CreateViewModelAsync();
+        await viewModel.SaveTodoAsync(DateTime.Today, "A", 10, "Dirty status", "body");
+        var reminder = new ReminderMonitoringSnapshot(
+            true,
+            DateTimeOffset.Now,
+            DateTimeOffset.Now,
+            DateTimeOffset.Now.AddSeconds(30),
+            1,
+            1,
+            1,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            null,
+            []);
+
+        await viewModel.RefreshOperationalStatusAsync(reminder);
+
+        Assert.Contains("未同期", viewModel.SyncStatusText);
+        Assert.Contains("1", viewModel.SyncStatusText);
+        Assert.Contains("起動中", viewModel.ReminderStatusText);
     }
 
     private static async Task<MainViewModel> CreateViewModelAsync()

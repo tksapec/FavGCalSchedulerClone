@@ -19,6 +19,7 @@ public partial class MainWindow : Window
     private readonly MainViewModel _viewModel;
     private readonly ReminderNotificationService _reminderService;
     private readonly DispatcherTimer _automaticSyncTimer;
+    private readonly DispatcherTimer _operationalStatusTimer;
     private MediaPlayer? _previewSoundPlayer;
     private bool _exitRequested;
     private Point? _dragStartPoint;
@@ -33,6 +34,8 @@ public partial class MainWindow : Window
         _reminderService = reminderService;
         _automaticSyncTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
         _automaticSyncTimer.Tick += async (_, _) => await _viewModel.RunAutomaticSyncIfDueAsync();
+        _operationalStatusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+        _operationalStatusTimer.Tick += async (_, _) => await RefreshOperationalStatusAsync();
         DataContext = _viewModel;
         _viewModel.SetManualSyncPreviewConfirmation(preview => Task.FromResult(SyncDialogs.ShowPreview(this, preview) == true));
         _viewModel.SetWindowCommandHandlers(
@@ -58,7 +61,163 @@ public partial class MainWindow : Window
                 return Task.CompletedTask;
             },
             ShowMonthJumpDialogAsync);
+        CustomizeMainUi();
     }
+
+    private void CustomizeMainUi()
+    {
+        CustomizeGoogleMenu();
+        CustomizeStatusBar();
+        CustomizeTodoTab();
+    }
+
+    private void CustomizeGoogleMenu()
+    {
+        if (FindMenuItemByCommand(this, _viewModel.SyncCommand) is not { Parent: { } parent, Item: { } syncItem, Index: var index })
+        {
+            return;
+        }
+
+        syncItem.Header = "今すぐ同期";
+        parent.Items.Insert(index + 1, new MenuItem { Header = "未同期のみ同期", Command = _viewModel.SyncDirtyCommand });
+        parent.Items.Insert(index + 2, new MenuItem { Header = "Google通知設定を再取得", Command = _viewModel.RefreshGoogleRemindersCommand });
+    }
+
+    private void CustomizeStatusBar()
+    {
+        var statusBar = FindLogicalChildren<StatusBar>(this).FirstOrDefault();
+        if (statusBar is null)
+        {
+            return;
+        }
+
+        statusBar.Height = 30;
+        statusBar.Items.Add(new Separator());
+        statusBar.Items.Add(CreateStatusButton(_viewModel.ShowSyncDiagnosticsCommand, nameof(MainViewModel.SyncStatusText), "#1E40AF"));
+        statusBar.Items.Add(CreateStatusButton(_viewModel.ShowReminderHistoryCommand, nameof(MainViewModel.ReminderStatusText), "#166534"));
+        var error = new TextBlock { Foreground = CreateBrush("#B91C1C"), FontWeight = FontWeights.SemiBold };
+        error.SetBinding(TextBlock.TextProperty, new Binding(nameof(MainViewModel.LastErrorStatusText)));
+        statusBar.Items.Add(new StatusBarItem { Content = error });
+    }
+
+    private static StatusBarItem CreateStatusButton(System.Windows.Input.ICommand command, string bindingPath, string foreground)
+    {
+        var button = new Button
+        {
+            Command = command,
+            Padding = new Thickness(6, 1, 6, 1),
+            BorderThickness = new Thickness(0),
+            Background = Brushes.Transparent,
+            Foreground = CreateBrush(foreground)
+        };
+        button.SetBinding(ContentControl.ContentProperty, new Binding(bindingPath));
+        return new StatusBarItem { Content = button };
+    }
+
+    private void CustomizeTodoTab()
+    {
+        var todoGrid = FindLogicalChildren<DataGrid>(this)
+            .FirstOrDefault(grid => grid.ItemsSource == _viewModel.TodoEvents);
+        if (todoGrid?.Parent is not TabItem tab || tab.Content is not DataGrid)
+        {
+            return;
+        }
+
+        tab.Content = new DockPanel { LastChildFill = true };
+        var panel = (DockPanel)tab.Content;
+        var filterButtons = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+        filterButtons.Children.Add(CreateSmallCommandButton("すべて", _viewModel.ShowAllTodosCommand, 48));
+        filterButtons.Children.Add(CreateSmallCommandButton("今日", _viewModel.ShowTodayTodosCommand, 44));
+        filterButtons.Children.Add(CreateSmallCommandButton("期限切れ", _viewModel.ShowOverdueTodosCommand, 64));
+        filterButtons.Children.Add(CreateSmallCommandButton("今週", _viewModel.ShowThisWeekTodosCommand, 44));
+        filterButtons.Children.Add(CreateSmallCommandButton("高優先", _viewModel.ShowHighPriorityTodosCommand, 58));
+        DockPanel.SetDock(filterButtons, Dock.Top);
+        panel.Children.Add(filterButtons);
+
+        var editButtons = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+        var filterText = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Foreground = CreateBrush("#475569"), Margin = new Thickness(0, 0, 8, 0) };
+        filterText.SetBinding(TextBlock.TextProperty, new Binding(nameof(MainViewModel.TodoQuickFilterText)));
+        editButtons.Children.Add(filterText);
+        editButtons.Children.Add(CreateSmallCommandButton("+10%", _viewModel.IncreaseSelectedTodoProgressCommand, 50));
+        editButtons.Children.Add(CreateSmallCommandButton("A", _viewModel.SetSelectedTodoPriorityACommand, 28));
+        editButtons.Children.Add(CreateSmallCommandButton("B", _viewModel.SetSelectedTodoPriorityBCommand, 28));
+        editButtons.Children.Add(CreateSmallCommandButton("C", _viewModel.SetSelectedTodoPriorityCCommand, 28));
+        editButtons.Children.Add(CreateSmallCommandButton("完了", _viewModel.MarkSelectedTodoDoneCommand, 50));
+        DockPanel.SetDock(editButtons, Dock.Top);
+        panel.Children.Add(editButtons);
+        panel.Children.Add(todoGrid);
+    }
+
+    private static Button CreateSmallCommandButton(string text, System.Windows.Input.ICommand command, double minWidth) =>
+        new()
+        {
+            Content = text,
+            Command = command,
+            MinWidth = minWidth,
+            Margin = new Thickness(0, 0, 4, 0),
+            Padding = new Thickness(6, 1, 6, 1)
+        };
+
+    private static (ItemsControl Parent, MenuItem Item, int Index)? FindMenuItemByCommand(DependencyObject root, System.Windows.Input.ICommand command)
+    {
+        foreach (var parent in FindLogicalChildren<ItemsControl>(root))
+        {
+            if (FindMenuItemByCommand(parent, command) is { } match)
+            {
+                return match;
+            }
+        }
+
+        return null;
+    }
+
+    private static (ItemsControl Parent, MenuItem Item, int Index)? FindMenuItemByCommand(ItemsControl parent, System.Windows.Input.ICommand command)
+    {
+        for (var index = 0; index < parent.Items.Count; index++)
+        {
+            if (parent.Items[index] is not MenuItem item)
+            {
+                continue;
+            }
+
+            if (ReferenceEquals(item.Command, command))
+            {
+                return (parent, item, index);
+            }
+
+            if (item.ItemsSource is not null)
+            {
+                continue;
+            }
+
+            if (FindMenuItemByCommand(item, command) is { } childMatch)
+            {
+                return childMatch;
+            }
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<T> FindLogicalChildren<T>(DependencyObject root)
+        where T : DependencyObject
+    {
+        foreach (var child in LogicalTreeHelper.GetChildren(root).OfType<DependencyObject>())
+        {
+            if (child is T match)
+            {
+                yield return match;
+            }
+
+            foreach (var descendant in FindLogicalChildren<T>(child))
+            {
+                yield return descendant;
+            }
+        }
+    }
+
+    private static Brush CreateBrush(string color) =>
+        (Brush)(new BrushConverter().ConvertFromString(color) ?? Brushes.Transparent);
 
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
@@ -67,6 +226,7 @@ public partial class MainWindow : Window
             _reminderService.Stop();
             _reminderService.Dispose();
             _automaticSyncTimer.Stop();
+            _operationalStatusTimer.Stop();
             StopPreviewSound();
             return;
         }
@@ -83,6 +243,24 @@ public partial class MainWindow : Window
         return _viewModel.EnableReminderSound
             ? new SoundReminderNotifier(notifier, _viewModel.ReminderSoundFilePath, _viewModel.ReminderSoundVolume)
             : notifier;
+    }
+
+    public void StartOperationalStatusRefresh()
+    {
+        _operationalStatusTimer.Start();
+        _ = RefreshOperationalStatusAsync();
+    }
+
+    private async Task RefreshOperationalStatusAsync()
+    {
+        try
+        {
+            await _viewModel.RefreshOperationalStatusAsync(await _reminderService.LoadDiagnosticsAsync());
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine(ex);
+        }
     }
 
     private IReminderNotifier CreateReminderNotifier(ReminderTestSettings settings)
@@ -386,6 +564,24 @@ public partial class MainWindow : Window
         list.Click += async (_, _) => await ShowEventListDialogAsync("スケジュール一覧", new EventListFilter(string.Empty, EventKindFilter.All, EventSearchRange.Year, _viewModel.CurrentMonth));
         menu.Items.Add(list);
 
+        var dayList = new MenuItem { Header = "選択日の予定一覧", IsEnabled = _viewModel.SelectedDay is not null };
+        dayList.Click += async (_, _) =>
+        {
+            if (_viewModel.SelectedDay is { } selectedDay)
+            {
+                await ShowEventListDialogAsync(
+                    $"{selectedDay.Date:yyyy/MM/dd} の予定",
+                    new EventListFilter(
+                        string.Empty,
+                        EventKindFilter.All,
+                        EventSearchRange.Custom,
+                        selectedDay.Date,
+                        StartDate: selectedDay.Date,
+                        EndDate: selectedDay.Date));
+            }
+        };
+        menu.Items.Add(dayList);
+
         menu.IsOpen = true;
     }
 
@@ -682,12 +878,26 @@ public partial class MainWindow : Window
 
     private async void CalendarSelectionMenu_Checked(object sender, RoutedEventArgs e)
     {
-        await _viewModel.ApplyCalendarSelectionAsync();
+        await ApplyCalendarSelectionFromMenuAsync(e);
     }
 
     private async void CalendarSelectionMenu_Unchecked(object sender, RoutedEventArgs e)
     {
-        await _viewModel.ApplyCalendarSelectionAsync();
+        await ApplyCalendarSelectionFromMenuAsync(e);
+    }
+
+    private async Task ApplyCalendarSelectionFromMenuAsync(RoutedEventArgs e)
+    {
+        try
+        {
+            await _viewModel.ApplyCalendarSelectionAsync();
+        }
+        catch (Exception ex)
+        {
+            e.Handled = true;
+            _viewModel.Status = $"表示カレンダーの変更に失敗しました: {ex.Message}";
+            MessageBox.Show(this, ex.Message, "表示カレンダー変更エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private void AboutMenu_Click(object sender, RoutedEventArgs e)
@@ -939,6 +1149,11 @@ public partial class MainWindow : Window
             {
                 await _viewModel.RefreshGoogleReminderMetadataAsync();
                 await _reminderService.CheckDueRemindersDetailedAsync(DateTimeOffset.Now);
+            },
+            async () =>
+            {
+                await _viewModel.CreateTwoMinuteReminderTestEventAsync();
+                await RefreshOperationalStatusAsync();
             },
             OpenReminderHistoryItemAsync);
     }
