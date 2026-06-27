@@ -87,4 +87,60 @@ public sealed class CalendarEventDisplayTests
         Start = new DateTimeOffset(dueDate.Date),
         End = new DateTimeOffset(dueDate.Date.AddDays(1))
     };
+
+    [Fact]
+    public void SummaryDisplayText_AllDayEvent_ShowsAllDayMarkerWithoutMidnightTime()
+    {
+        var item = new CalendarEvent
+        {
+            Title = "Holiday",
+            IsAllDay = true,
+            Start = new DateTimeOffset(new DateTime(2026, 5, 16)),
+            End = new DateTimeOffset(new DateTime(2026, 5, 17))
+        };
+
+        var text = item.SummaryDisplayText;
+
+        Assert.Contains("2026年05月16日", text);
+        Assert.Contains("(終日)", text);
+        Assert.DoesNotContain("00:00", text);
+    }
+
+    [Fact]
+    public void SummaryDisplayText_MultiDayAllDayEvent_ShowsLastInclusiveDay()
+    {
+        var item = new CalendarEvent
+        {
+            Title = "Trip",
+            IsAllDay = true,
+            Start = new DateTimeOffset(new DateTime(2026, 5, 16)),
+            End = new DateTimeOffset(new DateTime(2026, 5, 19))
+        };
+
+        var text = item.SummaryDisplayText;
+
+        Assert.Contains("2026年05月16日", text);
+        Assert.Contains("2026年05月18日", text);
+        Assert.DoesNotContain("2026年05月19日", text);
+        Assert.DoesNotContain("00:00", text);
+    }
+
+    [Fact]
+    public void SummaryDisplayText_TimedEvent_ShowsStartDateTimeAndEndTime()
+    {
+        var item = new CalendarEvent
+        {
+            Title = "Meeting",
+            IsAllDay = false,
+            Start = new DateTimeOffset(new DateTime(2026, 5, 16, 9, 30, 0)),
+            End = new DateTimeOffset(new DateTime(2026, 5, 16, 10, 0, 0))
+        };
+
+        var text = item.SummaryDisplayText;
+
+        Assert.Contains("2026年05月16日", text);
+        Assert.Contains("(09:30)", text);
+        Assert.Contains("10:00", text);
+        Assert.DoesNotContain("(終日)", text);
+    }
 }

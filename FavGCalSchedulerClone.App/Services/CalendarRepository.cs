@@ -20,6 +20,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
     {
         AppPaths.Ensure();
         await using var connection = OpenConnection();
+        await ExecuteAsync(connection, "PRAGMA journal_mode=WAL;");
         await ExecuteAsync(connection, """
             CREATE TABLE IF NOT EXISTS events (
                 id TEXT PRIMARY KEY,
@@ -372,21 +373,50 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
 
     public async Task<int> MarkSyncedByIdsAsync(IEnumerable<string> ids)
     {
+        const int chunkSize = 500;
         var idList = ids
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
-        var updated = 0;
-        foreach (var id in idList)
+        if (idList.Length == 0)
         {
-            var calendarEvent = await FindMasterByIdAsync(id);
-            if (calendarEvent is null)
+            return 0;
+        }
+
+        var updated = 0;
+        await using var connection = OpenConnection();
+        await using var transaction = connection.BeginTransaction();
+        try
+        {
+            var now = DateTimeOffset.Now.ToString("O");
+            for (var offset = 0; offset < idList.Length; offset += chunkSize)
             {
-                continue;
+                var chunk = idList.Skip(offset).Take(chunkSize).ToArray();
+                var placeholders = string.Join(", ", Enumerable.Range(0, chunk.Length).Select(index => $"$id{index}"));
+                await using var command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = $"""
+                    UPDATE events
+                    SET is_dirty = 0,
+                        dirty_fields = NULL,
+                        last_synced_at = $last_synced_at
+                    WHERE id IN ({placeholders})
+                    """;
+                command.Parameters.AddWithValue("$last_synced_at", now);
+                for (var index = 0; index < chunk.Length; index++)
+                {
+                    command.Parameters.AddWithValue($"$id{index}", chunk[index]);
+                }
+
+                updated += await command.ExecuteNonQueryAsync();
             }
 
-            await MarkSyncedAsync(calendarEvent);
-            updated++;
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
         }
 
         return updated;

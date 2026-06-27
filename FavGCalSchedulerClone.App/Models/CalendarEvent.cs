@@ -24,8 +24,8 @@ public sealed class CalendarEvent
     public string? DirtyFields { get; set; }
     public bool IsTodoLike { get; set; }
     public int? ReminderMinutesBeforeStart { get; set; }
-    public bool? AppReminderEnabled { get; set; }
-    public bool? GoogleEmailReminderEnabled { get; set; }
+    internal bool? AppReminderEnabled { get; set; }
+    internal bool? GoogleEmailReminderEnabled { get; set; }
     public GoogleReminderMetadata? GoogleReminderMetadata { get; set; }
     public string DisplayColor { get; set; } = "#FFFFFF";
     public string DisplayForegroundColor { get; set; } = "#111827";
@@ -72,7 +72,7 @@ public sealed class CalendarEvent
 
     public string DescriptionPreview => SingleLine(Description);
     public string SummaryDisplayText => IsAllDay
-        ? $"{Start:yyyy年MM月dd日(00:00)}〜{End:yyyy年MM月dd日(00:00)}の予定。"
+        ? $"{Start:yyyy年MM月dd日(終日)}〜{End.AddDays(-1):yyyy年MM月dd日(終日)}の予定。"
         : $"{Start:yyyy年MM月dd日(HH:mm)}〜{End:HH:mm}の予定。";
     public TodoMetadata? TodoMetadata => FavGCalSchedulerClone.App.Services.TagService.GetTodoMetadata(this);
     public string TodoPriority => TodoMetadata?.Priority ?? "";

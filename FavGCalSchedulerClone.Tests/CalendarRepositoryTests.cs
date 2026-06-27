@@ -307,4 +307,84 @@ public sealed class CalendarRepositoryTests
         Assert.True(loaded.IsAppReminderEnabled);
         Assert.True(loaded.IsGoogleEmailReminderEnabled);
     }
+
+    [Fact]
+    public async Task InitializeAsync_EnablesWalJournalMode()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+
+        await repository.InitializeAsync();
+
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+        {
+            DataSource = dbPath
+        }.ToString());
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA journal_mode;";
+        var mode = await command.ExecuteScalarAsync() as string;
+
+        Assert.Equal("wal", mode, ignoreCase: true);
+    }
+
+    [Fact]
+    public async Task MarkSyncedByIdsAsync_UpdatesExistingDistinctIdsAndPreservesReminderDetails()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        var item1 = DirtyEvent("sync-1", "Sync 1");
+        item1.ReminderMinutesBeforeStart = 30;
+        item1.IsAppReminderEnabled = false;
+        item1.IsGoogleEmailReminderEnabled = true;
+        item1.GoogleReminderMetadata = new GoogleReminderMetadata
+        {
+            UseDefault = false,
+            EmailMinutes = [30],
+            AdoptedReminderMinutes = 30,
+            AdoptedReminderMethod = "email",
+            Source = "explicit"
+        };
+        var item2 = DirtyEvent("sync-2", "Sync 2");
+        var item3 = DirtyEvent("sync-3", "Sync 3");
+        await repository.SaveEventAsync(item1);
+        await repository.SaveEventAsync(item2);
+        await repository.SaveEventAsync(item3);
+        var stored3BeforeSync = await repository.FindEventByIdAsync("sync-3");
+
+        var updated = await repository.MarkSyncedByIdsAsync(["sync-1", "", "missing", "sync-2", "sync-1", "   "]);
+
+        Assert.Equal(2, updated);
+        var stored1 = await repository.FindEventByIdAsync("sync-1");
+        var stored2 = await repository.FindEventByIdAsync("sync-2");
+        var stored3 = await repository.FindEventByIdAsync("sync-3");
+        Assert.NotNull(stored1);
+        Assert.NotNull(stored2);
+        Assert.NotNull(stored3);
+        Assert.False(stored1!.IsDirty);
+        Assert.Null(stored1.DirtyFields);
+        Assert.NotNull(stored1.LastSyncedAt);
+        Assert.Equal(30, stored1.ReminderMinutesBeforeStart);
+        Assert.False(stored1.IsAppReminderEnabled);
+        Assert.True(stored1.IsGoogleEmailReminderEnabled);
+        Assert.Equal([30], stored1.GoogleReminderMetadata?.EmailMinutes);
+        Assert.False(stored2!.IsDirty);
+        Assert.Null(stored2.DirtyFields);
+        Assert.NotNull(stored2.LastSyncedAt);
+        Assert.True(stored3!.IsDirty);
+        Assert.Equal(stored3BeforeSync?.DirtyFields, stored3.DirtyFields);
+        Assert.Null(stored3.LastSyncedAt);
+    }
+
+    private static CalendarEvent DirtyEvent(string id, string title) => new()
+    {
+        Id = id,
+        Title = title,
+        CalendarId = "primary",
+        Start = new DateTimeOffset(2026, 5, 16, 11, 0, 0, TimeSpan.Zero),
+        End = new DateTimeOffset(2026, 5, 16, 12, 0, 0, TimeSpan.Zero),
+        IsDirty = true,
+        DirtyFields = "Title"
+    };
 }
