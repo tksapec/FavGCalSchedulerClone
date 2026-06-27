@@ -200,7 +200,7 @@ public sealed class GoogleEventMapperTests
     }
 
     [Fact]
-    public void ToGoogleEvent_PreservesExistingEmailReminderWhenWritingLocalPopupReminder()
+    public void ToGoogleEvent_WritesEmailReminderWithSameMinutesAsLocalPopupReminder()
     {
         var local = new App.Models.CalendarEvent
         {
@@ -218,7 +218,7 @@ public sealed class GoogleEventMapperTests
 
         Assert.False(googleEvent.Reminders.UseDefault);
         Assert.Equal(
-            [("email", 30), ("popup", 10)],
+            [("email", 10), ("popup", 10)],
             googleEvent.Reminders.Overrides
                 .Select(item => (item.Method, item.Minutes.GetValueOrDefault()))
                 .OrderBy(item => item.Method)
@@ -227,7 +227,87 @@ public sealed class GoogleEventMapperTests
     }
 
     [Fact]
-    public void ToGoogleEvent_PreservesEmailOnlyReminderWhenLocalReminderIsNone()
+    public void ToGoogleEvent_WritesOnlyPopupWhenGoogleEmailReminderDisabled()
+    {
+        var local = new App.Models.CalendarEvent
+        {
+            Title = "App only reminder",
+            Start = new DateTimeOffset(2026, 5, 16, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 5, 16, 10, 0, 0, TimeSpan.Zero),
+            ReminderMinutesBeforeStart = 10,
+            IsAppReminderEnabled = true,
+            IsGoogleEmailReminderEnabled = false
+        };
+
+        var googleEvent = GoogleEventMapper.ToGoogleEvent(local);
+
+        Assert.False(googleEvent.Reminders.UseDefault);
+        var reminder = Assert.Single(googleEvent.Reminders.Overrides);
+        Assert.Equal("popup", reminder.Method);
+        Assert.Equal(10, reminder.Minutes);
+    }
+
+    [Fact]
+    public void ToGoogleEvent_WritesOnlyEmailWhenAppReminderDisabled()
+    {
+        var local = new App.Models.CalendarEvent
+        {
+            Title = "Email only reminder",
+            Start = new DateTimeOffset(2026, 5, 16, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 5, 16, 10, 0, 0, TimeSpan.Zero),
+            ReminderMinutesBeforeStart = 10,
+            IsAppReminderEnabled = false,
+            IsGoogleEmailReminderEnabled = true
+        };
+
+        var googleEvent = GoogleEventMapper.ToGoogleEvent(local);
+
+        Assert.False(googleEvent.Reminders.UseDefault);
+        var reminder = Assert.Single(googleEvent.Reminders.Overrides);
+        Assert.Equal("email", reminder.Method);
+        Assert.Equal(10, reminder.Minutes);
+    }
+
+    [Fact]
+    public void FromGoogleEvent_SetsSeparateReminderEnabledFlags()
+    {
+        var googleEvent = CreateTimedGoogleEvent();
+        googleEvent.Reminders = new Event.RemindersData
+        {
+            UseDefault = false,
+            Overrides =
+            [
+                new EventReminder { Method = "popup", Minutes = 10 },
+                new EventReminder { Method = "email", Minutes = 10 }
+            ]
+        };
+
+        var local = GoogleEventMapper.FromGoogleEvent(googleEvent, "primary");
+
+        Assert.Equal(10, local.ReminderMinutesBeforeStart);
+        Assert.True(local.IsAppReminderEnabled);
+        Assert.True(local.IsGoogleEmailReminderEnabled);
+    }
+
+    [Fact]
+    public void FromGoogleEvent_EmailOnlyDoesNotEnableAppReminder()
+    {
+        var googleEvent = CreateTimedGoogleEvent();
+        googleEvent.Reminders = new Event.RemindersData
+        {
+            UseDefault = false,
+            Overrides = [new EventReminder { Method = "email", Minutes = 30 }]
+        };
+
+        var local = GoogleEventMapper.FromGoogleEvent(googleEvent, "primary");
+
+        Assert.Equal(30, local.ReminderMinutesBeforeStart);
+        Assert.False(local.IsAppReminderEnabled);
+        Assert.True(local.IsGoogleEmailReminderEnabled);
+    }
+
+    [Fact]
+    public void ToGoogleEvent_RemovesEmailReminderWhenLocalReminderIsNone()
     {
         var local = new App.Models.CalendarEvent
         {
@@ -243,9 +323,7 @@ public sealed class GoogleEventMapperTests
         var googleEvent = GoogleEventMapper.ToGoogleEvent(local);
 
         Assert.False(googleEvent.Reminders.UseDefault);
-        var reminder = Assert.Single(googleEvent.Reminders.Overrides);
-        Assert.Equal("email", reminder.Method);
-        Assert.Equal(30, reminder.Minutes);
+        Assert.Empty(googleEvent.Reminders.Overrides);
     }
 
     [Fact]

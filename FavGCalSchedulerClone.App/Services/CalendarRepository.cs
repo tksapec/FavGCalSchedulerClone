@@ -37,6 +37,8 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
                 is_all_day INTEGER NOT NULL,
                 color_id TEXT,
                 reminder_minutes_before_start INTEGER,
+                app_reminder_enabled INTEGER,
+                google_email_reminder_enabled INTEGER,
                 recurrence_json TEXT,
                 is_deleted INTEGER NOT NULL,
                 updated_at TEXT NOT NULL,
@@ -151,7 +153,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         command.CommandText = """
             SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
                    calendar_id, title, description, location, start, end, is_all_day,
-                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields, google_reminder_metadata_json
+                   color_id, reminder_minutes_before_start, app_reminder_enabled, google_email_reminder_enabled, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields, google_reminder_metadata_json
             FROM events
             WHERE ((start < $end AND end > $start)
                 OR recurrence_json IS NOT NULL
@@ -172,7 +174,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         command.CommandText = """
             SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
                    calendar_id, title, description, location, start, end, is_all_day,
-                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields, google_reminder_metadata_json
+                   color_id, reminder_minutes_before_start, app_reminder_enabled, google_email_reminder_enabled, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields, google_reminder_metadata_json
             FROM events
             WHERE is_todo_like = 1 AND is_deleted = 0
             ORDER BY start, title
@@ -187,7 +189,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         command.CommandText = """
             SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
                    calendar_id, title, description, location, start, end, is_all_day,
-                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields, google_reminder_metadata_json
+                   color_id, reminder_minutes_before_start, app_reminder_enabled, google_email_reminder_enabled, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields, google_reminder_metadata_json
             FROM events
             WHERE is_dirty = 1
             ORDER BY updated_at
@@ -207,7 +209,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         command.CommandText = """
             SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
                    calendar_id, title, description, location, start, end, is_all_day,
-                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields, google_reminder_metadata_json
+                   color_id, reminder_minutes_before_start, app_reminder_enabled, google_email_reminder_enabled, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields, google_reminder_metadata_json
             FROM events
             WHERE calendar_id = $calendar_id AND google_event_id = $google_event_id
             LIMIT 1
@@ -233,6 +235,8 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         command.CommandText = """
             UPDATE events
             SET reminder_minutes_before_start = CASE WHEN is_dirty = 0 THEN $reminder_minutes_before_start ELSE reminder_minutes_before_start END,
+                app_reminder_enabled = CASE WHEN is_dirty = 0 THEN $app_reminder_enabled ELSE app_reminder_enabled END,
+                google_email_reminder_enabled = CASE WHEN is_dirty = 0 THEN $google_email_reminder_enabled ELSE google_email_reminder_enabled END,
                 google_reminder_metadata_json = $google_reminder_metadata_json
             WHERE calendar_id = $calendar_id
               AND google_event_id = $google_event_id
@@ -241,6 +245,8 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         command.Parameters.AddWithValue("$calendar_id", calendarId);
         command.Parameters.AddWithValue("$google_event_id", googleEventId);
         command.Parameters.AddWithValue("$reminder_minutes_before_start", (object?)reminderMinutesBeforeStart ?? DBNull.Value);
+        command.Parameters.AddWithValue("$app_reminder_enabled", HasGooglePopupReminder(metadata) ? 1 : 0);
+        command.Parameters.AddWithValue("$google_email_reminder_enabled", HasGoogleEmailReminder(metadata) ? 1 : 0);
         command.Parameters.AddWithValue("$google_reminder_metadata_json", metadata is null
             ? DBNull.Value
             : JsonSerializer.Serialize(metadata));
@@ -254,7 +260,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         command.CommandText = """
             SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
                    calendar_id, title, description, location, start, end, is_all_day,
-                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields, google_reminder_metadata_json
+                   color_id, reminder_minutes_before_start, app_reminder_enabled, google_email_reminder_enabled, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields, google_reminder_metadata_json
             FROM events
             WHERE calendar_id = $calendar_id
               AND title = $title
@@ -284,7 +290,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         command.CommandText = """
             SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
                    calendar_id, title, description, location, start, end, is_all_day,
-                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields, google_reminder_metadata_json
+                   color_id, reminder_minutes_before_start, app_reminder_enabled, google_email_reminder_enabled, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields, google_reminder_metadata_json
             FROM events
             WHERE id = $id
             LIMIT 1
@@ -302,7 +308,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         command.CommandText = """
             SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
                    calendar_id, title, description, location, start, end, is_all_day,
-                   color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields, google_reminder_metadata_json
+                   color_id, reminder_minutes_before_start, app_reminder_enabled, google_email_reminder_enabled, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields, google_reminder_metadata_json
             FROM events
             WHERE ($recurring_parent_id IS NOT NULL AND recurring_parent_id = $recurring_parent_id)
                OR ($recurring_event_id IS NOT NULL AND recurring_event_id = $recurring_event_id)
@@ -347,12 +353,16 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
             SET google_event_id = COALESCE($google_event_id, google_event_id),
                 is_dirty = 0,
                 dirty_fields = NULL,
+                app_reminder_enabled = $app_reminder_enabled,
+                google_email_reminder_enabled = $google_email_reminder_enabled,
                 google_reminder_metadata_json = $google_reminder_metadata_json,
                 last_synced_at = $last_synced_at
             WHERE id = $id
             """;
         command.Parameters.AddWithValue("$id", calendarEvent.Id);
         command.Parameters.AddWithValue("$google_event_id", (object?)googleEventId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$app_reminder_enabled", calendarEvent.IsAppReminderEnabled ? 1 : 0);
+        command.Parameters.AddWithValue("$google_email_reminder_enabled", calendarEvent.IsGoogleEmailReminderEnabled ? 1 : 0);
         command.Parameters.AddWithValue("$google_reminder_metadata_json", calendarEvent.GoogleReminderMetadata is null
             ? DBNull.Value
             : JsonSerializer.Serialize(calendarEvent.GoogleReminderMetadata));
@@ -457,11 +467,11 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
             INSERT OR REPLACE INTO events(
                 id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
                 calendar_id, title, description, location, start, end, is_all_day,
-                color_id, reminder_minutes_before_start, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields, google_reminder_metadata_json)
+                color_id, reminder_minutes_before_start, app_reminder_enabled, google_email_reminder_enabled, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields, google_reminder_metadata_json)
             VALUES(
                 $id, $google_event_id, $recurring_event_id, $recurring_parent_id, $original_start, $is_recurrence_exception,
                 $calendar_id, $title, $description, $location, $start, $end, $is_all_day,
-                $color_id, $reminder_minutes_before_start, $recurrence_json, $is_deleted, $updated_at, $last_synced_at, $is_dirty, $is_todo_like, $dirty_fields, $google_reminder_metadata_json)
+                $color_id, $reminder_minutes_before_start, $app_reminder_enabled, $google_email_reminder_enabled, $recurrence_json, $is_deleted, $updated_at, $last_synced_at, $is_dirty, $is_todo_like, $dirty_fields, $google_reminder_metadata_json)
             """;
         AddEventParameters(command, calendarEvent);
         await command.ExecuteNonQueryAsync();
@@ -538,16 +548,18 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
                 IsAllDay = reader.GetInt32(12) != 0,
                 ColorId = reader.IsDBNull(13) ? null : reader.GetString(13),
                 ReminderMinutesBeforeStart = reader.IsDBNull(14) ? null : reader.GetInt32(14),
-                RecurrenceJson = reader.IsDBNull(15) ? null : reader.GetString(15),
-                IsDeleted = reader.GetInt32(16) != 0,
-                UpdatedAt = DateTimeOffset.Parse(reader.GetString(17)),
-                LastSyncedAt = reader.IsDBNull(18) ? null : DateTimeOffset.Parse(reader.GetString(18)),
-                IsDirty = reader.GetInt32(19) != 0,
-                IsTodoLike = reader.GetInt32(20) != 0,
-                DirtyFields = reader.IsDBNull(21) ? null : reader.GetString(21),
-                GoogleReminderMetadata = reader.IsDBNull(22)
+                AppReminderEnabled = reader.IsDBNull(15) ? null : reader.GetInt32(15) != 0,
+                GoogleEmailReminderEnabled = reader.IsDBNull(16) ? null : reader.GetInt32(16) != 0,
+                RecurrenceJson = reader.IsDBNull(17) ? null : reader.GetString(17),
+                IsDeleted = reader.GetInt32(18) != 0,
+                UpdatedAt = DateTimeOffset.Parse(reader.GetString(19)),
+                LastSyncedAt = reader.IsDBNull(20) ? null : DateTimeOffset.Parse(reader.GetString(20)),
+                IsDirty = reader.GetInt32(21) != 0,
+                IsTodoLike = reader.GetInt32(22) != 0,
+                DirtyFields = reader.IsDBNull(23) ? null : reader.GetString(23),
+                GoogleReminderMetadata = reader.IsDBNull(24)
                     ? null
-                    : JsonSerializer.Deserialize<GoogleReminderMetadata>(reader.GetString(22))
+                    : JsonSerializer.Deserialize<GoogleReminderMetadata>(reader.GetString(24))
             });
         }
 
@@ -571,6 +583,8 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         command.Parameters.AddWithValue("$is_all_day", calendarEvent.IsAllDay ? 1 : 0);
         command.Parameters.AddWithValue("$color_id", (object?)calendarEvent.ColorId ?? DBNull.Value);
         command.Parameters.AddWithValue("$reminder_minutes_before_start", calendarEvent.ReminderMinutesBeforeStart ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$app_reminder_enabled", calendarEvent.IsAppReminderEnabled ? 1 : 0);
+        command.Parameters.AddWithValue("$google_email_reminder_enabled", calendarEvent.IsGoogleEmailReminderEnabled ? 1 : 0);
         command.Parameters.AddWithValue("$recurrence_json", (object?)calendarEvent.RecurrenceJson ?? DBNull.Value);
         command.Parameters.AddWithValue("$is_deleted", calendarEvent.IsDeleted ? 1 : 0);
         command.Parameters.AddWithValue("$updated_at", calendarEvent.UpdatedAt.ToString("O"));
@@ -590,8 +604,22 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         await EnsureColumnAsync(connection, "events", "original_start", "TEXT");
         await EnsureColumnAsync(connection, "events", "is_recurrence_exception", "INTEGER NOT NULL DEFAULT 0");
         await EnsureColumnAsync(connection, "events", "reminder_minutes_before_start", "INTEGER");
+        await EnsureColumnAsync(connection, "events", "app_reminder_enabled", "INTEGER");
+        await EnsureColumnAsync(connection, "events", "google_email_reminder_enabled", "INTEGER");
         await EnsureColumnAsync(connection, "events", "dirty_fields", "TEXT");
         await EnsureColumnAsync(connection, "events", "google_reminder_metadata_json", "TEXT");
+    }
+
+    private static bool HasGooglePopupReminder(GoogleReminderMetadata? metadata)
+    {
+        return metadata is not null
+            && (metadata.PopupMinutes.Count > 0 || metadata.DefaultPopupMinutes.Count > 0);
+    }
+
+    private static bool HasGoogleEmailReminder(GoogleReminderMetadata? metadata)
+    {
+        return metadata is not null
+            && (metadata.EmailMinutes.Count > 0 || metadata.DefaultEmailMinutes.Count > 0);
     }
 
     private static async Task EnsureColumnAsync(SqliteConnection connection, string tableName, string columnName, string sqlDefinition)

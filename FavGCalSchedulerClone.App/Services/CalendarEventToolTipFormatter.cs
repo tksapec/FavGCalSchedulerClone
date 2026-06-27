@@ -21,10 +21,18 @@ public static class CalendarEventToolTipFormatter
 
         AddValue(lines, "場所", calendarEvent.Location);
         AddValue(lines, "内容", calendarEvent.Description);
-        if (calendarEvent.ReminderMinutesBeforeStart is int minutes)
+        if (calendarEvent.IsAppReminderEnabled && calendarEvent.ReminderMinutesBeforeStart is int minutes)
         {
-            lines.Add("通知");
+            lines.Add("アプリ内通知");
             lines.Add(minutes == 0 ? "開始時刻" : $"{minutes}分前");
+        }
+
+        if (calendarEvent.IsGoogleEmailReminderEnabled)
+        {
+            lines.Add("Googleメール通知");
+            lines.Add(calendarEvent.ReminderMinutesBeforeStart is int emailMinutes
+                ? (emailMinutes == 0 ? "開始時刻" : $"{emailMinutes}分前")
+                : GoogleReminderDisplayFormatter.FormatEmailReminderText(calendarEvent.GoogleReminderMetadata));
         }
 
         if (calendarEvent.IsTodoLike)
@@ -84,4 +92,5 @@ public static class CalendarEventToolTipFormatter
         var trimmed = value.Trim();
         return trimmed.Length <= MaxLineLength ? trimmed : trimmed[..MaxLineLength] + "...";
     }
+
 }

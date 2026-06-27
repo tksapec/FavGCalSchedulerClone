@@ -188,7 +188,69 @@ public sealed class ReminderNotificationServiceTests
         Assert.Equal("Google email reminder", diagnostic.Title);
         Assert.Equal("Googleメール通知のみ（本ツールのポップアップ通知対象外）", diagnostic.Reason);
         Assert.Equal("30分前", diagnostic.GoogleEmailReminderText);
-        Assert.Equal("Googleメール通知のみ", diagnostic.ReminderDifferenceText);
+        Assert.Equal("アプリ内通知: なし / Googleメール通知: 30分前", diagnostic.ReminderDifferenceText);
+    }
+
+    [Fact]
+    public async Task CheckDueRemindersAsync_ShowsAdoptedGoogleEmailReminderAsUserFacingText()
+    {
+        var repository = await CreateRepositoryAsync();
+        var service = new ReminderNotificationService(repository, new RecordingNotifier());
+        var now = new DateTimeOffset(2026, 6, 10, 9, 0, 0, TimeSpan.FromHours(9));
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "Google email adopted reminder",
+            Start = now.AddMinutes(30),
+            End = now.AddHours(1),
+            ReminderMinutesBeforeStart = 30,
+            GoogleReminderMetadata = new GoogleReminderMetadata
+            {
+                UseDefault = false,
+                EmailMinutes = [30],
+                AdoptedReminderMinutes = 30,
+                AdoptedReminderMethod = "email",
+                Source = "explicit"
+            }
+        });
+
+        await service.CheckDueRemindersAsync(now);
+        var diagnostic = Assert.Single(service.CurrentDiagnostics.Candidates);
+
+        Assert.Equal("Google email adopted reminder", diagnostic.Title);
+        Assert.Equal("30分前", diagnostic.GoogleEmailReminderText);
+        Assert.Equal("アプリ内通知: 30分前 / Googleメール通知: 30分前", diagnostic.ReminderDifferenceText);
+    }
+
+    [Fact]
+    public async Task CheckDueRemindersAsync_DoesNotNotifyWhenAppReminderDisabledAndGoogleEmailEnabled()
+    {
+        var repository = await CreateRepositoryAsync();
+        var notifier = new RecordingNotifier();
+        var service = new ReminderNotificationService(repository, notifier);
+        var now = new DateTimeOffset(2026, 6, 10, 9, 0, 0, TimeSpan.FromHours(9));
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "Google email only",
+            Start = now.AddMinutes(30),
+            End = now.AddHours(1),
+            ReminderMinutesBeforeStart = 30,
+            IsAppReminderEnabled = false,
+            IsGoogleEmailReminderEnabled = true,
+            GoogleReminderMetadata = new GoogleReminderMetadata
+            {
+                EmailMinutes = [30],
+                AdoptedReminderMinutes = 30,
+                AdoptedReminderMethod = "email"
+            }
+        });
+
+        await service.CheckDueRemindersAsync(now);
+
+        Assert.Equal(0, notifier.Count);
+        var diagnostic = Assert.Single(service.CurrentDiagnostics.Candidates);
+        Assert.Equal("Google email only", diagnostic.Title);
+        Assert.Contains("アプリ内通知: なし", diagnostic.ReminderDifferenceText);
+        Assert.Contains("Googleメール通知: 30分前", diagnostic.ReminderDifferenceText);
     }
 
     [Fact]

@@ -35,6 +35,23 @@ internal static class ScheduleEditorDialog
             SelectedValuePath = nameof(ReminderOption.MinutesBeforeStart),
             SelectedValue = request.ReminderMinutesBeforeStart
         };
+        var googleEmailReminder = new TextBlock
+        {
+            Text = request.GoogleEmailReminderDisplayText,
+            Margin = new Thickness(0, ui.Y(4), 0, ui.Y(8))
+        };
+        var appReminderEnabled = new CheckBox
+        {
+            Content = "アプリ内通知",
+            IsChecked = request.IsAppReminderEnabled,
+            Margin = new Thickness(0, 0, ui.X(12), ui.Y(8))
+        };
+        var googleEmailReminderEnabled = new CheckBox
+        {
+            Content = "Googleメール通知",
+            IsChecked = request.IsGoogleEmailReminderEnabled,
+            Margin = new Thickness(0, 0, 0, ui.Y(8))
+        };
         var location = new ComboBox
         {
             IsEditable = true,
@@ -157,7 +174,18 @@ internal static class ScheduleEditorDialog
         alarmGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         alarmGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         alarmGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        alarmGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        alarmGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         ui.AddLabeledField(alarmGrid, 0, 0, "通知時間", reminder);
+        var reminderModePanel = new StackPanel { Orientation = Orientation.Horizontal };
+        reminderModePanel.Children.Add(appReminderEnabled);
+        reminderModePanel.Children.Add(googleEmailReminderEnabled);
+        Grid.SetRow(reminderModePanel, 1);
+        Grid.SetColumn(reminderModePanel, 0);
+        alarmGrid.Children.Add(reminderModePanel);
+        Grid.SetRow(googleEmailReminder, 2);
+        Grid.SetColumn(googleEmailReminder, 0);
+        alarmGrid.Children.Add(googleEmailReminder);
         var quickReminderPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, ui.Y(8)) };
         quickReminderPanel.Children.Add(ShortcutButton("なし", () => reminder.SelectedValue = null));
         quickReminderPanel.Children.Add(ShortcutButton("開始時", () => reminder.SelectedValue = 0));
@@ -165,7 +193,7 @@ internal static class ScheduleEditorDialog
         quickReminderPanel.Children.Add(ShortcutButton("10分前", () => reminder.SelectedValue = 10));
         quickReminderPanel.Children.Add(ShortcutButton("30分前", () => reminder.SelectedValue = 30));
         quickReminderPanel.Children.Add(ShortcutButton("1時間前", () => reminder.SelectedValue = 60));
-        Grid.SetRow(quickReminderPanel, 1);
+        Grid.SetRow(quickReminderPanel, 3);
         Grid.SetColumn(quickReminderPanel, 0);
         alarmGrid.Children.Add(quickReminderPanel);
         alarmGroup.Content = alarmGrid;
@@ -232,6 +260,8 @@ internal static class ScheduleEditorDialog
             endTime.Text,
             isAllDay.IsChecked == true,
             reminder.SelectedValue as int?,
+            appReminderEnabled.IsChecked == true,
+            googleEmailReminderEnabled.IsChecked == true,
             location.Text,
             title.Text,
             description.Text);
@@ -340,6 +370,8 @@ internal sealed record ScheduleEditorRequest(
     string EndTime,
     bool IsAllDay,
     int? ReminderMinutesBeforeStart,
+    bool IsAppReminderEnabled,
+    bool IsGoogleEmailReminderEnabled,
     string Location,
     string CalendarId,
     string? ColorId,
@@ -348,7 +380,8 @@ internal sealed record ScheduleEditorRequest(
     IReadOnlyList<string> LocationHistory,
     IReadOnlyList<string> TitleHistory,
     IEnumerable<GoogleCalendarSelectionItem> AvailableCalendars,
-    IEnumerable<ReminderOption> ReminderOptions);
+    IEnumerable<ReminderOption> ReminderOptions,
+    string GoogleEmailReminderDisplayText);
 
 internal sealed record ScheduleEditorResult(
     string CalendarId,
@@ -359,6 +392,8 @@ internal sealed record ScheduleEditorResult(
     string EndTime,
     bool IsAllDay,
     int? ReminderMinutesBeforeStart,
+    bool IsAppReminderEnabled,
+    bool IsGoogleEmailReminderEnabled,
     string Location,
     string Title,
     string Description);

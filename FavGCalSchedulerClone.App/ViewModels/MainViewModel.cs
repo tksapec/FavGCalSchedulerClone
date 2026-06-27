@@ -36,6 +36,8 @@ public sealed class MainViewModel : ObservableObject
     private string _endTime = "10:00";
     private bool _isAllDay = true;
     private int? _reminderMinutesBeforeStart;
+    private bool _isAppReminderEnabled = true;
+    private bool _isGoogleEmailReminderEnabled;
     private string _oauthClientJsonPath = "";
     private int _selectedTabIndex;
     private int _selectedTodoTabIndex;
@@ -448,6 +450,18 @@ public sealed class MainViewModel : ObservableObject
         set => SetProperty(ref _reminderMinutesBeforeStart, value);
     }
 
+    public bool IsAppReminderEnabled
+    {
+        get => _isAppReminderEnabled;
+        set => SetProperty(ref _isAppReminderEnabled, value);
+    }
+
+    public bool IsGoogleEmailReminderEnabled
+    {
+        get => _isGoogleEmailReminderEnabled;
+        set => SetProperty(ref _isGoogleEmailReminderEnabled, value);
+    }
+
     public string OAuthClientJsonPath
     {
         get => _oauthClientJsonPath;
@@ -751,6 +765,8 @@ public sealed class MainViewModel : ObservableObject
         EndTime = "10:00";
         IsAllDay = _settings.DefaultNewEventIsAllDay;
         ReminderMinutesBeforeStart = _settings.DefaultScheduleReminderMinutes;
+        IsAppReminderEnabled = _settings.DefaultScheduleReminderMinutes is not null;
+        IsGoogleEmailReminderEnabled = false;
         EditorColorId = null;
         Status = "新しいスケジュールを入力してください。";
     }
@@ -2188,6 +2204,8 @@ public sealed class MainViewModel : ObservableObject
         EndTime = calendarEvent.End.ToString("HH:mm", CultureInfo.InvariantCulture);
         IsAllDay = calendarEvent.IsAllDay;
         ReminderMinutesBeforeStart = calendarEvent.ReminderMinutesBeforeStart;
+        IsAppReminderEnabled = calendarEvent.IsAppReminderEnabled;
+        IsGoogleEmailReminderEnabled = calendarEvent.IsGoogleEmailReminderEnabled;
         EditorColorId = calendarEvent.ColorId;
     }
 
@@ -2307,7 +2325,14 @@ public sealed class MainViewModel : ObservableObject
         calendarEvent.Location = string.IsNullOrWhiteSpace(Location) ? null : Location.Trim();
         calendarEvent.CalendarId = ResolveEditorCalendarId();
         calendarEvent.IsAllDay = IsAllDay;
-        calendarEvent.ReminderMinutesBeforeStart = ReminderMinutesBeforeStart;
+        var hasReminderMinutes = ReminderMinutesBeforeStart is not null;
+        var appReminderEnabled = hasReminderMinutes && IsAppReminderEnabled;
+        var googleEmailReminderEnabled = hasReminderMinutes && IsGoogleEmailReminderEnabled;
+        var reminderMinutes = appReminderEnabled || googleEmailReminderEnabled ? ReminderMinutesBeforeStart : null;
+        calendarEvent.ReminderMinutesBeforeStart = reminderMinutes;
+        calendarEvent.IsAppReminderEnabled = appReminderEnabled;
+        calendarEvent.IsGoogleEmailReminderEnabled = googleEmailReminderEnabled;
+        calendarEvent.GoogleReminderMetadata = CreateCommonGoogleReminderMetadata(calendarEvent.GoogleReminderMetadata, reminderMinutes, appReminderEnabled, googleEmailReminderEnabled);
         calendarEvent.ColorId = EditorColorId;
         calendarEvent.IsDirty = true;
         calendarEvent.IsDeleted = false;
@@ -2614,6 +2639,9 @@ public sealed class MainViewModel : ObservableObject
             IsAllDay = source.IsAllDay,
             ColorId = source.ColorId,
             ReminderMinutesBeforeStart = source.ReminderMinutesBeforeStart,
+            AppReminderEnabled = source.AppReminderEnabled,
+            GoogleEmailReminderEnabled = source.GoogleEmailReminderEnabled,
+            GoogleReminderMetadata = source.GoogleReminderMetadata,
             RecurrenceJson = source.RecurrenceJson,
             IsDeleted = source.IsDeleted,
             UpdatedAt = source.UpdatedAt,
@@ -2625,6 +2653,42 @@ public sealed class MainViewModel : ObservableObject
             DisplayForegroundColor = source.DisplayForegroundColor,
             IsGeneratedOccurrence = source.IsGeneratedOccurrence
         };
+    }
+
+    private static GoogleReminderMetadata? CreateCommonGoogleReminderMetadata(
+        GoogleReminderMetadata? existing,
+        int? reminderMinutes,
+        bool appReminderEnabled,
+        bool googleEmailReminderEnabled)
+    {
+        if (existing is null)
+        {
+            return null;
+        }
+
+        var metadata = new GoogleReminderMetadata
+        {
+            UseDefault = false,
+            Source = "explicit",
+            AdoptedReminderMinutes = reminderMinutes,
+            AdoptedReminderMethod = reminderMinutes is null
+                ? null
+                : appReminderEnabled ? "popup" : "email"
+        };
+        if (reminderMinutes is int minutes)
+        {
+            if (appReminderEnabled)
+            {
+                metadata.PopupMinutes.Add(minutes);
+            }
+
+            if (googleEmailReminderEnabled)
+            {
+                metadata.EmailMinutes.Add(minutes);
+            }
+        }
+
+        return metadata;
     }
 
     private static CalendarEvent CloneEventAsNewLocalEvent(CalendarEvent source)

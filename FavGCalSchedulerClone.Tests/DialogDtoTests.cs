@@ -18,6 +18,8 @@ public sealed class DialogDtoTests
             "12:30",
             true,
             10,
+            true,
+            false,
             "C202a",
             "水田C 富士電機来社対応",
             "2026/05/12 14:12\r\nAN-40C 予備検証試験");
@@ -30,9 +32,41 @@ public sealed class DialogDtoTests
         Assert.Equal("12:30", result.EndTime);
         Assert.True(result.IsAllDay);
         Assert.Equal(10, result.ReminderMinutesBeforeStart);
+        Assert.True(result.IsAppReminderEnabled);
+        Assert.False(result.IsGoogleEmailReminderEnabled);
         Assert.Equal("C202a", result.Location);
         Assert.Equal("水田C 富士電機来社対応", result.Title);
         Assert.Equal("2026/05/12 14:12\r\nAN-40C 予備検証試験", result.Description);
+    }
+
+    [Fact]
+    public void ScheduleEditorRequest_PreservesGoogleEmailReminderDisplayText()
+    {
+        var request = new ScheduleEditorRequest(
+            true,
+            new DateTime(2026, 5, 22),
+            new DateTime(2026, 5, 22),
+            "09:00",
+            "10:00",
+            false,
+            10,
+            false,
+            true,
+            "A101",
+            "primary",
+            null,
+            "meeting",
+            "body",
+            [],
+            [],
+            [],
+            [new ReminderOption("10分前", 10)],
+            "Googleメール通知: 10分前");
+
+        Assert.Equal(10, request.ReminderMinutesBeforeStart);
+        Assert.False(request.IsAppReminderEnabled);
+        Assert.True(request.IsGoogleEmailReminderEnabled);
+        Assert.Equal("Googleメール通知: 10分前", request.GoogleEmailReminderDisplayText);
     }
 
     [Fact]

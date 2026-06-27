@@ -50,4 +50,26 @@ public sealed class CalendarEventToolTipFormatterTests
         Assert.DoesNotContain("場所", text);
         Assert.DoesNotContain("通知", text);
     }
+
+    [Fact]
+    public void Format_IncludesGoogleEmailReminderWhenAvailable()
+    {
+        var item = new CalendarEvent
+        {
+            CalendarId = "primary",
+            Title = "meeting",
+            Start = new DateTimeOffset(2026, 5, 18, 8, 0, 0, TimeSpan.FromHours(9)),
+            End = new DateTimeOffset(2026, 5, 18, 8, 30, 0, TimeSpan.FromHours(9)),
+            ReminderMinutesBeforeStart = 30,
+            GoogleReminderMetadata = new GoogleReminderMetadata
+            {
+                EmailMinutes = [30]
+            }
+        };
+
+        var text = CalendarEventToolTipFormatter.Format(item);
+
+        Assert.Contains("Googleメール通知", text);
+        Assert.Contains("30分前", text);
+    }
 }

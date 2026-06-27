@@ -181,6 +181,24 @@ public sealed class ReminderNotificationService : IDisposable
                     continue;
                 }
 
+                if (!calendarEvent.IsAppReminderEnabled)
+                {
+                    noReminderCount++;
+                    if (includeAllCandidates || calendarEvent.IsGoogleEmailReminderEnabled || calendarEvent.GoogleReminderMetadata?.HasGoogleReminder == true)
+                    {
+                        candidateDiagnostics.Add(CreateCandidateDiagnostic(
+                            calendarEvent,
+                            current,
+                            reminderMinutes,
+                            null,
+                            false,
+                            false,
+                            null,
+                            "アプリ内通知なし"));
+                    }
+                    continue;
+                }
+
                 reminderConfiguredCount++;
                 var notification = CreateReminderNotification(calendarEvent, current);
                 if (notification is null)
@@ -490,7 +508,14 @@ public sealed class ReminderNotificationService : IDisposable
         var metadata = calendarEvent.GoogleReminderMetadata;
         if (metadata is null || !metadata.HasGoogleReminder)
         {
-            return "";
+            return calendarEvent.IsAppReminderEnabled || calendarEvent.IsGoogleEmailReminderEnabled
+                ? FormatSeparatedReminderText(calendarEvent)
+                : "";
+        }
+
+        if (!calendarEvent.IsAppReminderEnabled || calendarEvent.IsGoogleEmailReminderEnabled)
+        {
+            return FormatSeparatedReminderText(calendarEvent);
         }
 
         if (metadata.HasEmailOnly && metadata.AdoptedReminderMinutes is null)
@@ -501,7 +526,7 @@ public sealed class ReminderNotificationService : IDisposable
         if (metadata.AdoptedReminderMethod is "email" or "default-email")
         {
             return metadata.AdoptedReminderMinutes == calendarEvent.ReminderMinutesBeforeStart
-                ? $"Google email {metadata.AdoptedReminderMinutes}分前を採用"
+                ? GoogleReminderDisplayFormatter.FormatEmailReminderText(metadata)
                 : "Google email通知設定差分あり";
         }
 
@@ -511,6 +536,29 @@ public sealed class ReminderNotificationService : IDisposable
         }
 
         return "";
+    }
+
+    private static string FormatSeparatedReminderText(CalendarEvent calendarEvent)
+    {
+        var appText = calendarEvent.IsAppReminderEnabled && calendarEvent.ReminderMinutesBeforeStart is int minutes
+            ? $"アプリ内通知: {FormatMinute(minutes)}"
+            : "アプリ内通知: なし";
+        var emailText = calendarEvent.IsGoogleEmailReminderEnabled
+            ? FormatGoogleEmailReminderText(calendarEvent)
+            : "Googleメール通知: なし";
+        return $"{appText} / {emailText}";
+    }
+
+    private static string FormatGoogleEmailReminderText(CalendarEvent calendarEvent)
+    {
+        return calendarEvent.ReminderMinutesBeforeStart is int minutes
+            ? $"Googleメール通知: {FormatMinute(minutes)}"
+            : GoogleReminderDisplayFormatter.FormatEmailReminderText(calendarEvent.GoogleReminderMetadata);
+    }
+
+    private static string FormatMinute(int minutes)
+    {
+        return minutes == 0 ? "開始時刻" : $"{minutes}分前";
     }
 
     private static string FormatDefaultReminders(GoogleReminderMetadata? metadata)

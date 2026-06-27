@@ -926,6 +926,8 @@ public partial class MainWindow : Window
                 editingEvent?.End.ToString("HH:mm") ?? "10:00",
                 editingEvent?.IsAllDay ?? _viewModel.DefaultNewEventIsAllDay,
                 editingEvent?.ReminderMinutesBeforeStart ?? _viewModel.DefaultScheduleReminderMinutes,
+                editingEvent?.IsAppReminderEnabled ?? _viewModel.IsAppReminderEnabled,
+                editingEvent?.IsGoogleEmailReminderEnabled ?? _viewModel.IsGoogleEmailReminderEnabled,
                 editingEvent?.Location ?? _viewModel.Location,
                 editingEvent?.CalendarId ?? _viewModel.EditorCalendarId,
                 editingEvent?.ColorId,
@@ -934,7 +936,8 @@ public partial class MainWindow : Window
                 await _viewModel.LoadScheduleLocationHistoryAsync(),
                 await _viewModel.LoadScheduleTitleHistoryAsync(),
                 _viewModel.AvailableCalendars,
-                _viewModel.ReminderOptions),
+                _viewModel.ReminderOptions,
+                GoogleReminderDisplayFormatter.FormatEmailReminderText(editingEvent?.GoogleReminderMetadata)),
             () =>
             {
                 if (!_viewModel.HideMainWindowWhileEditingSchedule)
@@ -963,6 +966,8 @@ public partial class MainWindow : Window
         _viewModel.EndTime = result.EndTime;
         _viewModel.IsAllDay = result.IsAllDay;
         _viewModel.ReminderMinutesBeforeStart = result.ReminderMinutesBeforeStart;
+        _viewModel.IsAppReminderEnabled = result.IsAppReminderEnabled;
+        _viewModel.IsGoogleEmailReminderEnabled = result.IsGoogleEmailReminderEnabled;
         _viewModel.Location = result.Location;
         _viewModel.Title = result.Title;
         _viewModel.Description = result.Description;

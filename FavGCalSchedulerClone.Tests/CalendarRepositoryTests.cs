@@ -249,4 +249,62 @@ public sealed class CalendarRepositoryTests
         Assert.Equal([30], loaded.GoogleReminderMetadata.EmailMinutes);
         Assert.Equal(10, loaded.GoogleReminderMetadata.AdoptedReminderMinutes);
     }
+
+    [Fact]
+    public async Task SaveEventAsync_RoundTripsSeparateReminderEnabledFlags()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        var item = new CalendarEvent
+        {
+            Id = "separate-reminders",
+            Title = "Separate reminders",
+            CalendarId = "primary",
+            Start = new DateTimeOffset(2026, 5, 16, 11, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 5, 16, 12, 0, 0, TimeSpan.Zero),
+            ReminderMinutesBeforeStart = 30,
+            IsAppReminderEnabled = false,
+            IsGoogleEmailReminderEnabled = true
+        };
+
+        await repository.SaveEventAsync(item);
+        var loaded = await repository.FindEventByIdAsync(item.Id);
+
+        Assert.NotNull(loaded);
+        Assert.Equal(30, loaded!.ReminderMinutesBeforeStart);
+        Assert.False(loaded.IsAppReminderEnabled);
+        Assert.True(loaded.IsGoogleEmailReminderEnabled);
+    }
+
+    [Fact]
+    public async Task LoadEventsAsync_InfersReminderEnabledFlagsForLegacyRows()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        await using (var connection = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = dbPath }.ToString()))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO events(
+                    id, calendar_id, title, start, end, is_all_day,
+                    reminder_minutes_before_start, is_deleted, updated_at, is_dirty, is_todo_like,
+                    google_reminder_metadata_json)
+                VALUES(
+                    'legacy-reminders', 'primary', 'Legacy reminders', '2026-05-16T11:00:00.0000000+00:00', '2026-05-16T12:00:00.0000000+00:00', 0,
+                    30, 0, '2026-05-16T10:00:00.0000000+00:00', 0, 0,
+                    '{"EmailMinutes":[30]}')
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var loaded = await repository.FindEventByIdAsync("legacy-reminders");
+
+        Assert.NotNull(loaded);
+        Assert.Equal(30, loaded!.ReminderMinutesBeforeStart);
+        Assert.True(loaded.IsAppReminderEnabled);
+        Assert.True(loaded.IsGoogleEmailReminderEnabled);
+    }
 }
