@@ -12,10 +12,14 @@ internal static class SettingsDialog
     public static Task<SettingsDialogResult?> ShowAsync(DialogUiFactory ui, SettingsDialogRequest request)
     {
         var settings = request.Settings;
-        var window = ui.CreateOwnedDialog("アプリ設定", 690, 610);
+        var window = ui.CreateOwnedDialog("アプリ設定", 760, 610);
         window.ResizeMode = ResizeMode.CanResize;
         var root = new DockPanel { Margin = new Thickness(10) };
-        var tabs = new TabControl { Margin = new Thickness(0, 0, 0, 10) };
+        var tabs = new TabControl
+        {
+            Margin = new Thickness(0, 0, 0, 10),
+            TabStripPlacement = Dock.Left
+        };
         DockPanel.SetDock(tabs, Dock.Top);
         root.Children.Add(tabs);
         window.Content = root;
@@ -157,6 +161,12 @@ internal static class SettingsDialog
 
         var notifyPage = Page();
         var soundEnabled = new CheckBox { Content = "通知時に音声ファイルを再生する", IsChecked = settings.EnableReminderSound };
+        var adoptGoogleEmailReminders = new CheckBox
+        {
+            Content = "Googleのメール通知もアプリ内通知として扱う",
+            IsChecked = settings.AdoptGoogleEmailRemindersAsLocalNotifications,
+            Margin = new Thickness(0, 0, 0, 12)
+        };
         var soundPath = new TextBox { Text = settings.ReminderSoundFilePath ?? "", MinWidth = 430, Margin = new Thickness(0, 8, 0, 8) };
         var browseSound = new Button { Content = "参照", Width = 80 };
         browseSound.Click += (_, _) =>
@@ -189,6 +199,7 @@ internal static class SettingsDialog
                 MessageBoxButton.OK,
                 result.Succeeded ? MessageBoxImage.Information : MessageBoxImage.Warning);
         };
+        notifyPage.Children.Add(adoptGoogleEmailReminders);
         notifyPage.Children.Add(soundEnabled);
         notifyPage.Children.Add(soundPath);
         notifyPage.Children.Add(browseSound);
@@ -208,6 +219,7 @@ internal static class SettingsDialog
         var authorize = new Button { Content = "Google認証", Width = 120 };
         var clearToken = new Button { Content = "トークン削除", Width = 120 };
         var reloadCalendars = new Button { Content = "カレンダー一覧を更新", Width = 170 };
+        var refreshReminders = new Button { Content = "Google通知設定を再取得", Width = 190 };
         chooseOAuth.Click += (_, _) =>
         {
             var dialog = new OpenFileDialog { Filter = "Google OAuth client JSON (*.json)|*.json|All files (*.*)|*.*" };
@@ -224,9 +236,15 @@ internal static class SettingsDialog
             await request.SetOAuthClientJsonPathAsync(oauthPath.Text);
             await request.ReloadAvailableCalendarsAsync();
         });
+        refreshReminders.Click += async (_, _) => await RunGoogleOperationAsync(window, "Google通知設定", "Google通知設定を再取得しました。", "Google通知設定エラー", async () =>
+        {
+            await request.SetOAuthClientJsonPathAsync(oauthPath.Text);
+            var updated = await request.RefreshGoogleRemindersAsync();
+            MessageBox.Show(window, $"更新しました: {updated} 件", "Google通知設定", MessageBoxButton.OK, MessageBoxImage.Information);
+        }, showSuccessMessage: false);
         accountPage.Children.Add(new TextBlock { Text = "Google Calendar API OAuth client JSON" });
         accountPage.Children.Add(oauthPath);
-        foreach (var button in new[] { chooseOAuth, authorize, clearToken, reloadCalendars }) accountPage.Children.Add(button);
+        foreach (var button in new[] { chooseOAuth, authorize, clearToken, reloadCalendars, refreshReminders }) accountPage.Children.Add(button);
         tabs.Items.Add(Tab("GoogleAccount設定", accountPage));
 
         var syncPage = Page();
@@ -274,6 +292,7 @@ internal static class SettingsDialog
         settings.EnableReminderSound = soundEnabled.IsChecked == true;
         settings.ReminderSoundFilePath = string.IsNullOrWhiteSpace(soundPath.Text) ? null : soundPath.Text.Trim();
         settings.ReminderSoundVolume = (int)volume.Value;
+        settings.AdoptGoogleEmailRemindersAsLocalNotifications = adoptGoogleEmailReminders.IsChecked == true;
         settings.OAuthClientJsonPath = string.IsNullOrWhiteSpace(oauthPath.Text) ? null : oauthPath.Text.Trim();
         settings.SyncAfterLocalChange = syncAfterChange.IsChecked == true;
         settings.ShowSyncPreviewBeforeManualSync = syncPreview.IsChecked == true;
@@ -316,12 +335,21 @@ internal static class SettingsDialog
         }
     }
 
-    private static async Task RunGoogleOperationAsync(Window owner, string title, string successMessage, string errorTitle, Func<Task> operation)
+    private static async Task RunGoogleOperationAsync(
+        Window owner,
+        string title,
+        string successMessage,
+        string errorTitle,
+        Func<Task> operation,
+        bool showSuccessMessage = true)
     {
         try
         {
             await operation();
-            MessageBox.Show(owner, successMessage, title, MessageBoxButton.OK, MessageBoxImage.Information);
+            if (showSuccessMessage)
+            {
+                MessageBox.Show(owner, successMessage, title, MessageBoxButton.OK, MessageBoxImage.Information);
+            }
         }
         catch (Exception ex)
         {
@@ -342,6 +370,7 @@ internal sealed record SettingsDialogRequest(
     Func<Task> AuthorizeGoogleAsync,
     Func<Task> ClearTokensAsync,
     Func<Task> ReloadAvailableCalendarsAsync,
+    Func<Task<int>> RefreshGoogleRemindersAsync,
     Func<ReminderTestSettings, Task<ReminderTestNotificationResult>> ShowTestNotificationAsync);
 
 internal sealed record SettingsDialogResult(AppSettings Settings, string OAuthClientJsonPath);

@@ -467,7 +467,7 @@ public sealed class ReminderNotificationService : IDisposable
             return null;
         }
 
-        if (metadata.HasEmailOnly)
+        if (metadata.HasEmailOnly && metadata.AdoptedReminderMinutes is null)
         {
             return "Googleメール通知のみ（本ツールのポップアップ通知対象外）";
         }
@@ -493,9 +493,16 @@ public sealed class ReminderNotificationService : IDisposable
             return "";
         }
 
-        if (metadata.HasEmailOnly)
+        if (metadata.HasEmailOnly && metadata.AdoptedReminderMinutes is null)
         {
             return "Googleメール通知のみ";
+        }
+
+        if (metadata.AdoptedReminderMethod is "email" or "default-email")
+        {
+            return metadata.AdoptedReminderMinutes == calendarEvent.ReminderMinutesBeforeStart
+                ? $"Google email {metadata.AdoptedReminderMinutes}分前を採用"
+                : "Google email通知設定差分あり";
         }
 
         if (metadata.AdoptedReminderMinutes != calendarEvent.ReminderMinutesBeforeStart)

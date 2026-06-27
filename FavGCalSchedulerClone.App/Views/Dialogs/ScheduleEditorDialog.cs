@@ -103,22 +103,14 @@ internal static class ScheduleEditorDialog
         dayCount.LostFocus += (_, _) => UpdateEndDateFromCount();
         UpdateDayCount();
 
-        void ApplyDateShortcut(DateTime date)
+        void ApplyDurationShortcut(TimeSpan duration)
         {
-            startDate.SelectedDate = date.Date;
-            endDate.SelectedDate = date.Date;
-            dayCount.Text = "1";
-        }
-
-        void ApplyRelativeTimeShortcut(TimeSpan offset, TimeSpan duration)
-        {
-            var start = DateTime.Now.Add(offset);
-            startDate.SelectedDate = start.Date;
-            endDate.SelectedDate = start.Date;
-            startTime.Text = start.ToString("HH:mm", CultureInfo.InvariantCulture);
-            endTime.Text = start.Add(duration).ToString("HH:mm", CultureInfo.InvariantCulture);
-            isAllDay.IsChecked = false;
-            dayCount.Text = "1";
+            if (TryCreateEndTimeFromDuration(startTime.Text, duration, out var endTimeText))
+            {
+                startTime.Text = NormalizeTimeText(startTime.Text);
+                endTime.Text = endTimeText;
+                isAllDay.IsChecked = false;
+            }
         }
 
         var timeGroup = new GroupBox { Header = "開始時間／終了時間", Margin = new Thickness(0, 0, ui.X(10), ui.Y(10)), Padding = ui.Thickness(14, 14, 14, 6) };
@@ -152,11 +144,9 @@ internal static class ScheduleEditorDialog
         Grid.SetColumn(isAllDay, 3);
         timeGrid.Children.Add(isAllDay);
         var quickTimePanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, ui.Y(2), 0, ui.Y(8)) };
-        quickTimePanel.Children.Add(ShortcutButton("今日", () => ApplyDateShortcut(DateTime.Today)));
-        quickTimePanel.Children.Add(ShortcutButton("明日", () => ApplyDateShortcut(DateTime.Today.AddDays(1))));
-        quickTimePanel.Children.Add(ShortcutButton("来週", () => ApplyDateShortcut(DateTime.Today.AddDays(7))));
-        quickTimePanel.Children.Add(ShortcutButton("30分後", () => ApplyRelativeTimeShortcut(TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(30))));
-        quickTimePanel.Children.Add(ShortcutButton("1時間", () => ApplyRelativeTimeShortcut(TimeSpan.Zero, TimeSpan.FromHours(1))));
+        quickTimePanel.Children.Add(ShortcutButton("30分", () => ApplyDurationShortcut(TimeSpan.FromMinutes(30))));
+        quickTimePanel.Children.Add(ShortcutButton("1時間", () => ApplyDurationShortcut(TimeSpan.FromHours(1))));
+        quickTimePanel.Children.Add(ShortcutButton("2時間", () => ApplyDurationShortcut(TimeSpan.FromHours(2))));
         Grid.SetRow(quickTimePanel, 3);
         Grid.SetColumnSpan(quickTimePanel, 4);
         timeGrid.Children.Add(quickTimePanel);
@@ -200,16 +190,16 @@ internal static class ScheduleEditorDialog
         details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ui.X(214)) });
         details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ui.X(16)) });
         details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ui.X(260)) });
-        ui.AddLabeledField(details, 0, 0, "場所", location);
-        ui.AddLabeledField(details, 0, 2, "予定の色", color, rightMarginPhysicalPixels: 0);
-        ui.AddLabeledField(details, 0, 4, "カレンダー", calendar);
-        ui.AddLabeledField(details, 1, 0, "件名", title, columnSpan: 5);
+        ui.AddLabeledField(details, 0, 0, "件名", title, columnSpan: 5);
+        ui.AddLabeledField(details, 1, 0, "場所", location);
+        ui.AddLabeledField(details, 1, 2, "予定の色", color, rightMarginPhysicalPixels: 0);
+        ui.AddLabeledField(details, 1, 4, "カレンダー", calendar);
         ui.AddLabeledField(details, 2, 0, "内容", description, columnSpan: 5, stretchVertically: true);
         detailsGroup.Content = details;
         Grid.SetRow(detailsGroup, 1);
         root.Children.Add(detailsGroup);
 
-        var buttons = ui.DialogButtons(window, "設定", "キャンセル");
+        var buttons = ui.DialogButtons(window, request.IsNew ? "登録" : "保存", "キャンセル");
         Grid.SetRow(buttons, 2);
         root.Children.Add(buttons);
 
@@ -306,6 +296,28 @@ internal static class ScheduleEditorDialog
         }
 
         return value;
+    }
+
+    internal static bool TryCreateEndTimeFromDuration(string? startTime, TimeSpan duration, out string endTime)
+    {
+        endTime = startTime ?? "";
+        var normalized = NormalizeTimeText(startTime);
+        if (!TimeSpan.TryParseExact(
+                normalized,
+                "hh\\:mm",
+                CultureInfo.InvariantCulture,
+                out var start)
+            || start.Days != 0
+            || start.Hours is < 0 or > 23
+            || start.Minutes is < 0 or > 59
+            || start.Seconds != 0)
+        {
+            return false;
+        }
+
+        var end = start.Add(duration);
+        endTime = $"{end.Hours:00}:{end.Minutes:00}";
+        return true;
     }
 
     private static IEnumerable<string> TimeChoices()

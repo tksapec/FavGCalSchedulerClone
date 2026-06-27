@@ -148,7 +148,7 @@ public sealed class GoogleCalendarSyncService
             deleted += push.Deleted;
             recreated += push.Recreated;
 
-            var pull = await PullRemoteEventsAsync(client, calendarId, settings.SyncConflictPolicy, failures, reminderDefaults, cancellationToken);
+            var pull = await PullRemoteEventsAsync(client, calendarId, settings.SyncConflictPolicy, failures, reminderDefaults, settings.AdoptGoogleEmailRemindersAsLocalNotifications, cancellationToken);
             pulled += pull.Pulled;
             skipped += pull.Skipped;
             conflicts += pull.Conflicts;
@@ -311,7 +311,8 @@ public sealed class GoogleCalendarSyncService
                 await _repository.UpsertSyncedEventAsync(GoogleEventMapper.FromGoogleEvent(
                     googleEvent,
                     localEvent.CalendarId,
-                    GetDefaultReminders(reminderDefaults, localEvent.CalendarId)));
+                    GetDefaultReminders(reminderDefaults, localEvent.CalendarId),
+                    settings.AdoptGoogleEmailRemindersAsLocalNotifications));
                 restored++;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -356,7 +357,7 @@ public sealed class GoogleCalendarSyncService
         foreach (var calendarId in targets)
         {
             var failures = new List<SyncFailureDiagnostic>();
-            var pull = await PullRemoteEventsAsync(client, calendarId, settings.SyncConflictPolicy, failures, reminderDefaults, cancellationToken);
+            var pull = await PullRemoteEventsAsync(client, calendarId, settings.SyncConflictPolicy, failures, reminderDefaults, settings.AdoptGoogleEmailRemindersAsLocalNotifications, cancellationToken);
             pulled += pull.Pulled;
             if (failures.Count > 0)
             {
@@ -437,7 +438,8 @@ public sealed class GoogleCalendarSyncService
                     var mapped = GoogleEventMapper.FromGoogleEvent(
                         googleEvent,
                         calendarId,
-                        GetDefaultReminders(reminderDefaults, calendarId));
+                        GetDefaultReminders(reminderDefaults, calendarId),
+                        settings.AdoptGoogleEmailRemindersAsLocalNotifications);
                     var local = await _repository.FindEventByGoogleEventIdAsync(calendarId, googleEvent.Id);
                     if (local is null)
                     {
@@ -506,7 +508,11 @@ public sealed class GoogleCalendarSyncService
             {
                 foreach (var googleEvent in await LoadRemoteChangesForPreviewAsync(client, calendarId, syncToken, cancellationToken))
                 {
-                    var remoteEvent = GoogleEventMapper.FromGoogleEvent(googleEvent, calendarId, GetDefaultReminders(reminderDefaults, calendarId));
+                    var remoteEvent = GoogleEventMapper.FromGoogleEvent(
+                        googleEvent,
+                        calendarId,
+                        GetDefaultReminders(reminderDefaults, calendarId),
+                        settings.AdoptGoogleEmailRemindersAsLocalNotifications);
                     var item = ToPreviewItem(calendarId, remoteEvent, "pull", "Googleから取得予定");
                     var local = await _repository.FindEventByGoogleEventIdAsync(calendarId, googleEvent.Id);
                     if (local?.IsDirty == true)
@@ -936,6 +942,7 @@ public sealed class GoogleCalendarSyncService
         SyncConflictPolicy conflictPolicy,
         ICollection<SyncFailureDiagnostic> failures,
         IReadOnlyDictionary<string, IReadOnlyList<GoogleReminderOverride>> reminderDefaults,
+        bool adoptEmailRemindersAsLocalNotifications,
         CancellationToken cancellationToken)
     {
         var syncToken = await _repository.GetSyncTokenAsync(calendarId);
@@ -971,7 +978,8 @@ public sealed class GoogleCalendarSyncService
                     await _repository.UpsertSyncedEventAsync(GoogleEventMapper.FromGoogleEvent(
                         googleEvent,
                         calendarId,
-                        GetDefaultReminders(reminderDefaults, calendarId)));
+                        GetDefaultReminders(reminderDefaults, calendarId),
+                        adoptEmailRemindersAsLocalNotifications));
                     pulled++;
                 }
 
@@ -989,7 +997,7 @@ public sealed class GoogleCalendarSyncService
         {
             failures.Add(CreatePullFailureDiagnostic(calendarId, syncToken, pageToken, ex, "SyncTokenExpired", "410 Gone: sync token をリセットして再取得します。"));
             await _repository.SaveSyncTokenAsync(calendarId, null);
-            var retry = await PullRemoteEventsAsync(client, calendarId, conflictPolicy, failures, reminderDefaults, cancellationToken);
+            var retry = await PullRemoteEventsAsync(client, calendarId, conflictPolicy, failures, reminderDefaults, adoptEmailRemindersAsLocalNotifications, cancellationToken);
             return new SyncPullSummary(pulled + retry.Pulled, skipped + retry.Skipped, conflicts + retry.Conflicts, retry.Failed);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

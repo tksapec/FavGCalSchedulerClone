@@ -103,6 +103,8 @@ public partial class MainWindow : Window
         {
             Command = command,
             Padding = new Thickness(6, 1, 6, 1),
+            MinWidth = 170,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
             BorderThickness = new Thickness(0),
             Background = Brushes.Transparent,
             Foreground = CreateBrush(foreground)
@@ -1206,6 +1208,7 @@ public partial class MainWindow : Window
                 _viewModel.AuthorizeGoogleAsync,
                 _viewModel.ClearTokensAsync,
                 _viewModel.ReloadAvailableCalendarsAsync,
+                _viewModel.RefreshGoogleReminderMetadataAsync,
                 settings => _reminderService.ShowTestNotificationDetailedAsync(CreateReminderNotifier(settings))));
         if (result is null)
         {

@@ -27,6 +27,7 @@ public sealed class AppSettings
     public int ReminderSoundVolume { get; set; } = 50;
     public bool UseWindowsToastNotifications { get; set; } = true;
     public bool ShowMessageBoxAfterToastNotification { get; set; } = true;
+    public bool AdoptGoogleEmailRemindersAsLocalNotifications { get; set; } = true;
     public DateTimeOffset? ToastVerifiedAt { get; set; }
     public string? ToastVerifiedAumid { get; set; }
     public string? ToastVerifiedExecutablePath { get; set; }

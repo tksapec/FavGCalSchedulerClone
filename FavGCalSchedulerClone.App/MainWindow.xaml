@@ -321,7 +321,7 @@
             </MenuItem>
             <MenuItem Header="設定(_C)">
                 <MenuItem Header="アプリ設定(_A)" Command="{Binding ShowSettingsCommand}" />
-                <MenuItem Header="通知一覧..." Command="{Binding ShowReminderHistoryCommand}" />
+                <MenuItem Header="通知履歴・診断..." Command="{Binding ShowReminderHistoryCommand}" />
             </MenuItem>
             <MenuItem Header="ヘルプ(_H)">
                 <MenuItem Header="バージョン情報(_A)..." Command="{Binding ShowAboutCommand}" />

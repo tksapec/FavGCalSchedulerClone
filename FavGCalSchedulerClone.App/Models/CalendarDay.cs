@@ -98,7 +98,7 @@ public sealed class CalendarDay : INotifyPropertyChanged
     }
 
     public bool HasHiddenEvents => HiddenEventCount > 0;
-    public string HiddenEventText => HiddenEventCount > 0 ? $"他 {HiddenEventCount} 件" : "";
+    public string HiddenEventText => HiddenEventCount > 0 ? $"+{HiddenEventCount}件" : "";
 
     public bool IsDropTarget
     {

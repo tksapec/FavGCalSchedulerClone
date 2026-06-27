@@ -102,7 +102,7 @@ internal static class TodoEditorDialog
             VerticalContentAlignment = VerticalAlignment.Top
         };
 
-        AddTodoEditorLayout(ui, root, window, dueDateEditor, priority, progressInput, progressValue, complete, color, calendar, title, description);
+        AddTodoEditorLayout(ui, root, window, request.IsNew, dueDateEditor, priority, progressInput, progressValue, complete, color, calendar, title, description);
         if (window.ShowDialog() != true)
         {
             return null;
@@ -122,6 +122,7 @@ internal static class TodoEditorDialog
         DialogUiFactory ui,
         Grid root,
         Window window,
+        bool isNew,
         FrameworkElement dueDate,
         ComboBox priority,
         FrameworkElement progressInput,
@@ -175,19 +176,20 @@ internal static class TodoEditorDialog
         var details = new Grid();
         details.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         details.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        details.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         details.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ui.X(214)) });
         details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ui.X(16)) });
         details.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        ui.AddLabeledField(details, 0, 0, "予定の色", color, rightMarginPhysicalPixels: 0);
-        ui.AddLabeledField(details, 0, 2, "カレンダー", calendar);
-        ui.AddLabeledField(details, 1, 0, "件名", title, columnSpan: 3);
-        ui.AddLabeledField(details, 2, 0, "内容", description, columnSpan: 3, stretchVertically: true);
+        ui.AddLabeledField(details, 0, 0, "件名", title, columnSpan: 3);
+        ui.AddLabeledField(details, 1, 0, "予定の色", color, rightMarginPhysicalPixels: 0);
+        ui.AddLabeledField(details, 1, 2, "カレンダー", calendar);
+        ui.AddLabeledField(details, 3, 0, "内容", description, columnSpan: 3, stretchVertically: true);
         detailsGroup.Content = details;
         Grid.SetRow(detailsGroup, 1);
         root.Children.Add(detailsGroup);
 
-        var buttons = ui.DialogButtons(window, "設定", "キャンセル");
+        var buttons = ui.DialogButtons(window, isNew ? "登録" : "保存", "キャンセル");
         Grid.SetRow(buttons, 2);
         root.Children.Add(buttons);
     }

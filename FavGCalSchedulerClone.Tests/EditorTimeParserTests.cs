@@ -40,4 +40,29 @@ public sealed class EditorTimeParserTests
     {
         Assert.Equal(expected, ScheduleEditorDialog.NormalizeTimeText(value));
     }
+
+    [Theory]
+    [InlineData("09:00", 30, "09:30")]
+    [InlineData("09:00", 60, "10:00")]
+    [InlineData("09:00", 120, "11:00")]
+    [InlineData("23:30", 60, "00:30")]
+    [InlineData("0900", 30, "09:30")]
+    public void TryCreateEndTimeFromDuration_UsesStartTimePlusDuration(
+        string startTime,
+        int durationMinutes,
+        string expected)
+    {
+        Assert.True(ScheduleEditorDialog.TryCreateEndTimeFromDuration(startTime, TimeSpan.FromMinutes(durationMinutes), out var endTime));
+        Assert.Equal(expected, endTime);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("900")]
+    [InlineData("2460")]
+    public void TryCreateEndTimeFromDuration_RejectsInvalidStartTime(string startTime)
+    {
+        Assert.False(ScheduleEditorDialog.TryCreateEndTimeFromDuration(startTime, TimeSpan.FromMinutes(30), out var endTime));
+        Assert.Equal(startTime, endTime);
+    }
 }

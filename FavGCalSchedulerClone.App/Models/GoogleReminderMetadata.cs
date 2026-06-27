@@ -8,6 +8,7 @@ public sealed class GoogleReminderMetadata
     public List<int> DefaultPopupMinutes { get; set; } = [];
     public List<int> DefaultEmailMinutes { get; set; } = [];
     public int? AdoptedReminderMinutes { get; set; }
+    public string? AdoptedReminderMethod { get; set; }
     public string? Source { get; set; }
 
     public bool HasGoogleReminder =>

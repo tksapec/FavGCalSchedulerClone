@@ -4,6 +4,9 @@ namespace FavGCalSchedulerClone.App.Services;
 
 public static class CalendarEventToolTipFormatter
 {
+    private const int MaxLineLength = 120;
+    private const int MaxValueLines = 5;
+
     public static string Format(CalendarEvent calendarEvent, string? calendarName = null)
     {
         var lines = new List<string>
@@ -30,7 +33,7 @@ public static class CalendarEventToolTipFormatter
             lines.Add($"優先度 {calendarEvent.TodoPriorityDisplayText} / 進捗 {calendarEvent.TodoProgress}%");
         }
 
-        return string.Join(Environment.NewLine, lines);
+        return string.Join(Environment.NewLine, lines.Select(TrimLine));
     }
 
     private static string FormatDate(CalendarEvent calendarEvent)
@@ -53,7 +56,32 @@ public static class CalendarEventToolTipFormatter
         if (!string.IsNullOrWhiteSpace(value))
         {
             lines.Add(header);
-            lines.Add(value.Trim());
+            lines.Add(TrimValue(value));
         }
+    }
+
+    private static string TrimValue(string value)
+    {
+        var normalizedLines = value
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Split('\n')
+            .Select(line => line.Trim())
+            .Where(line => line.Length > 0)
+            .Take(MaxValueLines + 1)
+            .ToArray();
+        var visible = normalizedLines.Take(MaxValueLines).Select(TrimLine).ToList();
+        if (normalizedLines.Length > MaxValueLines)
+        {
+            visible.Add("...");
+        }
+
+        return string.Join(Environment.NewLine, visible);
+    }
+
+    private static string TrimLine(string value)
+    {
+        var trimmed = value.Trim();
+        return trimmed.Length <= MaxLineLength ? trimmed : trimmed[..MaxLineLength] + "...";
     }
 }

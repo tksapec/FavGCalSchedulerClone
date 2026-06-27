@@ -512,7 +512,7 @@ public sealed class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
-    public async Task SyncAsync_PullsGoogleEmailOnlyReminderAsDiagnosticsMetadataOnly()
+    public async Task SyncAsync_PullsGoogleEmailOnlyReminderAsLocalReminder()
     {
         var repository = await CreateRepositoryAsync();
         var api = new FakeGoogleCalendarApi();
@@ -537,9 +537,43 @@ public sealed class GoogleCalendarSyncServiceTests
         var stored = (await repository.LoadEventsAsync(
             new DateTimeOffset(2026, 1, 8, 0, 0, 0, TimeSpan.Zero),
             new DateTimeOffset(2026, 1, 9, 0, 0, 0, TimeSpan.Zero))).Single();
+        Assert.Equal(30, stored.ReminderMinutesBeforeStart);
+        Assert.True(stored.GoogleReminderMetadata!.HasEmailOnly);
+        Assert.Equal([30], stored.GoogleReminderMetadata.EmailMinutes);
+        Assert.Equal("email", stored.GoogleReminderMetadata.AdoptedReminderMethod);
+    }
+
+    [Fact]
+    public async Task SyncAsync_PreservesGoogleEmailOnlyReminderAsDiagnosticsWhenAdoptionDisabled()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        var settings = CreateSettings("work");
+        settings.AdoptGoogleEmailRemindersAsLocalNotifications = false;
+        api.UpsertRemote("work", new Event
+        {
+            Id = "remote-email",
+            Summary = "email reminder",
+            Start = DateTimeEvent(2026, 1, 8, 11),
+            End = DateTimeEvent(2026, 1, 8, 12),
+            Status = "confirmed",
+            Reminders = new Event.RemindersData
+            {
+                UseDefault = false,
+                Overrides = [new EventReminder { Method = "email", Minutes = 30 }]
+            }
+        });
+        var service = new GoogleCalendarSyncService(repository, api);
+
+        await service.SyncAsync(settings);
+
+        var stored = (await repository.LoadEventsAsync(
+            new DateTimeOffset(2026, 1, 8, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 1, 9, 0, 0, 0, TimeSpan.Zero))).Single();
         Assert.Null(stored.ReminderMinutesBeforeStart);
         Assert.True(stored.GoogleReminderMetadata!.HasEmailOnly);
         Assert.Equal([30], stored.GoogleReminderMetadata.EmailMinutes);
+        Assert.Null(stored.GoogleReminderMetadata.AdoptedReminderMethod);
     }
 
     [Fact]
