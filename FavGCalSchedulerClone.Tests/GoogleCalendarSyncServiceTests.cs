@@ -1073,7 +1073,8 @@ public sealed class GoogleCalendarSyncServiceTests
             }
         });
         var settings = CreateSettings("primary");
-        settings.AutomaticSyncIntervalMinutes = 1;
+        settings.AutomaticSyncIntervalMinutes = 30;
+        settings.LastAutomaticSyncAt = DateTimeOffset.Now.AddMinutes(-31);
         await repository.SaveSettingsAsync(settings);
         var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository, api));
         await viewModel.InitializeAsync();
@@ -1082,6 +1083,49 @@ public sealed class GoogleCalendarSyncServiceTests
         await viewModel.RunAutomaticSyncIfDueAsync();
 
         Assert.DoesNotContain(api.ListRequests, request =>
+            request.CalendarId == "primary"
+            && request.TimeMax is not null
+            && request.ShowDeleted == false);
+    }
+
+    [Fact]
+    public async Task MainViewModel_ManualSyncRequestedDuringAutomaticSyncRerunsWithReminderRefresh()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        api.UpsertRemote("primary", new Event
+        {
+            Id = "remote-pending-manual-refresh",
+            Summary = "pending manual reminder refresh",
+            Start = DateTimeEvent(2026, 1, 8, 19),
+            End = DateTimeEvent(2026, 1, 8, 20),
+            Status = "confirmed",
+            Reminders = new Event.RemindersData
+            {
+                UseDefault = false,
+                Overrides = [new EventReminder { Method = "popup", Minutes = 25 }]
+            }
+        });
+        var settings = CreateSettings("primary");
+        settings.AutomaticSyncIntervalMinutes = 30;
+        settings.LastAutomaticSyncAt = DateTimeOffset.Now.AddMinutes(-31);
+        await repository.SaveSettingsAsync(settings);
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository, api));
+        await viewModel.InitializeAsync();
+        api.ListRequests.Clear();
+        var listStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var continueList = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        api.ListStarted = listStarted;
+        api.ContinueList = continueList;
+
+        var automaticSync = viewModel.RunAutomaticSyncIfDueAsync();
+        await listStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var manualResult = await viewModel.SynchronizeManuallyAsync();
+        continueList.SetResult();
+        await automaticSync.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Null(manualResult);
+        Assert.Contains(api.ListRequests, request =>
             request.CalendarId == "primary"
             && request.TimeMax is not null
             && request.ShowDeleted == false);

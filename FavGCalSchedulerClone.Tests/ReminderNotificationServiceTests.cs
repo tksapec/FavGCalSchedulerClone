@@ -236,6 +236,64 @@ public sealed class ReminderNotificationServiceTests
     }
 
     [Fact]
+    public async Task CheckDueRemindersAsync_DoesNotTriggerForTimedEventAfterStart()
+    {
+        var repository = await CreateRepositoryAsync();
+        var service = new ReminderNotificationService(repository);
+        var notifications = new List<ReminderNotification>();
+        service.ReminderTriggered += notification =>
+        {
+            notifications.Add(notification);
+            return Task.CompletedTask;
+        };
+
+        var start = new DateTimeOffset(2026, 5, 17, 10, 0, 0, TimeSpan.FromHours(9));
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "Past timed event",
+            CalendarId = "primary",
+            Start = start,
+            End = start.AddHours(1),
+            ReminderMinutesBeforeStart = 10
+        });
+
+        await service.CheckDueRemindersAsync(start.AddMinutes(1));
+
+        Assert.Empty(notifications);
+        Assert.Contains(service.CurrentDiagnostics.Candidates, item =>
+            item.Title == "Past timed event"
+            && item.IsDue
+            && item.Reason == "開始済みの予定");
+    }
+
+    [Fact]
+    public async Task CheckDueRemindersAsync_TriggersDelayedReminderBeforeTimedEventStart()
+    {
+        var repository = await CreateRepositoryAsync();
+        var service = new ReminderNotificationService(repository);
+        var notifications = new List<ReminderNotification>();
+        service.ReminderTriggered += notification =>
+        {
+            notifications.Add(notification);
+            return Task.CompletedTask;
+        };
+
+        var start = new DateTimeOffset(2026, 5, 17, 10, 0, 0, TimeSpan.FromHours(9));
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "Delayed before start",
+            CalendarId = "primary",
+            Start = start,
+            End = start.AddHours(1),
+            ReminderMinutesBeforeStart = 10
+        });
+
+        await service.CheckDueRemindersAsync(start.AddMinutes(-1));
+
+        Assert.Single(notifications);
+    }
+
+    [Fact]
     public async Task CheckDueRemindersAsync_DoesNotRepeatSameOccurrence()
     {
         var repository = await CreateRepositoryAsync();
@@ -364,6 +422,39 @@ public sealed class ReminderNotificationServiceTests
     }
 
     [Fact]
+    public async Task CheckDueRemindersAsync_DoesNotTriggerForFinishedAllDayEvent()
+    {
+        var repository = await CreateRepositoryAsync();
+        var service = new ReminderNotificationService(repository);
+        var notifications = new List<ReminderNotification>();
+        service.ReminderTriggered += notification =>
+        {
+            notifications.Add(notification);
+            return Task.CompletedTask;
+        };
+
+        var day = new DateTime(2026, 5, 17);
+        var offset = TimeZoneInfo.Local.GetUtcOffset(day);
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "Finished all day",
+            CalendarId = "primary",
+            Start = new DateTimeOffset(day, offset),
+            End = new DateTimeOffset(day.AddDays(1), offset),
+            IsAllDay = true,
+            ReminderMinutesBeforeStart = 60
+        });
+
+        await service.CheckDueRemindersAsync(new DateTimeOffset(day.AddDays(1).AddHours(9), offset));
+
+        Assert.Empty(notifications);
+        Assert.Contains(service.CurrentDiagnostics.Candidates, item =>
+            item.Title == "Finished all day"
+            && item.IsDue
+            && item.Reason == "終了済みの予定");
+    }
+
+    [Fact]
     public async Task LoadHistoryAsync_ReturnsEmptyWhenStoredJsonIsCorrupt()
     {
         var repository = await CreateRepositoryAsync();
@@ -436,18 +527,19 @@ public sealed class ReminderNotificationServiceTests
             throw new InvalidOperationException("notification failed");
         };
 
-        var start = new DateTimeOffset(2026, 5, 17, 12, 0, 0, TimeSpan.FromHours(9));
+        var start = new DateTimeOffset(2026, 5, 17, 12, 10, 0, TimeSpan.FromHours(9));
         await repository.SaveEventAsync(new CalendarEvent
         {
             Title = "Retry reminder",
             CalendarId = "primary",
             Start = start,
             End = start.AddHours(1),
-            ReminderMinutesBeforeStart = 0
+            ReminderMinutesBeforeStart = 10
         });
 
-        await service.CheckDueRemindersAsync(start);
-        await service.CheckDueRemindersAsync(start.AddMinutes(1));
+        var dueAt = start.AddMinutes(-10);
+        await service.CheckDueRemindersAsync(dueAt);
+        await service.CheckDueRemindersAsync(dueAt.AddMinutes(1));
 
         Assert.Equal(2, attempts);
         var history = await service.LoadHistoryAsync();
@@ -467,18 +559,19 @@ public sealed class ReminderNotificationServiceTests
         var service = new ReminderNotificationService(repository);
         service.ReminderTriggered += _ => throw new InvalidOperationException("notification failed");
 
-        var start = new DateTimeOffset(2026, 5, 17, 12, 0, 0, TimeSpan.FromHours(9));
+        var start = new DateTimeOffset(2026, 5, 17, 12, 30, 0, TimeSpan.FromHours(9));
         await repository.SaveEventAsync(new CalendarEvent
         {
             Title = "Retry reminder after window",
             CalendarId = "primary",
             Start = start,
             End = start.AddHours(1),
-            ReminderMinutesBeforeStart = 0
+            ReminderMinutesBeforeStart = 30
         });
 
-        await service.CheckDueRemindersAsync(start);
-        await service.CheckDueRemindersAsync(start.AddMinutes(6));
+        var dueAt = start.AddMinutes(-30);
+        await service.CheckDueRemindersAsync(dueAt);
+        await service.CheckDueRemindersAsync(dueAt.AddMinutes(6));
 
         var history = await service.LoadHistoryAsync();
         Assert.Equal(2, history.Count);
@@ -606,8 +699,7 @@ public sealed class ReminderNotificationServiceTests
     {
         var displayed = false;
         var notifier = new CustomPopupReminderNotifier(
-            (_, _) => Task.CompletedTask,
-            (_, _, _, _) =>
+            (_, _, _) =>
             {
                 displayed = true;
                 return Task.CompletedTask;
@@ -619,6 +711,26 @@ public sealed class ReminderNotificationServiceTests
         Assert.Equal("CustomPopup", notifier.DeliveryMethodName);
         Assert.False(notifier.UsedMessageBoxFallback);
         Assert.Equal(MessageBoxNotificationRole.None, notifier.MessageBoxRole);
+    }
+
+    [Fact]
+    public async Task CustomReminderPopupWindow_SourceDoesNotCreateSnoozeButtons()
+    {
+        var sourcePath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            "FavGCalSchedulerClone.App",
+            "Services",
+            "CustomReminderPopupWindow.cs"));
+
+        var source = await File.ReadAllTextAsync(sourcePath);
+
+        Assert.DoesNotContain("CreateSnoozeButton", source);
+        Assert.DoesNotContain("5分後", source);
+        Assert.DoesNotContain("10分後", source);
     }
 
     [Fact]

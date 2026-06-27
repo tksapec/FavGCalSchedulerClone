@@ -211,6 +211,10 @@ public sealed class ReminderNotificationService : IDisposable
                 {
                     reason = googleReminderReason ?? "通知時刻未到達";
                 }
+                else if (IsPastForReminder(calendarEvent, current))
+                {
+                    reason = calendarEvent.IsAllDay ? "終了済みの予定" : "開始済みの予定";
+                }
                 else
                 {
                     reason = snoozedUntil is not null ? "スヌーズ期限到達" : "通知対象";
@@ -595,6 +599,16 @@ public sealed class ReminderNotificationService : IDisposable
             occurrenceStart,
             calendarEvent.CalendarId,
             calendarEvent.IsTodoLike);
+    }
+
+    private static bool IsPastForReminder(CalendarEvent calendarEvent, DateTimeOffset current)
+    {
+        if (calendarEvent.IsAllDay)
+        {
+            return calendarEvent.End <= current;
+        }
+
+        return calendarEvent.Start < current;
     }
 
     private static bool IsDue(

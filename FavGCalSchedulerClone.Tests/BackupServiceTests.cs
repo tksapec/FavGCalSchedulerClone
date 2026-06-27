@@ -3,6 +3,7 @@ using System.Text.Json;
 using FavGCalSchedulerClone.App.Models;
 using FavGCalSchedulerClone.App.Services;
 using FavGCalSchedulerClone.App.ViewModels;
+using Microsoft.Data.Sqlite;
 
 namespace FavGCalSchedulerClone.Tests;
 
@@ -14,7 +15,9 @@ public sealed class BackupServiceTests
         var directory = CreateTempDirectory();
         var dbPath = Path.Combine(directory, "calendar.db");
         var zipPath = Path.Combine(directory, "backup.zip");
-        await File.WriteAllTextAsync(dbPath, "db-content");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        await repository.SaveSettingsAsync(new AppSettings { StartupTabIndex = 2 });
         var service = new BackupService();
 
         await service.CreateBackupAsync(dbPath, zipPath);
@@ -28,6 +31,32 @@ public sealed class BackupServiceTests
         Assert.NotNull(manifest);
         Assert.Equal("FavGCalSchedulerClone", manifest!.ApplicationName);
         Assert.Equal(BackupService.FormatVersion, manifest.FormatVersion);
+    }
+
+    [Fact]
+    public async Task CreateBackupAsync_HandlesDatabasePathContainingSemicolon()
+    {
+        var directory = CreateTempDirectory();
+        var dbPath = Path.Combine(directory, "calendar;semi.db");
+        var zipPath = Path.Combine(directory, "backup.zip");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        await repository.SaveSettingsAsync(new AppSettings { StartupTabIndex = 3 });
+
+        await new BackupService().CreateBackupAsync(dbPath, zipPath);
+
+        using var archive = ZipFile.OpenRead(zipPath);
+        var dbEntry = archive.GetEntry(BackupService.DatabaseEntryName);
+        Assert.NotNull(dbEntry);
+        var restoredDbPath = Path.Combine(directory, "restored;semi.db");
+        await using (var entryStream = dbEntry!.Open())
+        await using (var restored = new FileStream(restoredDbPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        {
+            await entryStream.CopyToAsync(restored);
+        }
+
+        var restoredSettings = await new CalendarRepository(restoredDbPath).LoadSettingsAsync();
+        Assert.Equal(3, restoredSettings.StartupTabIndex);
     }
 
     [Fact]
@@ -56,6 +85,30 @@ public sealed class BackupServiceTests
         var rollbackRepository = new CalendarRepository(result.PreviousDatabaseBackupPath);
         var rollbackSettings = await rollbackRepository.LoadSettingsAsync();
         Assert.Equal(1, rollbackSettings.StartupTabIndex);
+    }
+
+    [Fact]
+    public async Task RestoreBackupAsync_UsesUniqueRollbackPathForRapidRestores()
+    {
+        var directory = CreateTempDirectory();
+        var sourceDbPath = Path.Combine(directory, "source.db");
+        var targetDbPath = Path.Combine(directory, "calendar.db");
+        var zipPath = Path.Combine(directory, "backup.zip");
+        var sourceRepository = new CalendarRepository(sourceDbPath);
+        await sourceRepository.InitializeAsync();
+        await sourceRepository.SaveSettingsAsync(new AppSettings { StartupTabIndex = 2 });
+        var targetRepository = new CalendarRepository(targetDbPath);
+        await targetRepository.InitializeAsync();
+        await targetRepository.SaveSettingsAsync(new AppSettings { StartupTabIndex = 1 });
+        var service = new BackupService();
+        await service.CreateBackupAsync(sourceDbPath, zipPath);
+
+        var first = await service.RestoreBackupAsync(zipPath, targetDbPath);
+        var second = await service.RestoreBackupAsync(zipPath, targetDbPath);
+
+        Assert.NotEqual(first.PreviousDatabaseBackupPath, second.PreviousDatabaseBackupPath);
+        Assert.True(File.Exists(first.PreviousDatabaseBackupPath));
+        Assert.True(File.Exists(second.PreviousDatabaseBackupPath));
     }
 
     [Fact]
@@ -114,7 +167,7 @@ public sealed class BackupServiceTests
         var zipPath = Path.Combine(directory, "missing-tables.zip");
         var targetDbPath = Path.Combine(directory, "calendar.db");
         var incompleteDbPath = Path.Combine(directory, "incomplete.db");
-        await using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={incompleteDbPath}"))
+        await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = incompleteDbPath }.ToString()))
         {
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();

@@ -18,7 +18,6 @@ public partial class MainWindow : Window
 {
     private readonly MainViewModel _viewModel;
     private readonly ReminderNotificationService _reminderService;
-    private readonly DispatcherTimer _automaticSyncTimer;
     private readonly DispatcherTimer _operationalStatusTimer;
     private MediaPlayer? _previewSoundPlayer;
     private bool _exitRequested;
@@ -32,8 +31,6 @@ public partial class MainWindow : Window
         InitializeComponent();
         _viewModel = viewModel;
         _reminderService = reminderService;
-        _automaticSyncTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
-        _automaticSyncTimer.Tick += async (_, _) => await _viewModel.RunAutomaticSyncIfDueAsync();
         _operationalStatusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         _operationalStatusTimer.Tick += async (_, _) => await RefreshOperationalStatusAsync();
         DataContext = _viewModel;
@@ -225,7 +222,6 @@ public partial class MainWindow : Window
         {
             _reminderService.Stop();
             _reminderService.Dispose();
-            _automaticSyncTimer.Stop();
             _operationalStatusTimer.Stop();
             StopPreviewSound();
             return;
@@ -238,8 +234,7 @@ public partial class MainWindow : Window
     public IReminderNotifier CreateReminderNotifier()
     {
         IReminderNotifier notifier = new CustomPopupReminderNotifier(
-            this,
-            (occurrenceKey, minutes) => _reminderService.SnoozeAsync(occurrenceKey, minutes));
+            this);
         return _viewModel.EnableReminderSound
             ? new SoundReminderNotifier(notifier, _viewModel.ReminderSoundFilePath, _viewModel.ReminderSoundVolume)
             : notifier;
@@ -266,8 +261,7 @@ public partial class MainWindow : Window
     private IReminderNotifier CreateReminderNotifier(ReminderTestSettings settings)
     {
         IReminderNotifier notifier = new CustomPopupReminderNotifier(
-            this,
-            (occurrenceKey, minutes) => _reminderService.SnoozeAsync(occurrenceKey, minutes));
+            this);
         return settings.EnableReminderSound
             ? new SoundReminderNotifier(notifier, settings.ReminderSoundFilePath, settings.ReminderSoundVolume)
             : notifier;

@@ -5,28 +5,24 @@ namespace FavGCalSchedulerClone.App.Services;
 public sealed class CustomPopupReminderNotifier : IReminderNotifier, IReminderNotifierMetadata
 {
     private readonly Window _owner;
-    private readonly Func<string, int, Task> _snoozeAsync;
-    private readonly Func<Window, ReminderNotification, Func<int, Task>, CancellationToken, Task> _showPopupAsync;
+    private readonly Func<Window, ReminderNotification, CancellationToken, Task> _showPopupAsync;
 
-    public CustomPopupReminderNotifier(Window owner, Func<string, int, Task> snoozeAsync)
-        : this(owner, snoozeAsync, CustomReminderPopupWindow.ShowAsync)
+    public CustomPopupReminderNotifier(Window owner)
+        : this(owner, CustomReminderPopupWindow.ShowAsync)
     {
     }
 
     internal CustomPopupReminderNotifier(
-        Func<string, int, Task> snoozeAsync,
-        Func<Window, ReminderNotification, Func<int, Task>, CancellationToken, Task> showPopupAsync)
-        : this(null!, snoozeAsync, showPopupAsync)
+        Func<Window, ReminderNotification, CancellationToken, Task> showPopupAsync)
+        : this(null!, showPopupAsync)
     {
     }
 
     internal CustomPopupReminderNotifier(
         Window owner,
-        Func<string, int, Task> snoozeAsync,
-        Func<Window, ReminderNotification, Func<int, Task>, CancellationToken, Task> showPopupAsync)
+        Func<Window, ReminderNotification, CancellationToken, Task> showPopupAsync)
     {
         _owner = owner;
-        _snoozeAsync = snoozeAsync;
         _showPopupAsync = showPopupAsync;
     }
 
@@ -43,7 +39,6 @@ public sealed class CustomPopupReminderNotifier : IReminderNotifier, IReminderNo
         return _showPopupAsync(
             _owner,
             notification,
-            minutes => _snoozeAsync(notification.OccurrenceKey, minutes),
             cancellationToken);
     }
 }

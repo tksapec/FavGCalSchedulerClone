@@ -11,6 +11,7 @@ namespace FavGCalSchedulerClone.App.ViewModels;
 
 public sealed class MainViewModel : ObservableObject
 {
+    private const int NoPendingSyncInvocationKind = -1;
     private const string ScheduleTitleHistoryKey = "schedule:title-history";
     private const string ScheduleLocationHistoryKey = "schedule:location-history";
     private readonly CalendarRepository _repository;
@@ -51,7 +52,7 @@ public sealed class MainViewModel : ObservableObject
     private IReadOnlyList<string> _scheduleTitleHistory = [];
     private IReadOnlyList<string> _scheduleLocationHistory = [];
     private int _syncInProgress;
-    private int _syncRerunRequested;
+    private int _pendingSyncInvocationKind = NoPendingSyncInvocationKind;
     private int _calendarSelectionInProgress;
     private int _calendarSelectionRerunRequested;
     private bool _isSynchronizing;
@@ -2771,7 +2772,7 @@ public sealed class MainViewModel : ObservableObject
     {
         if (Interlocked.Exchange(ref _syncInProgress, 1) != 0)
         {
-            Interlocked.Exchange(ref _syncRerunRequested, 1);
+            RequestSyncRerun(invocationKind);
             return null;
         }
 
@@ -2845,9 +2846,10 @@ public sealed class MainViewModel : ObservableObject
             Interlocked.Exchange(ref _syncInProgress, 0);
             IsSynchronizing = false;
             await RefreshOperationalStatusAsync(null);
-            if (Interlocked.Exchange(ref _syncRerunRequested, 0) != 0)
+            var pendingInvocationKind = Interlocked.Exchange(ref _pendingSyncInvocationKind, NoPendingSyncInvocationKind);
+            if (pendingInvocationKind != NoPendingSyncInvocationKind)
             {
-                await SynchronizeAsync(reportErrors: false, SyncInvocationKind.LocalChange);
+                await SynchronizeAsync(reportErrors: false, (SyncInvocationKind)pendingInvocationKind);
             }
         }
     }
@@ -2860,9 +2862,27 @@ public sealed class MainViewModel : ObservableObject
 
     private enum SyncInvocationKind
     {
-        Manual,
-        Automatic,
-        LocalChange
+        LocalChange = 0,
+        Automatic = 1,
+        Manual = 2
+    }
+
+    private void RequestSyncRerun(SyncInvocationKind invocationKind)
+    {
+        var requested = (int)invocationKind;
+        while (true)
+        {
+            var current = Volatile.Read(ref _pendingSyncInvocationKind);
+            if (current >= requested)
+            {
+                return;
+            }
+
+            if (Interlocked.CompareExchange(ref _pendingSyncInvocationKind, requested, current) == current)
+            {
+                return;
+            }
+        }
     }
 
     private async Task SaveOAuthPathAsync()

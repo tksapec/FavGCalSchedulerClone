@@ -10,15 +10,13 @@ namespace FavGCalSchedulerClone.App.Services;
 internal sealed class CustomReminderPopupWindow : Window
 {
     private const double PopupWidth = 340;
-    private const double PopupHeight = 156;
+    private const double PopupHeight = 128;
     private const double MarginFromEdge = 16;
     private readonly DispatcherTimer _autoCloseTimer;
-    private readonly Func<int, Task> _snoozeAsync;
     private bool _closingAnimated;
 
-    private CustomReminderPopupWindow(ReminderNotification notification, Func<int, Task> snoozeAsync)
+    private CustomReminderPopupWindow(ReminderNotification notification)
     {
-        _snoozeAsync = snoozeAsync;
         Width = PopupWidth;
         Height = PopupHeight;
         WindowStyle = WindowStyle.None;
@@ -38,13 +36,12 @@ internal sealed class CustomReminderPopupWindow : Window
     public static Task ShowAsync(
         Window owner,
         ReminderNotification notification,
-        Func<int, Task> snoozeAsync,
         CancellationToken cancellationToken = default)
     {
         return owner.Dispatcher.InvokeAsync(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var popup = new CustomReminderPopupWindow(notification, snoozeAsync);
+            var popup = new CustomReminderPopupWindow(notification);
             popup.Show();
         }).Task;
     }
@@ -137,35 +134,7 @@ internal sealed class CustomReminderPopupWindow : Window
             TextTrimming = TextTrimming.CharacterEllipsis
         });
 
-        var buttons = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right
-        };
-        Grid.SetRow(buttons, 2);
-        grid.Children.Add(buttons);
-        buttons.Children.Add(CreateSnoozeButton("5分後", 5));
-        buttons.Children.Add(CreateSnoozeButton("10分後", 10));
-
         return root;
-    }
-
-    private Button CreateSnoozeButton(string text, int minutes)
-    {
-        var button = new Button
-        {
-            Content = text,
-            MinWidth = 72,
-            Height = 28,
-            Margin = new Thickness(6, 0, 0, 0)
-        };
-        button.Click += async (_, _) =>
-        {
-            button.IsEnabled = false;
-            await _snoozeAsync(minutes);
-            CloseWithAnimation();
-        };
-        return button;
     }
 
     private void CloseWithAnimation()

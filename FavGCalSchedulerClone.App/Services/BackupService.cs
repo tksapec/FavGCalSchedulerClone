@@ -82,7 +82,7 @@ public sealed class BackupService
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(databasePath))!);
         var backupDirectory = Path.GetDirectoryName(Path.GetFullPath(databasePath))!;
-        var rollbackPath = Path.Combine(backupDirectory, $"{Path.GetFileName(databasePath)}.restore-backup-{DateTime.Now:yyyyMMdd-HHmmss}");
+        var rollbackPath = Path.Combine(backupDirectory, $"{Path.GetFileName(databasePath)}.restore-backup-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}");
         var tempRestorePath = Path.Combine(backupDirectory, $"{Path.GetFileName(databasePath)}.restore-{Guid.NewGuid():N}.tmp");
         var currentMoved = false;
 
@@ -209,26 +209,26 @@ public sealed class BackupService
         SqliteConnection.ClearAllPools();
         try
         {
-            await using var connection = new SqliteConnection($"Data Source={databasePath}");
-            await connection.OpenAsync(cancellationToken);
-            await using var command = connection.CreateCommand();
-            command.CommandText = "VACUUM INTO $destination";
-            command.Parameters.AddWithValue("$destination", destinationPath);
-            await command.ExecuteNonQueryAsync(cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch
-        {
-            SqliteConnection.ClearAllPools();
-            File.Copy(databasePath, destinationPath, true);
+            await using var source = new SqliteConnection(CreateConnectionString(databasePath));
+            await source.OpenAsync(cancellationToken);
+            await using var destination = new SqliteConnection(CreateConnectionString(destinationPath));
+            await destination.OpenAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            source.BackupDatabase(destination);
+            cancellationToken.ThrowIfCancellationRequested();
         }
         finally
         {
             SqliteConnection.ClearAllPools();
         }
+    }
+
+    private static string CreateConnectionString(string databasePath)
+    {
+        return new SqliteConnectionStringBuilder
+        {
+            DataSource = databasePath
+        }.ToString();
     }
 }
 

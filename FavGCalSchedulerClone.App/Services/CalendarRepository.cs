@@ -499,7 +499,10 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
     private SqliteConnection OpenConnection()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_databasePath)!);
-        var connection = new SqliteConnection($"Data Source={_databasePath}");
+        var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = _databasePath
+        }.ToString());
         connection.Open();
         return connection;
     }
