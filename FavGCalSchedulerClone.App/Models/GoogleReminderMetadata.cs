@@ -22,4 +22,16 @@ public sealed class GoogleReminderMetadata
         PopupMinutes.Count == 0
         && DefaultPopupMinutes.Count == 0
         && (EmailMinutes.Count > 0 || DefaultEmailMinutes.Count > 0);
+
+    public GoogleReminderMetadata Clone() => new()
+    {
+        UseDefault = UseDefault,
+        PopupMinutes = [.. PopupMinutes],
+        EmailMinutes = [.. EmailMinutes],
+        DefaultPopupMinutes = [.. DefaultPopupMinutes],
+        DefaultEmailMinutes = [.. DefaultEmailMinutes],
+        AdoptedReminderMinutes = AdoptedReminderMinutes,
+        AdoptedReminderMethod = AdoptedReminderMethod,
+        Source = Source
+    };
 }

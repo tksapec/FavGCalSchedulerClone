@@ -1,0 +1,40 @@
+using System.Collections.ObjectModel;
+using System.Diagnostics;
+using System.Globalization;
+using System.Text.Json;
+using FavGCalSchedulerClone.App.Commands;
+using FavGCalSchedulerClone.App.Models;
+using FavGCalSchedulerClone.App.Services;
+using Microsoft.Win32;
+
+namespace FavGCalSchedulerClone.App.ViewModels;
+
+public sealed partial class MainViewModel
+{
+
+    public async Task<BackupResult> BackupAllCalendarsAsync(string backupZipPath)
+    {
+        await _repository.InitializeAsync();
+        var result = await _backupService.CreateBackupAsync(_repository.DatabasePath, backupZipPath);
+        Status = $"バックアップを作成しました: {Path.GetFileName(result.BackupPath)}";
+        return result;
+    }
+
+    public async Task<RestoreResult> RestoreAllCalendarsAsync(string backupZipPath)
+    {
+        var result = await _backupService.RestoreBackupAsync(backupZipPath, _repository.DatabasePath);
+        await InitializeAsync();
+        Status = "バックアップからリストアしました。Google認証は必要に応じて再実行してください。";
+        return result;
+    }
+
+    public async Task<BackupResult> CreateDiagnosticsBulkBackupAsync()
+    {
+        await _repository.InitializeAsync();
+        var backupPath = Path.Combine(
+            AppPaths.AppDataDirectory,
+            "backups",
+            $"diagnostics-bulk-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
+        return await _backupService.CreateBackupAsync(_repository.DatabasePath, backupPath);
+    }
+}

@@ -53,6 +53,7 @@ public static class RecurrenceExpansionService
                 generated.OriginalStart = occurrenceStart;
                 generated.RecurringParentId = master.Id;
                 generated.RecurringEventId = master.GoogleEventId;
+                generated.RecurrenceJson = null;
                 generated.IsGeneratedOccurrence = true;
                 generated.IsRecurrenceException = false;
                 results.Add(generated);
