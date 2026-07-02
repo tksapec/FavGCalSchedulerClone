@@ -7,13 +7,25 @@ namespace FavGCalSchedulerClone.App.Views.Dialogs;
 
 internal static class ScheduleEditorDialog
 {
+    private const double ScheduleMinWidthPhysical = 980;
+    private const double ScheduleMinHeightPhysical = 620;
+    private const double ScheduleDescriptionMinHeightPhysical = 120;
+
     public static ScheduleEditorResult? Show(
         DialogUiFactory ui,
         ScheduleEditorRequest request,
         Func<bool> hideOwner,
         Action showOwner)
     {
-        var window = ui.CreateOwnedDialog(request.IsNew ? "スケジュールの追加" : "スケジュールの編集", 1320, 830, usePhysicalPixelSize: true);
+        var window = ui.CreateOwnedDialog(
+            request.IsNew ? "スケジュールの追加" : "スケジュールの編集",
+            1320,
+            830,
+            usePhysicalPixelSize: true,
+            resizeMode: ResizeMode.CanResize,
+            minWidth: ScheduleMinWidthPhysical,
+            minHeight: ScheduleMinHeightPhysical,
+            fitToWorkArea: true);
         var root = ui.CreateEditorDialogRoot();
         window.Content = root;
 
@@ -79,7 +91,7 @@ internal static class ScheduleEditorDialog
             TextWrapping = TextWrapping.Wrap,
             AcceptsTab = true,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            MinHeight = ui.Y(255),
+            MinHeight = ui.Y(ScheduleDescriptionMinHeightPhysical),
             VerticalContentAlignment = VerticalAlignment.Top
         };
 

@@ -20,12 +20,33 @@ internal sealed class DialogUiFactory
         _sideListFontSize = sideListFontSize;
     }
 
-    public Window CreateOwnedDialog(string title, double width, double height, bool usePhysicalPixelSize = false)
+    public Window CreateOwnedDialog(
+        string title,
+        double width,
+        double height,
+        bool usePhysicalPixelSize = false,
+        ResizeMode resizeMode = ResizeMode.NoResize,
+        double? minWidth = null,
+        double? minHeight = null,
+        bool fitToWorkArea = false)
     {
         if (usePhysicalPixelSize)
         {
             width = X(width);
             height = Y(height);
+            minWidth = minWidth is null ? null : X(minWidth.Value);
+            minHeight = minHeight is null ? null : Y(minHeight.Value);
+        }
+
+        if (fitToWorkArea)
+        {
+            var workArea = SystemParameters.WorkArea;
+            var maxWidth = Math.Max(320, workArea.Width - 40);
+            var maxHeight = Math.Max(240, workArea.Height - 40);
+            width = Math.Min(width, maxWidth);
+            height = Math.Min(height, maxHeight);
+            minWidth = minWidth is null ? null : Math.Min(minWidth.Value, width);
+            minHeight = minHeight is null ? null : Math.Min(minHeight.Value, height);
         }
 
         return new Window
@@ -34,10 +55,10 @@ internal sealed class DialogUiFactory
             Title = title,
             Width = width,
             Height = height,
-            MinWidth = width,
-            MinHeight = height,
+            MinWidth = minWidth ?? width,
+            MinHeight = minHeight ?? height,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            ResizeMode = ResizeMode.NoResize,
+            ResizeMode = resizeMode,
             Background = Brushes.White
         };
     }

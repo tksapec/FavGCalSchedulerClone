@@ -256,7 +256,7 @@ public sealed class GoogleCalendarSyncService
             startedAt,
             DateTimeOffset.Now,
             $"選択対象の再同期: 送信 {pushed} / 失敗 {failed} / 削除 {deleted} / 再作成 {recreated}");
-        await SaveFailureDiagnosticsAsync(failures);
+        await SaveFailureDiagnosticsAsync(failures, localIds);
         await SaveSyncResultAsync(result, settings.EnableSyncDiagnostics);
         return result;
     }
@@ -333,7 +333,7 @@ public sealed class GoogleCalendarSyncService
             startedAt,
             DateTimeOffset.Now,
             $"ローカル変更破棄: 復元 {restored} / ローカル新規削除 {deleted} / 失敗 {failed}");
-        await SaveFailureDiagnosticsAsync(failures);
+        await SaveFailureDiagnosticsAsync(failures, localIds);
         await SaveSyncResultAsync(result, settings.EnableSyncDiagnostics);
         return result;
     }
@@ -354,17 +354,16 @@ public sealed class GoogleCalendarSyncService
         }
 
         var pulled = 0;
+        var allFailures = new List<SyncFailureDiagnostic>();
         foreach (var calendarId in targets)
         {
             var failures = new List<SyncFailureDiagnostic>();
             var pull = await PullRemoteEventsAsync(client, calendarId, settings.SyncConflictPolicy, failures, reminderDefaults, settings.AdoptGoogleEmailRemindersAsLocalNotifications, cancellationToken);
             pulled += pull.Pulled;
-            if (failures.Count > 0)
-            {
-                await SaveFailureDiagnosticsAsync(failures);
-            }
+            allFailures.AddRange(failures);
         }
 
+        await SavePullFailureDiagnosticsAsync(allFailures, targets);
         return pulled;
     }
 
@@ -543,6 +542,10 @@ public sealed class GoogleCalendarSyncService
         var history = await LoadSyncHistoryAsync();
         var failures = await LoadFailureDiagnosticsAsync();
         var dirtyEvents = await _repository.LoadDirtyEventsAsync();
+        var dirtyIds = dirtyEvents.Select(item => item.Id).ToHashSet(StringComparer.Ordinal);
+        var activeFailures = failures
+            .Where(failure => string.IsNullOrWhiteSpace(failure.LocalId) || dirtyIds.Contains(failure.LocalId))
+            .ToArray();
         var calendars = new List<SyncCalendarDiagnostic>();
         foreach (var calendarId in ResolveTargetCalendarIds(settings, dirtyEvents))
         {
@@ -555,9 +558,9 @@ public sealed class GoogleCalendarSyncService
 
         var dirtyItems = dirtyEvents
             .OrderBy(item => item.UpdatedAt)
-            .Select(item => ToDirtyItem(item, failures.LastOrDefault(failure => string.Equals(failure.LocalId, item.Id, StringComparison.Ordinal))))
+            .Select(item => ToDirtyItem(item, activeFailures.LastOrDefault(failure => string.Equals(failure.LocalId, item.Id, StringComparison.Ordinal))))
             .ToArray();
-        return new SyncDiagnosticsSnapshot(history.FirstOrDefault(), history, calendars, dirtyEvents.Count, dirtyItems, failures);
+        return new SyncDiagnosticsSnapshot(history.FirstOrDefault(), history, calendars, dirtyEvents.Count, dirtyItems, activeFailures);
     }
 
     public async Task<SyncResult> RecordFailedSyncAsync(string message, bool keepHistory)
@@ -1206,6 +1209,59 @@ public sealed class GoogleCalendarSyncService
         await _repository.SaveSettingValueAsync(
             SyncLastFailuresKey,
             failures.Count == 0 ? null : JsonSerializer.Serialize(failures));
+    }
+
+    private async Task SaveFailureDiagnosticsAsync(
+        IReadOnlyCollection<SyncFailureDiagnostic> failures,
+        IReadOnlySet<string> attemptedLocalIds)
+    {
+        var attemptedIds = attemptedLocalIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .ToHashSet(StringComparer.Ordinal);
+        if (attemptedIds.Count == 0)
+        {
+            await SaveFailureDiagnosticsAsync(failures);
+            return;
+        }
+
+        var dirtyIds = (await _repository.LoadDirtyEventsAsync())
+            .Select(item => item.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        var existing = await LoadFailureDiagnosticsAsync();
+        var merged = existing
+            .Where(failure => string.IsNullOrWhiteSpace(failure.LocalId)
+                || !attemptedIds.Contains(failure.LocalId) && dirtyIds.Contains(failure.LocalId))
+            .Concat(failures)
+            .ToArray();
+
+        await SaveFailureDiagnosticsAsync(merged);
+    }
+
+    private async Task SavePullFailureDiagnosticsAsync(
+        IReadOnlyCollection<SyncFailureDiagnostic> failures,
+        IReadOnlyCollection<string> attemptedCalendarIds)
+    {
+        var attemptedCalendars = attemptedCalendarIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .ToHashSet(StringComparer.Ordinal);
+        if (attemptedCalendars.Count == 0)
+        {
+            await SaveFailureDiagnosticsAsync(failures);
+            return;
+        }
+
+        var dirtyIds = (await _repository.LoadDirtyEventsAsync())
+            .Select(item => item.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        var existing = await LoadFailureDiagnosticsAsync();
+        var merged = existing
+            .Where(failure => !string.IsNullOrWhiteSpace(failure.LocalId)
+                ? dirtyIds.Contains(failure.LocalId)
+                : !attemptedCalendars.Contains(failure.CalendarId))
+            .Concat(failures)
+            .ToArray();
+
+        await SaveFailureDiagnosticsAsync(merged);
     }
 
     private async Task<IReadOnlyList<SyncFailureDiagnostic>> LoadFailureDiagnosticsAsync()

@@ -8,11 +8,22 @@ internal static class TodoEditorDialog
 {
     internal const double DueDateColumnPhysicalWidth = 230;
     internal const double UpperDueColumnWeight = 2.4;
+    private const double TodoMinWidthPhysical = 640;
+    private const double TodoMinHeightPhysical = 450;
+    private const double TodoDescriptionMinHeightPhysical = 90;
     private static readonly string[] PriorityItems = ["A", "B", "C", "D", "E", "F"];
 
     public static TodoEditorResult? Show(DialogUiFactory ui, TodoEditorRequest request)
     {
-        var window = ui.CreateOwnedDialog(request.IsNew ? "ＴＯＤＯの追加" : "ＴＯＤＯの編集", 824, 610, usePhysicalPixelSize: true);
+        var window = ui.CreateOwnedDialog(
+            request.IsNew ? "ＴＯＤＯの追加" : "ＴＯＤＯの編集",
+            824,
+            610,
+            usePhysicalPixelSize: true,
+            resizeMode: ResizeMode.CanResize,
+            minWidth: TodoMinWidthPhysical,
+            minHeight: TodoMinHeightPhysical,
+            fitToWorkArea: true);
         var root = ui.CreateEditorDialogRoot();
         window.Content = root;
 
@@ -98,7 +109,7 @@ internal static class TodoEditorDialog
             AcceptsTab = true,
             TextWrapping = TextWrapping.Wrap,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            MinHeight = ui.Y(145),
+            MinHeight = ui.Y(TodoDescriptionMinHeightPhysical),
             VerticalContentAlignment = VerticalAlignment.Top
         };
 

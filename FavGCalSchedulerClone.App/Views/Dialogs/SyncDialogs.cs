@@ -80,7 +80,14 @@ internal static class SyncDialogs
         panel.Children.Add(summary);
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0) };
-        var clear = new Button { Content = "ログ削除", MinWidth = 96, Height = 28, Margin = new Thickness(0, 0, 8, 0) };
+        var clear = new Button
+        {
+            Content = "ログ削除",
+            MinWidth = 96,
+            Height = 28,
+            Margin = new Thickness(0, 0, 8, 0),
+            ToolTip = "同期ログと失敗詳細だけを削除します。未同期データは削除されません。"
+        };
         var close = new Button { Content = "閉じる", MinWidth = 96, Height = 28 };
         var retryFailures = new Button { Content = "失敗分を再同期", MinWidth = 116, Height = 28, Margin = new Thickness(0, 0, 8, 0), IsEnabled = retryFailuresAsync is not null && diagnostics.Failures.Any(item => !string.IsNullOrWhiteSpace(item.LocalId)) };
         var exportDirty = new Button { Content = "未同期CSV出力", MinWidth = 116, Height = 28, Margin = new Thickness(0, 0, 8, 0) };

@@ -99,6 +99,30 @@ public sealed class DialogDtoTests
     }
 
     [Fact]
+    public async Task ScheduleAndTodoEditors_AreResizableAndUseScreenFittingOwnedDialogs()
+    {
+        var scheduleCode = await File.ReadAllTextAsync(DialogSourcePath("ScheduleEditorDialog.cs"));
+        var todoCode = await File.ReadAllTextAsync(DialogSourcePath("TodoEditorDialog.cs"));
+
+        Assert.Contains("ResizeMode.CanResize", scheduleCode);
+        Assert.Contains("ResizeMode.CanResize", todoCode);
+        Assert.Contains("fitToWorkArea: true", scheduleCode);
+        Assert.Contains("fitToWorkArea: true", todoCode);
+    }
+
+    [Fact]
+    public async Task ScheduleAndTodoEditors_UseSmallerMinimumSizesThanInitialSizes()
+    {
+        var scheduleCode = await File.ReadAllTextAsync(DialogSourcePath("ScheduleEditorDialog.cs"));
+        var todoCode = await File.ReadAllTextAsync(DialogSourcePath("TodoEditorDialog.cs"));
+
+        Assert.Contains("ScheduleMinHeightPhysical", scheduleCode);
+        Assert.Contains("TodoMinHeightPhysical", todoCode);
+        Assert.DoesNotContain("MinHeight = ui.Y(255)", scheduleCode);
+        Assert.DoesNotContain("MinHeight = ui.Y(145)", todoCode);
+    }
+
+    [Fact]
     public async Task SyncDiagnosticsDialog_ShowsDirtyItemsTab()
     {
         var dialogPath = Path.GetFullPath(Path.Combine(
@@ -114,6 +138,14 @@ public sealed class DialogDtoTests
         Assert.Contains("nameof(SyncDirtyItem.Kind)", code);
         Assert.Contains("nameof(SyncDirtyItem.Operation)", code);
         Assert.Contains("未同期", code);
+    }
+
+    [Fact]
+    public async Task SyncDiagnosticsDialog_ClearButtonExplainsDirtyItemsRemain()
+    {
+        var code = await File.ReadAllTextAsync(DialogSourcePath("SyncDialogs.cs"));
+
+        Assert.Contains("未同期データは削除されません", code);
     }
 
     [Fact]
@@ -196,5 +228,16 @@ public sealed class DialogDtoTests
         Assert.False(editRequest.IsDelete);
         Assert.True(deleteRequest.IsDelete);
         Assert.Contains(scope, Enum.GetValues<RecurrenceEditScope>());
+    }
+
+    private static string DialogSourcePath(string fileName)
+    {
+        return Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..",
+            "FavGCalSchedulerClone.App",
+            "Views",
+            "Dialogs",
+            fileName));
     }
 }

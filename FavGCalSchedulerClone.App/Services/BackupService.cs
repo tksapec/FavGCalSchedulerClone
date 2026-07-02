@@ -106,7 +106,7 @@ public sealed class BackupService
                 currentMoved = true;
             }
 
-            File.Move(tempRestorePath, databasePath);
+            File.Move(tempRestorePath, databasePath, overwrite: true);
             return new RestoreResult(databasePath, currentMoved ? rollbackPath : null);
         }
         catch

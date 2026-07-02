@@ -306,6 +306,101 @@ public sealed class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task LoadDiagnosticsAsync_HidesFailureDiagnosticsForItemsThatAreNoLongerDirty()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi { ThrowOnInsert = true };
+        var settings = CreateSettings("work");
+        settings.EnableSyncDiagnostics = true;
+        var local = new CalendarEvent
+        {
+            CalendarId = "work",
+            Title = "stale diagnostic target",
+            Start = new DateTimeOffset(2026, 1, 4, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 1, 4, 10, 0, 0, TimeSpan.Zero)
+        };
+        await repository.SaveEventAsync(local);
+        var service = new GoogleCalendarSyncService(repository, api);
+        await service.SyncAsync(settings);
+        Assert.Single((await service.LoadDiagnosticsAsync(settings)).Failures);
+
+        await repository.MarkSyncedByIdsAsync([local.Id]);
+        var diagnostics = await service.LoadDiagnosticsAsync(settings);
+
+        Assert.Empty(diagnostics.Failures);
+        Assert.Empty(diagnostics.DirtyItems);
+    }
+
+    [Fact]
+    public async Task SyncAsync_KeepsOnlyCurrentFailuresWhenSomeDirtyItemsSucceed()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        api.FailedInsertTitles.Add("still failing");
+        var settings = CreateSettings("work");
+        settings.EnableSyncDiagnostics = true;
+        var succeeds = new CalendarEvent
+        {
+            CalendarId = "work",
+            Title = "now succeeds",
+            Start = new DateTimeOffset(2026, 1, 4, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 1, 4, 10, 0, 0, TimeSpan.Zero)
+        };
+        var fails = new CalendarEvent
+        {
+            CalendarId = "work",
+            Title = "still failing",
+            Start = new DateTimeOffset(2026, 1, 4, 11, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 1, 4, 12, 0, 0, TimeSpan.Zero)
+        };
+        await repository.SaveEventAsync(succeeds);
+        await repository.SaveEventAsync(fails);
+        var service = new GoogleCalendarSyncService(repository, api);
+
+        var result = await service.SyncAsync(settings);
+        var diagnostics = await service.LoadDiagnosticsAsync(settings);
+
+        Assert.Equal(1, result.Pushed);
+        Assert.Equal(1, result.Failed);
+        var failure = Assert.Single(diagnostics.Failures);
+        Assert.Equal(fails.Id, failure.LocalId);
+        Assert.Equal("still failing", failure.Title);
+        var dirty = Assert.Single(diagnostics.DirtyItems);
+        Assert.Equal(fails.Id, dirty.LocalId);
+        Assert.Equal("insert failed for still failing", dirty.ErrorMessage);
+        Assert.DoesNotContain(await repository.LoadDirtyEventsAsync(), item => item.Id == succeeds.Id);
+    }
+
+    [Fact]
+    public async Task ClearSyncDiagnosticsAsync_RemovesLogsButKeepsDirtyItems()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi { ThrowOnInsert = true };
+        var settings = CreateSettings("work");
+        settings.EnableSyncDiagnostics = true;
+        var local = new CalendarEvent
+        {
+            CalendarId = "work",
+            Title = "dirty remains",
+            Start = new DateTimeOffset(2026, 1, 4, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 1, 4, 10, 0, 0, TimeSpan.Zero)
+        };
+        await repository.SaveEventAsync(local);
+        var service = new GoogleCalendarSyncService(repository, api);
+        await service.SyncAsync(settings);
+
+        await service.ClearSyncDiagnosticsAsync();
+        var diagnostics = await service.LoadDiagnosticsAsync(settings);
+
+        Assert.Null(diagnostics.LastResult);
+        Assert.Empty(diagnostics.History);
+        Assert.Empty(diagnostics.Failures);
+        var dirty = Assert.Single(diagnostics.DirtyItems);
+        Assert.Equal(local.Id, dirty.LocalId);
+        Assert.Null(dirty.ErrorMessage);
+    }
+
+    [Fact]
     public async Task SyncAsync_DoesNotMixCalendarsWithSameRemoteEventId()
     {
         var repository = await CreateRepositoryAsync();
@@ -383,6 +478,32 @@ public sealed class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task PullAsync_ClearsPreviousPullFailureDiagnosticsAfterSuccessfulPull()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi { ThrowOnList = true };
+        var settings = CreateSettings("work");
+        var service = new GoogleCalendarSyncService(repository, api);
+        await service.PullAsync(settings);
+        Assert.Single((await service.LoadDiagnosticsAsync(settings)).Failures);
+        api.ThrowOnList = false;
+        api.UpsertRemote("work", new Event
+        {
+            Id = "remote-pull-success",
+            Summary = "pull success",
+            Start = DateTimeEvent(2026, 1, 6, 9),
+            End = DateTimeEvent(2026, 1, 6, 10),
+            Status = "confirmed"
+        });
+
+        var pulled = await service.PullAsync(settings);
+        var diagnostics = await service.LoadDiagnosticsAsync(settings);
+
+        Assert.Equal(1, pulled);
+        Assert.Empty(diagnostics.Failures);
+    }
+
+    [Fact]
     public async Task SyncAsync_PushesDirtyEventOutsideConfiguredCalendars()
     {
         var repository = await CreateRepositoryAsync();
@@ -439,6 +560,49 @@ public sealed class GoogleCalendarSyncServiceTests
         Assert.DoesNotContain(stored, item => item.Id == selected.Id);
         Assert.Contains(stored, item => item.Id == untouched.Id);
         Assert.Single(api.Operations, item => item.StartsWith("insert:work:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task SyncDirtyEventsAsync_PreservesFailureDiagnosticsForUnselectedDirtyItems()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        api.FailedInsertTitles.Add("retry selected");
+        api.FailedInsertTitles.Add("keep failure");
+        var settings = CreateSettings("work");
+        settings.EnableSyncDiagnostics = true;
+        var selected = new CalendarEvent
+        {
+            CalendarId = "work",
+            Title = "retry selected",
+            Start = new DateTimeOffset(2026, 1, 7, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 1, 7, 10, 0, 0, TimeSpan.Zero)
+        };
+        var untouched = new CalendarEvent
+        {
+            CalendarId = "work",
+            Title = "keep failure",
+            Start = new DateTimeOffset(2026, 1, 7, 11, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 1, 7, 12, 0, 0, TimeSpan.Zero)
+        };
+        await repository.SaveEventAsync(selected);
+        await repository.SaveEventAsync(untouched);
+        var service = new GoogleCalendarSyncService(repository, api);
+        await service.SyncAsync(settings);
+        Assert.Equal(2, (await service.LoadDiagnosticsAsync(settings)).Failures.Count);
+
+        api.FailedInsertTitles.Remove("retry selected");
+        var result = await service.SyncDirtyEventsAsync(settings, new HashSet<string>(StringComparer.Ordinal) { selected.Id });
+        var diagnostics = await service.LoadDiagnosticsAsync(settings);
+
+        Assert.Equal(1, result.Pushed);
+        Assert.Equal(0, result.Failed);
+        var failure = Assert.Single(diagnostics.Failures);
+        Assert.Equal(untouched.Id, failure.LocalId);
+        Assert.Equal("keep failure", failure.Title);
+        var dirty = Assert.Single(diagnostics.DirtyItems);
+        Assert.Equal(untouched.Id, dirty.LocalId);
+        Assert.Equal("insert failed for keep failure", dirty.ErrorMessage);
     }
 
     [Fact]
@@ -998,6 +1162,56 @@ public sealed class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task DiscardLocalChangesAsync_PreservesFailureDiagnosticsForUnselectedDirtyItems()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        var settings = CreateSettings("work");
+        settings.EnableSyncDiagnostics = true;
+        var selected = new CalendarEvent
+        {
+            CalendarId = "work",
+            GoogleEventId = "remote-selected",
+            Title = "selected discard",
+            Start = new DateTimeOffset(2026, 1, 9, 11, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 1, 9, 12, 0, 0, TimeSpan.Zero)
+        };
+        var untouched = new CalendarEvent
+        {
+            CalendarId = "work",
+            GoogleEventId = "remote-untouched",
+            Title = "untouched discard",
+            Start = new DateTimeOffset(2026, 1, 9, 13, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 1, 9, 14, 0, 0, TimeSpan.Zero)
+        };
+        await repository.SaveEventAsync(selected);
+        await repository.SaveEventAsync(untouched);
+        var service = new GoogleCalendarSyncService(repository, api);
+        await service.DiscardLocalChangesAsync(settings, new HashSet<string>(StringComparer.Ordinal) { selected.Id, untouched.Id });
+        Assert.Equal(2, (await service.LoadDiagnosticsAsync(settings)).Failures.Count);
+        api.UpsertRemote("work", new Event
+        {
+            Id = "remote-selected",
+            Summary = "remote selected",
+            Start = DateTimeEvent(2026, 1, 9, 11),
+            End = DateTimeEvent(2026, 1, 9, 12),
+            Status = "confirmed"
+        });
+
+        var result = await service.DiscardLocalChangesAsync(settings, new HashSet<string>(StringComparer.Ordinal) { selected.Id });
+        var diagnostics = await service.LoadDiagnosticsAsync(settings);
+
+        Assert.Equal(1, result.Pulled);
+        Assert.Equal(0, result.Failed);
+        var failure = Assert.Single(diagnostics.Failures);
+        Assert.Equal(untouched.Id, failure.LocalId);
+        Assert.Equal("untouched discard", failure.Title);
+        var dirty = Assert.Single(diagnostics.DirtyItems);
+        Assert.Equal(untouched.Id, dirty.LocalId);
+        Assert.NotNull(dirty.ErrorMessage);
+    }
+
+    [Fact]
     public async Task PreviewAndDiagnosticsIncludeDirtyCalendarsOutsideConfiguredCalendars()
     {
         var repository = await CreateRepositoryAsync();
@@ -1261,6 +1475,7 @@ public sealed class GoogleCalendarSyncServiceTests
         public Dictionary<string, IReadOnlyList<GoogleReminderOverride>> DefaultRemindersByCalendar { get; } = new(StringComparer.Ordinal);
         public List<string> Operations { get; } = [];
         public List<GoogleEventListRequest> ListRequests { get; } = [];
+        public HashSet<string> FailedInsertTitles { get; } = new(StringComparer.Ordinal);
         public bool ThrowOnInsert { get; set; }
         public bool ThrowOnUpdate { get; set; }
         public bool ThrowOnList { get; set; }
@@ -1296,6 +1511,11 @@ public sealed class GoogleCalendarSyncServiceTests
             if (ThrowOnInsert)
             {
                 throw new InvalidOperationException("insert failed");
+            }
+
+            if (!string.IsNullOrWhiteSpace(googleEvent.Summary) && FailedInsertTitles.Contains(googleEvent.Summary))
+            {
+                throw new InvalidOperationException($"insert failed for {googleEvent.Summary}");
             }
 
             var copy = Clone(googleEvent);
