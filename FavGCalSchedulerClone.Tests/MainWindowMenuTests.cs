@@ -111,6 +111,49 @@ public sealed partial class MainWindowMenuTests
     }
 
     [Fact]
+    public async Task MainWindow_AsyncVoidHandlersAreGuardedByRunUiActionAsync()
+    {
+        var codeBehindPath = Path.ChangeExtension(MainWindowXamlPath, ".xaml.cs");
+        var codeBehind = await File.ReadAllTextAsync(codeBehindPath);
+
+        Assert.Contains("private async Task RunUiActionAsync(Func<Task> action, string context)", codeBehind);
+        Assert.DoesNotContain("private async void ShowSettingsDialog()", codeBehind);
+        Assert.Contains("private async Task ShowSettingsDialogAsync()", codeBehind);
+        Assert.Contains("await ShowSettingsDialogAsync();", codeBehind);
+
+        foreach (var methodName in new[]
+        {
+            "DayList_MouseDoubleClick",
+            "EventBar_MouseLeftButtonDown",
+            "EventSegment_PreviewMouseLeftButtonDown",
+            "DayCell_Drop",
+            "AddScheduleMenu_Click",
+            "AddTodoMenu_Click",
+            "ImportFavGCalSchedulerMenu_Click",
+            "ScheduleListMenu_Click",
+            "SearchMenu_Click",
+            "SettingsMenu_Click",
+            "ReminderHistoryMenu_Click",
+            "SyncMenu_Click",
+            "SyncDiagnosticsMenu_Click",
+            "DeleteEventButton_Click",
+            "SelectedDayEventsGrid_MouseDoubleClick",
+            "TodoEventsGrid_MouseDoubleClick",
+            "TodoDoneButton_Click",
+            "CalendarSelectionMenu_Checked",
+            "CalendarSelectionMenu_Unchecked"
+        })
+        {
+            var start = codeBehind.IndexOf($"void {methodName}", StringComparison.Ordinal);
+            Assert.True(start >= 0, $"{methodName} was not found.");
+            var nextMethod = codeBehind.IndexOf("\n    private ", start + 1, StringComparison.Ordinal);
+            var body = nextMethod < 0 ? codeBehind[start..] : codeBehind[start..nextMethod];
+
+            Assert.Contains("RunUiActionAsync", body);
+        }
+    }
+
+    [Fact]
     public async Task DayCell_WeekendTriggersOverrideOutsideMonthTrigger()
     {
         var xaml = await File.ReadAllTextAsync(MainWindowXamlPath);

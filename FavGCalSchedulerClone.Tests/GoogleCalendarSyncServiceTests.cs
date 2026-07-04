@@ -775,6 +775,44 @@ public sealed class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncAsync_InsertsBlankGoogleEventIdLocalEventEvenWhenMatchingRemoteExists()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        var settings = CreateSettings("work");
+        var local = new CalendarEvent
+        {
+            CalendarId = "work",
+            Title = "normal sync local create",
+            Location = "same room",
+            Start = new DateTimeOffset(2026, 1, 8, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 1, 8, 10, 0, 0, TimeSpan.Zero)
+        };
+        await repository.SaveEventAsync(local);
+        api.UpsertRemote("work", new Event
+        {
+            Id = "remote-same-shape",
+            Summary = "normal sync local create",
+            Location = "same room",
+            Start = DateTimeEvent(2026, 1, 8, 9),
+            End = DateTimeEvent(2026, 1, 8, 10),
+            Status = "confirmed"
+        });
+        var service = new GoogleCalendarSyncService(repository, api);
+
+        var result = await service.SyncAsync(settings);
+
+        Assert.Equal(1, result.Pushed);
+        Assert.Contains(api.Operations, item => item.StartsWith("insert:work:", StringComparison.Ordinal));
+        Assert.DoesNotContain("update:work:remote-same-shape", api.Operations);
+        var stored = (await repository.LoadEventsAsync(local.Start.AddDays(-1), local.End.AddDays(1)))
+            .Single(item => item.Id == local.Id);
+        Assert.False(stored.IsDirty);
+        Assert.NotNull(stored.GoogleEventId);
+        Assert.NotEqual("remote-same-shape", stored.GoogleEventId);
+    }
+
+    [Fact]
     public async Task SyncAsync_PullsGooglePopupReminderIntoLocalReminder()
     {
         var repository = await CreateRepositoryAsync();

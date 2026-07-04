@@ -50,6 +50,8 @@ ToDoタグはGoogleカレンダー上では通常の予定タイトルまたは�
 
 OAuth client JSON はリポジトリや配布 ZIP に含めないでください。
 
+初回同期時は、既定で過去 5 年分の Google Calendar 予定を取得します。
+
 ## 開発
 
 ```powershell

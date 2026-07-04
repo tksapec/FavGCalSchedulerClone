@@ -48,11 +48,7 @@ public partial class MainWindow : Window
             () => ShowEventListDialogAsync("スケジュール一覧", new EventListFilter(string.Empty, EventKindFilter.All, EventSearchRange.Year, _viewModel.CurrentMonth)),
             ShowSearchDialogAsync,
             ShowSyncDiagnosticsDialogAsync,
-            () =>
-            {
-                ShowSettingsDialog();
-                return Task.CompletedTask;
-            },
+            ShowSettingsDialogAsync,
             ShowReminderHistoryDialogAsync,
             () =>
             {
@@ -263,6 +259,24 @@ public partial class MainWindow : Window
         }
     }
 
+    private async Task RunUiActionAsync(Func<Task> action, string context)
+    {
+        try
+        {
+            await action();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, context);
+            _viewModel.Status = $"操作に失敗しました: {ex.Message}";
+            MessageBox.Show(this, ex.Message, "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+            System.Diagnostics.Debug.WriteLine($"{context}: {ex}");
+        }
+    }
+
     private IReminderNotifier CreateReminderNotifier(ReminderTestSettings settings)
     {
         IReminderNotifier notifier = new CustomPopupReminderNotifier(
@@ -274,14 +288,17 @@ public partial class MainWindow : Window
 
     private async void DayList_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        if (IsEventSegmentSource(e.OriginalSource))
+        await RunUiActionAsync(async () =>
         {
-            e.Handled = true;
-            return;
-        }
+            if (IsEventSegmentSource(e.OriginalSource))
+            {
+                e.Handled = true;
+                return;
+            }
 
-        _viewModel.SelectedEvent = null;
-        await ShowScheduleDialogAsync();
+            _viewModel.SelectedEvent = null;
+            await ShowScheduleDialogAsync();
+        }, nameof(DayList_MouseDoubleClick));
     }
 
     private void DayCell_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
@@ -308,18 +325,21 @@ public partial class MainWindow : Window
 
     private async void EventBar_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        if (sender is not FrameworkElement { DataContext: CalendarEvent calendarEvent })
+        await RunUiActionAsync(async () =>
         {
-            return;
-        }
+            if (sender is not FrameworkElement { DataContext: CalendarEvent calendarEvent })
+            {
+                return;
+            }
 
-        _viewModel.SelectEvent(calendarEvent);
-        e.Handled = true;
+            _viewModel.SelectEvent(calendarEvent);
+            e.Handled = true;
 
-        if (e.ClickCount >= 2)
-        {
-            await OpenSelectedEventEditorAsync();
-        }
+            if (e.ClickCount >= 2)
+            {
+                await OpenSelectedEventEditorAsync();
+            }
+        }, nameof(EventBar_MouseLeftButtonDown));
     }
 
     private void EventBar_MouseRightButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
@@ -336,23 +356,26 @@ public partial class MainWindow : Window
 
     private async void EventSegment_PreviewMouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        if (sender is not FrameworkElement { DataContext: CalendarEventSegment { Event: not null } segment })
+        await RunUiActionAsync(async () =>
         {
-            return;
-        }
+            if (sender is not FrameworkElement { DataContext: CalendarEventSegment { Event: not null } segment })
+            {
+                return;
+            }
 
-        if (e.ClickCount >= 2)
-        {
-            _dragStartPoint = null;
-            _dragSegment = null;
-            _viewModel.SelectEventSegment(segment);
-            e.Handled = true;
-            await OpenSelectedEventEditorAsync();
-            return;
-        }
+            if (e.ClickCount >= 2)
+            {
+                _dragStartPoint = null;
+                _dragSegment = null;
+                _viewModel.SelectEventSegment(segment);
+                e.Handled = true;
+                await OpenSelectedEventEditorAsync();
+                return;
+            }
 
-        _dragStartPoint = e.GetPosition(this);
-        _dragSegment = segment;
+            _dragStartPoint = e.GetPosition(this);
+            _dragSegment = segment;
+        }, nameof(EventSegment_PreviewMouseLeftButtonDown));
     }
 
     private void EventSegment_PreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
@@ -433,27 +456,30 @@ public partial class MainWindow : Window
 
     private async void DayCell_Drop(object sender, DragEventArgs e)
     {
-        e.Handled = true;
-        if (sender is not FrameworkElement { DataContext: CalendarDay targetDay }
-            || e.Data.GetData(typeof(CalendarEventSegment)) is not CalendarEventSegment { Event: not null } segment
-            || targetDay.Date.Date == segment.Date.Date)
+        await RunUiActionAsync(async () =>
         {
-            ClearDragTarget();
-            return;
-        }
-
-        ClearDragTarget();
-        RecurrenceEditScope? recurrenceScope = null;
-        if (segment.Event.IsRecurringSeriesItem)
-        {
-            recurrenceScope = PromptRecurrenceScope(false);
-            if (recurrenceScope is null)
+            e.Handled = true;
+            if (sender is not FrameworkElement { DataContext: CalendarDay targetDay }
+                || e.Data.GetData(typeof(CalendarEventSegment)) is not CalendarEventSegment { Event: not null } segment
+                || targetDay.Date.Date == segment.Date.Date)
             {
+                ClearDragTarget();
                 return;
             }
-        }
 
-        await _viewModel.MoveEventAsync(segment.Event, segment.Date, targetDay.Date, recurrenceScope);
+            ClearDragTarget();
+            RecurrenceEditScope? recurrenceScope = null;
+            if (segment.Event.IsRecurringSeriesItem)
+            {
+                recurrenceScope = PromptRecurrenceScope(false);
+                if (recurrenceScope is null)
+                {
+                    return;
+                }
+            }
+
+            await _viewModel.MoveEventAsync(segment.Event, segment.Date, targetDay.Date, recurrenceScope);
+        }, nameof(DayCell_Drop));
     }
 
     private void SetDragTarget(CalendarDay day)
@@ -505,11 +531,11 @@ public partial class MainWindow : Window
         var menu = new ContextMenu { PlacementTarget = placementTarget };
 
         var addSchedule = new MenuItem { Header = "スケジュールの追加" };
-        addSchedule.Click += async (_, _) => await ShowScheduleDialogAsync();
+        addSchedule.Click += async (_, _) => await RunUiActionAsync(ShowScheduleDialogAsync, "ContextMenu.AddSchedule");
         menu.Items.Add(addSchedule);
 
         var addTodo = new MenuItem { Header = "ToDoの追加" };
-        addTodo.Click += async (_, _) => await ShowTodoDialogAsync();
+        addTodo.Click += async (_, _) => await RunUiActionAsync(ShowTodoDialogAsync, "ContextMenu.AddTodo");
         menu.Items.Add(addTodo);
 
         menu.Items.Add(new Separator());
@@ -517,18 +543,21 @@ public partial class MainWindow : Window
         var edit = new MenuItem { Header = "編集", IsEnabled = _viewModel.SelectedEvent is not null };
         edit.Click += async (_, _) =>
         {
-            if (_viewModel.SelectedEvent?.IsTodoLike == true)
+            await RunUiActionAsync(async () =>
             {
-                await ShowSelectedTodoDialogAsync();
-                return;
-            }
+                if (_viewModel.SelectedEvent?.IsTodoLike == true)
+                {
+                    await ShowSelectedTodoDialogAsync();
+                    return;
+                }
 
-            await OpenSelectedEventEditorAsync();
+                await OpenSelectedEventEditorAsync();
+            }, "ContextMenu.Edit");
         };
         menu.Items.Add(edit);
 
         var delete = new MenuItem { Header = "削除", IsEnabled = _viewModel.SelectedEvent is not null };
-        delete.Click += async (_, _) => await DeleteSelectedEventWithOptionalConfirmationAsync();
+        delete.Click += async (_, _) => await RunUiActionAsync(DeleteSelectedEventWithOptionalConfirmationAsync, "ContextMenu.Delete");
         menu.Items.Add(delete);
 
         var copy = new MenuItem { Header = "コピー", IsEnabled = _viewModel.SelectedEvent is not null };
@@ -540,7 +569,9 @@ public partial class MainWindow : Window
         menu.Items.Add(cut);
 
         var paste = new MenuItem { Header = "貼付", IsEnabled = _viewModel.CanPasteEventLabel };
-        paste.Click += async (_, _) => await _viewModel.PasteEventLabelAsync(_viewModel.SelectedDay?.Date ?? _viewModel.SelectedEvent?.Start.Date ?? DateTime.Today);
+        paste.Click += async (_, _) => await RunUiActionAsync(
+            async () => await _viewModel.PasteEventLabelAsync(_viewModel.SelectedDay?.Date ?? _viewModel.SelectedEvent?.Start.Date ?? DateTime.Today),
+            "ContextMenu.Paste");
         menu.Items.Add(paste);
 
         var completeTodo = new MenuItem
@@ -550,22 +581,29 @@ public partial class MainWindow : Window
         };
         completeTodo.Click += async (_, _) =>
         {
-            if (_viewModel.SelectedEvent?.IsTodoLike == true)
+            await RunUiActionAsync(async () =>
             {
-                await _viewModel.MarkTodoDoneAsync(_viewModel.SelectedEvent);
-            }
+                if (_viewModel.SelectedEvent?.IsTodoLike == true)
+                {
+                    await _viewModel.MarkTodoDoneAsync(_viewModel.SelectedEvent);
+                }
+            }, "ContextMenu.CompleteTodo");
         };
         menu.Items.Add(completeTodo);
 
         menu.Items.Add(new Separator());
 
         var list = new MenuItem { Header = "スケジュール一覧" };
-        list.Click += async (_, _) => await ShowEventListDialogAsync("スケジュール一覧", new EventListFilter(string.Empty, EventKindFilter.All, EventSearchRange.Year, _viewModel.CurrentMonth));
+        list.Click += async (_, _) => await RunUiActionAsync(
+            async () => await ShowEventListDialogAsync("スケジュール一覧", new EventListFilter(string.Empty, EventKindFilter.All, EventSearchRange.Year, _viewModel.CurrentMonth)),
+            "ContextMenu.List");
         menu.Items.Add(list);
 
         var dayList = new MenuItem { Header = "選択日の予定一覧", IsEnabled = _viewModel.SelectedDay is not null };
         dayList.Click += async (_, _) =>
         {
+            await RunUiActionAsync(async () =>
+            {
             if (_viewModel.SelectedDay is { } selectedDay)
             {
                 await ShowEventListDialogAsync(
@@ -578,6 +616,7 @@ public partial class MainWindow : Window
                         StartDate: selectedDay.Date,
                         EndDate: selectedDay.Date));
             }
+            }, "ContextMenu.DayList");
         };
         menu.Items.Add(dayList);
 
@@ -586,12 +625,12 @@ public partial class MainWindow : Window
 
     private async void AddScheduleMenu_Click(object sender, RoutedEventArgs e)
     {
-        await ShowScheduleDialogAsync();
+        await RunUiActionAsync(ShowScheduleDialogAsync, nameof(AddScheduleMenu_Click));
     }
 
     private async void AddTodoMenu_Click(object sender, RoutedEventArgs e)
     {
-        await ShowTodoDialogAsync();
+        await RunUiActionAsync(ShowTodoDialogAsync, nameof(AddTodoMenu_Click));
     }
 
     private async Task BackupAllCalendarsAsync()
@@ -695,7 +734,7 @@ public partial class MainWindow : Window
 
     private async void ImportFavGCalSchedulerMenu_Click(object sender, RoutedEventArgs e)
     {
-        await ShowFavGCalSchedulerImportDialogAsync();
+        await RunUiActionAsync(ShowFavGCalSchedulerImportDialogAsync, nameof(ImportFavGCalSchedulerMenu_Click));
     }
 
     private async Task ExportCsvAsync()
@@ -725,26 +764,34 @@ public partial class MainWindow : Window
 
     private async void ScheduleListMenu_Click(object sender, RoutedEventArgs e)
     {
+        await RunUiActionAsync(async () =>
+        {
         await ShowEventListDialogAsync("スケジュール一覧", new EventListFilter(string.Empty, EventKindFilter.All, EventSearchRange.Year, _viewModel.CurrentMonth));
+        }, nameof(ScheduleListMenu_Click));
     }
 
     private async void SearchMenu_Click(object sender, RoutedEventArgs e)
     {
-        await ShowSearchDialogAsync();
+        await RunUiActionAsync(ShowSearchDialogAsync, nameof(SearchMenu_Click));
     }
 
-    private void SettingsMenu_Click(object sender, RoutedEventArgs e)
+    private async void SettingsMenu_Click(object sender, RoutedEventArgs e)
     {
-        ShowSettingsDialog();
+        await RunUiActionAsync(async () =>
+        {
+            await ShowSettingsDialogAsync();
+        }, nameof(SettingsMenu_Click));
     }
 
     private async void ReminderHistoryMenu_Click(object sender, RoutedEventArgs e)
     {
-        await ShowReminderHistoryDialogAsync();
+        await RunUiActionAsync(ShowReminderHistoryDialogAsync, nameof(ReminderHistoryMenu_Click));
     }
 
     private async void SyncMenu_Click(object sender, RoutedEventArgs e)
     {
+        await RunUiActionAsync(async () =>
+        {
         try
         {
             var result = await _viewModel.SynchronizeManuallyWithPreviewAsync();
@@ -762,20 +809,23 @@ public partial class MainWindow : Window
         {
             MessageBox.Show(this, ex.Message, "Google同期エラー", MessageBoxButton.OK, MessageBoxImage.Error);
         }
+        }, nameof(SyncMenu_Click));
     }
 
     private async void SyncDiagnosticsMenu_Click(object sender, RoutedEventArgs e)
     {
-        await ShowSyncDiagnosticsDialogAsync();
+        await RunUiActionAsync(ShowSyncDiagnosticsDialogAsync, nameof(SyncDiagnosticsMenu_Click));
     }
 
     private async void DeleteEventButton_Click(object sender, RoutedEventArgs e)
     {
-        await DeleteSelectedEventWithOptionalConfirmationAsync();
+        await RunUiActionAsync(DeleteSelectedEventWithOptionalConfirmationAsync, nameof(DeleteEventButton_Click));
     }
 
     private async void SelectedDayEventsGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
+        await RunUiActionAsync(async () =>
+        {
         var calendarEvent = DataGridDoubleClickHelper.GetEditableRowItem<CalendarEvent>(e.OriginalSource);
         if (calendarEvent is null)
         {
@@ -783,6 +833,7 @@ public partial class MainWindow : Window
         }
 
         await OpenGridEventEditorAsync(calendarEvent);
+        }, nameof(SelectedDayEventsGrid_MouseDoubleClick));
     }
 
     private void SidePanelEventsGrid_PreviewMouseRightButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
@@ -808,6 +859,8 @@ public partial class MainWindow : Window
 
     private async void TodoEventsGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
+        await RunUiActionAsync(async () =>
+        {
         var calendarEvent = DataGridDoubleClickHelper.GetEditableRowItem<CalendarEvent>(e.OriginalSource);
         if (calendarEvent?.IsTodoLike != true)
         {
@@ -815,10 +868,13 @@ public partial class MainWindow : Window
         }
 
         await OpenGridEventEditorAsync(calendarEvent);
+        }, nameof(TodoEventsGrid_MouseDoubleClick));
     }
 
     private async void TodoDoneButton_Click(object sender, RoutedEventArgs e)
     {
+        await RunUiActionAsync(async () =>
+        {
         if (sender is not FrameworkElement { DataContext: CalendarEvent calendarEvent })
         {
             return;
@@ -827,6 +883,7 @@ public partial class MainWindow : Window
         e.Handled = true;
         _viewModel.SelectEvent(calendarEvent);
         await _viewModel.MarkTodoDoneAsync(calendarEvent);
+        }, nameof(TodoDoneButton_Click));
     }
 
     private async Task OpenSelectedEventEditorAsync()
@@ -877,12 +934,12 @@ public partial class MainWindow : Window
 
     private async void CalendarSelectionMenu_Checked(object sender, RoutedEventArgs e)
     {
-        await ApplyCalendarSelectionFromMenuAsync(e);
+        await RunUiActionAsync(async () => await ApplyCalendarSelectionFromMenuAsync(e), nameof(CalendarSelectionMenu_Checked));
     }
 
     private async void CalendarSelectionMenu_Unchecked(object sender, RoutedEventArgs e)
     {
-        await ApplyCalendarSelectionFromMenuAsync(e);
+        await RunUiActionAsync(async () => await ApplyCalendarSelectionFromMenuAsync(e), nameof(CalendarSelectionMenu_Unchecked));
     }
 
     private async Task ApplyCalendarSelectionFromMenuAsync(RoutedEventArgs e)
@@ -1203,7 +1260,7 @@ public partial class MainWindow : Window
         await _viewModel.SelectReminderEventAsync(item.EventId, item.OccurrenceStart);
     }
 
-    private async void ShowSettingsDialog()
+    private async Task ShowSettingsDialogAsync()
     {
         var result = await SettingsDialog.ShowAsync(
             DialogUi,
