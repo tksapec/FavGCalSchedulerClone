@@ -149,6 +149,39 @@ public sealed class DialogDtoTests
     }
 
     [Fact]
+    public async Task SyncPreviewDialog_ShowsFieldDiffDetails()
+    {
+        var code = await File.ReadAllTextAsync(DialogSourcePath("SyncDialogs.cs"));
+
+        Assert.Contains("FieldDiffs", code);
+        Assert.Contains("nameof(SyncFieldDiff.DisplayName)", code);
+        Assert.Contains("nameof(SyncFieldDiff.LocalValue)", code);
+        Assert.Contains("nameof(SyncFieldDiff.GoogleValue)", code);
+    }
+
+    [Fact]
+    public async Task ReminderHistoryDialog_IsNotificationCenterWithRefreshGoogleReminderAction()
+    {
+        var code = await File.ReadAllTextAsync(DialogSourcePath("ReminderHistoryDialog.cs"));
+
+        Assert.Contains("refreshGoogleRemindersAsync", code);
+        Assert.Contains("GooglePopupReminderText", code);
+        Assert.Contains("GoogleEmailReminderText", code);
+        Assert.Contains("ReminderDifferenceText", code);
+    }
+
+    [Fact]
+    public async Task EventListDialog_ExposesBulkEditAndDeleteActions()
+    {
+        var code = await File.ReadAllTextAsync(DialogSourcePath("EventListDialog.cs"));
+
+        Assert.Contains("BulkEditAsync", code);
+        Assert.Contains("BulkDeleteAsync", code);
+        Assert.Contains("SelectionMode = DataGridSelectionMode.Extended", code);
+        Assert.Contains("BulkEventUpdateDialog", code);
+    }
+
+    [Fact]
     public void SettingsDialogResult_PreservesSettingsAndOAuthPath()
     {
         var settings = new AppSettings

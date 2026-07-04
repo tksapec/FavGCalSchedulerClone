@@ -13,6 +13,7 @@ internal static class ReminderHistoryDialog
         Func<Task<(IReadOnlyList<ReminderHistoryItem> History, ReminderMonitoringSnapshot Diagnostics)>> loadAsync,
         Func<Task> checkNowAsync,
         Func<Task> createTwoMinuteTestEventAsync,
+        Func<Task<int>>? refreshGoogleRemindersAsync,
         Func<ReminderHistoryItem, Task> openAsync)
     {
         var historyItems = new ObservableCollection<ReminderHistoryItem>();
@@ -22,7 +23,7 @@ internal static class ReminderHistoryDialog
         var window = new Window
         {
             Owner = owner,
-            Title = "通知履歴・診断",
+            Title = "通知センター",
             Width = 1180,
             Height = 650,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
@@ -36,9 +37,11 @@ internal static class ReminderHistoryDialog
         var createTest = new Button { Content = "2分後テスト予定を作成", MinWidth = 160, Height = 30, Margin = new Thickness(0, 0, 8, 0) };
         var checkNow = new Button { Content = "通知判定を今すぐ実行", MinWidth = 160, Height = 30, Margin = new Thickness(0, 0, 8, 0) };
         var close = new Button { Content = "閉じる", MinWidth = 96, Height = 30 };
+        var refreshGoogle = new Button { Content = "Google通知設定を再取得", MinWidth = 160, Height = 30, Margin = new Thickness(0, 0, 8, 0), IsEnabled = refreshGoogleRemindersAsync is not null };
         close.Click += (_, _) => window.Close();
         buttons.Children.Add(createTest);
         buttons.Children.Add(checkNow);
+        buttons.Children.Add(refreshGoogle);
         buttons.Children.Add(close);
         DockPanel.SetDock(buttons, Dock.Bottom);
         root.Children.Add(buttons);
@@ -90,6 +93,25 @@ internal static class ReminderHistoryDialog
             finally
             {
                 createTest.IsEnabled = true;
+            }
+        };
+
+        refreshGoogle.Click += async (_, _) =>
+        {
+            if (refreshGoogleRemindersAsync is null)
+            {
+                return;
+            }
+
+            refreshGoogle.IsEnabled = false;
+            try
+            {
+                await refreshGoogleRemindersAsync();
+                await ReloadAsync();
+            }
+            finally
+            {
+                refreshGoogle.IsEnabled = true;
             }
         };
 

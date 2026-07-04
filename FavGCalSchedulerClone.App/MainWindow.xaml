@@ -17,6 +17,7 @@
         <KeyBinding Key="PageDown" Command="{Binding NextMonthCommand}" />
         <KeyBinding Key="G" Modifiers="Control" Command="{Binding ShowMonthJumpCommand}" />
         <KeyBinding Key="F8" Command="{Binding SyncCommand}" />
+        <KeyBinding Key="Z" Modifiers="Control" Command="{Binding UndoLastChangeCommand}" />
     </Window.InputBindings>
     <Window.Resources>
         <SolidColorBrush x:Key="ChromeBrush" Color="#243447" />
@@ -286,6 +287,8 @@
                 <MenuItem Header="エクスポート(_E)" Command="{Binding ExportCsvCommand}" />
             </MenuItem>
             <MenuItem Header="編集(_E)">
+                <MenuItem Header="元に戻す(_U)" InputGestureText="Ctrl+Z" Command="{Binding UndoLastChangeCommand}" />
+                <Separator />
                 <MenuItem Header="スケジュールの追加(_A)" Command="{Binding AddScheduleCommand}" />
                 <MenuItem Header="ToDoの追加(_D)" Command="{Binding AddTodoCommand}" />
                 <Separator />
@@ -314,14 +317,14 @@
                 <MenuItem Header="トークン削除" Command="{Binding ClearTokensCommand}" />
                 <Separator />
                 <MenuItem Header="同期する" InputGestureText="F8" Command="{Binding SyncCommand}" />
-                <MenuItem Header="同期診断..." Command="{Binding ShowSyncDiagnosticsCommand}" />
+                <MenuItem Header="同期センター..." Command="{Binding ShowSyncDiagnosticsCommand}" />
                 <MenuItem Header="カレンダー一覧を更新" Command="{Binding ReloadCalendarListCommand}" />
                 <Separator />
                 <MenuItem Header="表示カレンダー" ItemsSource="{Binding AvailableCalendars}" ItemContainerStyle="{StaticResource CalendarMenuItemStyle}" />
             </MenuItem>
             <MenuItem Header="設定(_C)">
                 <MenuItem Header="アプリ設定(_A)" Command="{Binding ShowSettingsCommand}" />
-                <MenuItem Header="通知履歴・診断..." Command="{Binding ShowReminderHistoryCommand}" />
+                <MenuItem Header="通知センター..." Command="{Binding ShowReminderHistoryCommand}" />
             </MenuItem>
             <MenuItem Header="ヘルプ(_H)">
                 <MenuItem Header="バージョン情報(_A)..." Command="{Binding ShowAboutCommand}" />

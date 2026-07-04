@@ -1141,7 +1141,9 @@ public partial class MainWindow : Window
             filter,
             _viewModel.CalendarNames.ToArray(),
             LoadEventsAsync,
-            OpenGridEventEditorAsync));
+            OpenGridEventEditorAsync,
+            async (ids, request) => await _viewModel.BulkUpdateEventsAsync(ids, request),
+            async ids => await _viewModel.BulkDeleteEventsAsync(ids)));
     }
 
     private async Task ShowReminderHistoryDialogAsync()
@@ -1159,6 +1161,7 @@ public partial class MainWindow : Window
                 await _viewModel.CreateTwoMinuteReminderTestEventAsync();
                 await RefreshOperationalStatusAsync();
             },
+            async () => await _viewModel.RefreshGoogleReminderMetadataAsync(),
             OpenReminderHistoryItemAsync);
     }
 

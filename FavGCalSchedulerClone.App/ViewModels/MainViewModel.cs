@@ -19,6 +19,7 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly BackupService _backupService;
     private readonly CalendarCsvService _csvService;
     private readonly FavGCalSchedulerImportService _favGCalImportService;
+    private readonly UndoService _undoService = new();
     private IReadOnlyList<CalendarEvent> _storedEvents = [];
     private IReadOnlyList<CalendarEvent> _visibleEvents = [];
     private IReadOnlyList<CalendarEvent> _dayDirectiveEvents = [];
@@ -140,6 +141,7 @@ public sealed partial class MainViewModel : ObservableObject
         SetSelectedTodoPriorityACommand = CreateAsyncCommand(() => UpdateSelectedTodoAsync(priority: "A"), () => SelectedEvent?.IsTodoLike == true && !SelectedEvent.IsTodoDone);
         SetSelectedTodoPriorityBCommand = CreateAsyncCommand(() => UpdateSelectedTodoAsync(priority: "B"), () => SelectedEvent?.IsTodoLike == true && !SelectedEvent.IsTodoDone);
         SetSelectedTodoPriorityCCommand = CreateAsyncCommand(() => UpdateSelectedTodoAsync(priority: "C"), () => SelectedEvent?.IsTodoLike == true && !SelectedEvent.IsTodoDone);
+        UndoLastChangeCommand = CreateAsyncCommand(UndoLastChangeAsync, () => CanUndoLastChange);
     }
 
     private AsyncRelayCommand CreateAsyncCommand(Func<Task> execute, Func<bool>? canExecute = null) =>
@@ -206,6 +208,7 @@ public sealed partial class MainViewModel : ObservableObject
     public AsyncRelayCommand SetSelectedTodoPriorityACommand { get; }
     public AsyncRelayCommand SetSelectedTodoPriorityBCommand { get; }
     public AsyncRelayCommand SetSelectedTodoPriorityCCommand { get; }
+    public AsyncRelayCommand UndoLastChangeCommand { get; }
     internal Func<DateTime, CancellationToken, Task>? BeforeLoadCalendarSnapshotAsync { get; set; }
     internal Action<DateTime, CancellationToken>? BeforeBuildCalendarSnapshot { get; set; }
     internal Action<DateTime>? BeforeSaveDisplayMonth { get; set; }
@@ -223,6 +226,8 @@ public sealed partial class MainViewModel : ObservableObject
         _ => JapaneseMonthTitle
     };
     public string CalendarStatusText => CalendarStatusFormatter.FormatCalendarStatus(SelectedDay?.Date ?? DateTime.Today);
+    public bool CanUndoLastChange => _undoService.CanUndo;
+    public string UndoStatusText => _undoService.StatusText;
     public bool IsMonthView => CurrentViewMode == CalendarViewMode.Month;
     public bool IsWeekView => CurrentViewMode == CalendarViewMode.Week;
     public bool IsDayView => CurrentViewMode == CalendarViewMode.Day;

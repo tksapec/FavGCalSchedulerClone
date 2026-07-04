@@ -43,10 +43,19 @@ public sealed record SyncPreviewItem(
     DateTimeOffset? Start,
     string Kind,
     string Detail,
-    string? ChangeFields = null)
+    string? ChangeFields = null,
+    IReadOnlyList<SyncFieldDiff>? FieldDiffs = null)
 {
     public string ChangeFieldsText => Services.EventDirtyFieldTracker.ToDisplayText(ChangeFields);
 }
+
+public sealed record SyncFieldDiff(
+    string FieldName,
+    string DisplayName,
+    string LocalValue,
+    string GoogleValue,
+    string Direction,
+    bool IsDifferent);
 
 public sealed record SyncCalendarDiagnostic(
     string CalendarId,

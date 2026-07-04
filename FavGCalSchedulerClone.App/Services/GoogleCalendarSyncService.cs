@@ -495,6 +495,15 @@ public sealed class GoogleCalendarSyncService
             foreach (var localEvent in calendarDirty)
             {
                 var item = ToPreviewItem(calendarId, localEvent, localEvent.IsDeleted ? "delete" : "push", localEvent.IsDeleted ? "Googleから削除予定" : "Googleへ送信予定");
+                var remoteForDiff = await TryLoadRemoteForPreviewAsync(
+                    client,
+                    calendarId,
+                    localEvent,
+                    reminderDefaults,
+                    settings.AdoptGoogleEmailRemindersAsLocalNotifications,
+                    cancellationToken);
+                item = item with { FieldDiffs = remoteForDiff is null ? [] : BuildFieldDiffs(localEvent, remoteForDiff, "LocalToGoogle") };
+
                 if (localEvent.IsDeleted)
                 {
                     deleteItems.Add(item);
@@ -519,6 +528,14 @@ public sealed class GoogleCalendarSyncService
                     if (local?.IsDirty == true)
                     {
                         conflictItems.Add(item with { Detail = $"ローカル未同期変更とGoogle変更が競合: {settings.SyncConflictPolicy}" });
+                        var conflictIndex = conflictItems.Count - 1;
+                        conflictItems[conflictIndex] = conflictItems[conflictIndex] with
+                        {
+                            LocalId = local.Id,
+                            ChangeFields = local.DirtyFields,
+                            Detail = $"Conflict: {settings.SyncConflictPolicy}",
+                            FieldDiffs = BuildFieldDiffs(local, remoteEvent, "Conflict")
+                        };
                     }
                     else if (remoteEvent.IsDeleted)
                     {
@@ -1036,7 +1053,90 @@ public sealed class GoogleCalendarSyncService
         };
     }
 
-    private static SyncPreviewItem ToPreviewItem(string calendarId, CalendarEvent calendarEvent, string kind, string detail)
+    private async Task<CalendarEvent?> TryLoadRemoteForPreviewAsync(
+        IGoogleCalendarClient client,
+        string calendarId,
+        CalendarEvent localEvent,
+        IReadOnlyDictionary<string, IReadOnlyList<GoogleReminderOverride>> reminderDefaults,
+        bool adoptEmailRemindersAsLocalNotifications,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(localEvent.GoogleEventId))
+        {
+            return null;
+        }
+
+        try
+        {
+            var googleEvent = await client.GetEventAsync(calendarId, localEvent.GoogleEventId, cancellationToken);
+            return GoogleEventMapper.FromGoogleEvent(
+                googleEvent,
+                calendarId,
+                GetDefaultReminders(reminderDefaults, calendarId),
+                adoptEmailRemindersAsLocalNotifications);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Debug.WriteLine(ex);
+            return null;
+        }
+    }
+
+    private static IReadOnlyList<SyncFieldDiff> BuildFieldDiffs(CalendarEvent localEvent, CalendarEvent googleEvent, string direction)
+    {
+        return
+        [
+            Diff("Title", "件名", localEvent.Title, googleEvent.Title, direction),
+            Diff("Start", "開始", FormatDateTime(localEvent.Start, localEvent.IsAllDay), FormatDateTime(googleEvent.Start, googleEvent.IsAllDay), direction),
+            Diff("End", "終了", FormatDateTime(localEvent.End, localEvent.IsAllDay), FormatDateTime(googleEvent.End, googleEvent.IsAllDay), direction),
+            Diff("AllDay", "終日", localEvent.IsAllDay ? "ON" : "OFF", googleEvent.IsAllDay ? "ON" : "OFF", direction),
+            Diff("Description", "内容", localEvent.Description ?? "", googleEvent.Description ?? "", direction),
+            Diff("Location", "場所", localEvent.Location ?? "", googleEvent.Location ?? "", direction),
+            Diff("Calendar", "カレンダー", localEvent.CalendarId, googleEvent.CalendarId, direction),
+            Diff("Color", "色", localEvent.ColorId ?? "", googleEvent.ColorId ?? "", direction),
+            Diff("Reminder", "通知", FormatReminderDiffValue(localEvent), FormatReminderDiffValue(googleEvent), direction),
+            Diff("Deleted", "削除", localEvent.IsDeleted ? "削除" : "通常", googleEvent.IsDeleted ? "削除" : "通常", direction)
+        ];
+    }
+
+    private static SyncFieldDiff Diff(string fieldName, string displayName, string localValue, string googleValue, string direction)
+    {
+        return new SyncFieldDiff(
+            fieldName,
+            displayName,
+            localValue,
+            googleValue,
+            direction,
+            !string.Equals(localValue, googleValue, StringComparison.Ordinal));
+    }
+
+    private static string FormatDateTime(DateTimeOffset value, bool isAllDay)
+    {
+        return isAllDay ? value.ToString("yyyy/MM/dd") : value.ToString("yyyy/MM/dd HH:mm");
+    }
+
+    private static string FormatReminderDiffValue(CalendarEvent calendarEvent)
+    {
+        if (calendarEvent.ReminderMinutesBeforeStart is not int minutes)
+        {
+            return "none";
+        }
+
+        var parts = new List<string>();
+        if (calendarEvent.IsAppReminderEnabled)
+        {
+            parts.Add($"popup {minutes}");
+        }
+
+        if (calendarEvent.IsGoogleEmailReminderEnabled)
+        {
+            parts.Add($"email {minutes}");
+        }
+
+        return parts.Count == 0 ? "none" : string.Join(", ", parts);
+    }
+
+    private static SyncPreviewItem ToPreviewItem(string calendarId, CalendarEvent calendarEvent, string kind, string detail, IReadOnlyList<SyncFieldDiff>? fieldDiffs = null)
     {
         return new SyncPreviewItem(
             calendarId,
@@ -1046,7 +1146,8 @@ public sealed class GoogleCalendarSyncService
             calendarEvent.Start,
             kind,
             detail,
-            calendarEvent.DirtyFields);
+            calendarEvent.DirtyFields,
+            fieldDiffs ?? []);
     }
 
     private static SyncDirtyItem ToDirtyItem(CalendarEvent calendarEvent, SyncFailureDiagnostic? failure)
