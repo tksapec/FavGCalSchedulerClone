@@ -750,6 +750,166 @@ public sealed class MainViewModelTodoTests
     }
 
     [Fact]
+    public async Task BulkUpdateEventsAsync_UpdatesSelectedFieldsAndMarksEventsDirty()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        var first = new CalendarEvent
+        {
+            Id = "bulk-1",
+            CalendarId = "primary",
+            Title = "Bulk 1",
+            Location = "Keep room",
+            Start = new DateTimeOffset(DateTime.Today.AddHours(9)),
+            End = new DateTimeOffset(DateTime.Today.AddHours(10)),
+            IsDirty = false
+        };
+        var second = new CalendarEvent
+        {
+            Id = "bulk-2",
+            CalendarId = "primary",
+            Title = "Bulk 2",
+            Location = "Keep room",
+            Start = new DateTimeOffset(DateTime.Today.AddHours(11)),
+            End = new DateTimeOffset(DateTime.Today.AddHours(12)),
+            IsDirty = false
+        };
+        await repository.UpsertSyncedEventAsync(first);
+        await repository.UpsertSyncedEventAsync(second);
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        await viewModel.InitializeAsync();
+
+        var updated = await viewModel.BulkUpdateEventsAsync(
+            ["bulk-1", "bulk-2"],
+            new BulkEventUpdateRequest(
+                CalendarId: "team",
+                ColorId: "5",
+                ReminderMinutesBeforeStart: 15,
+                AppReminderEnabled: true,
+                GoogleEmailReminderEnabled: false));
+
+        Assert.Equal(2, updated);
+        var stored = await repository.LoadDirtyEventsAsync();
+        Assert.Equal(["bulk-1", "bulk-2"], stored.Select(item => item.Id).Order().ToArray());
+        Assert.All(stored, item =>
+        {
+            Assert.Equal("team", item.CalendarId);
+            Assert.Equal("5", item.ColorId);
+            Assert.Equal(15, item.ReminderMinutesBeforeStart);
+            Assert.True(item.IsAppReminderEnabled);
+            Assert.False(item.IsGoogleEmailReminderEnabled);
+            Assert.Equal("Keep room", item.Location);
+            Assert.Contains("Reminder", item.DirtyFields);
+        });
+    }
+
+    [Fact]
+    public async Task BulkDeleteEventsAsync_MarksOnlySelectedEventsDeletedAndDirty()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        await repository.UpsertSyncedEventAsync(new CalendarEvent
+        {
+            Id = "delete-1",
+            CalendarId = "primary",
+            GoogleEventId = "g-1",
+            Title = "Delete 1",
+            Start = new DateTimeOffset(DateTime.Today.AddHours(9)),
+            End = new DateTimeOffset(DateTime.Today.AddHours(10)),
+            IsDirty = false
+        });
+        await repository.UpsertSyncedEventAsync(new CalendarEvent
+        {
+            Id = "keep-1",
+            CalendarId = "primary",
+            GoogleEventId = "g-keep",
+            Title = "Keep 1",
+            Start = new DateTimeOffset(DateTime.Today.AddHours(11)),
+            End = new DateTimeOffset(DateTime.Today.AddHours(12)),
+            IsDirty = false
+        });
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        await viewModel.InitializeAsync();
+
+        var deleted = await viewModel.BulkDeleteEventsAsync(["delete-1"]);
+
+        Assert.Equal(1, deleted);
+        var dirty = Assert.Single(await repository.LoadDirtyEventsAsync());
+        Assert.Equal("delete-1", dirty.Id);
+        Assert.True(dirty.IsDeleted);
+        var keep = await repository.FindMasterByIdAsync("keep-1");
+        Assert.NotNull(keep);
+        Assert.False(keep!.IsDeleted);
+        Assert.False(keep.IsDirty);
+    }
+
+    [Fact]
+    public async Task UndoLastChangeAsync_RestoresPreviousSingleEventStateAsDirty()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        await repository.UpsertSyncedEventAsync(new CalendarEvent
+        {
+            Id = "undo-edit",
+            CalendarId = "primary",
+            GoogleEventId = "g-undo",
+            Title = "Before",
+            Start = new DateTimeOffset(DateTime.Today.AddHours(9)),
+            End = new DateTimeOffset(DateTime.Today.AddHours(10)),
+            IsDirty = false
+        });
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        await viewModel.InitializeAsync();
+        var editing = await repository.FindMasterByIdAsync("undo-edit");
+        Assert.NotNull(editing);
+        viewModel.SelectEvent(editing);
+        viewModel.Title = "After";
+        await viewModel.SaveCurrentEventAsync();
+        Assert.True(viewModel.CanUndoLastChange);
+
+        var undone = await viewModel.UndoLastChangeAsync();
+
+        Assert.True(undone);
+        var stored = await repository.FindMasterByIdAsync("undo-edit");
+        Assert.NotNull(stored);
+        Assert.Equal("Before", stored!.Title);
+        Assert.True(stored.IsDirty);
+        Assert.False(viewModel.CanUndoLastChange);
+    }
+
+    [Fact]
+    public async Task UndoLastChangeAsync_RestoresBulkDeletedEventsAsDirty()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        await repository.UpsertSyncedEventAsync(new CalendarEvent
+        {
+            Id = "undo-delete",
+            CalendarId = "primary",
+            GoogleEventId = "g-delete",
+            Title = "Undo delete",
+            Start = new DateTimeOffset(DateTime.Today.AddHours(9)),
+            End = new DateTimeOffset(DateTime.Today.AddHours(10)),
+            IsDirty = false
+        });
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        await viewModel.InitializeAsync();
+
+        await viewModel.BulkDeleteEventsAsync(["undo-delete"]);
+        var undone = await viewModel.UndoLastChangeAsync();
+
+        Assert.True(undone);
+        var stored = await repository.FindMasterByIdAsync("undo-delete");
+        Assert.NotNull(stored);
+        Assert.False(stored!.IsDeleted);
+        Assert.True(stored.IsDirty);
+    }
+
+    [Fact]
     public async Task CreateTwoMinuteReminderTestEventAsync_CreatesStartTimeReminder()
     {
         var viewModel = await CreateViewModelAsync();

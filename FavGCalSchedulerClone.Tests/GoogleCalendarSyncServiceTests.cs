@@ -189,6 +189,100 @@ public sealed class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task PreviewAsync_IncludesFieldDiffsForDirtyLocalUpdateAgainstGoogle()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        var settings = CreateSettings("work");
+        var local = new CalendarEvent
+        {
+            Id = "field-diff-local",
+            CalendarId = "work",
+            GoogleEventId = "remote-field-diff",
+            Title = "Local title",
+            Description = "Local description",
+            Location = "Local room",
+            Start = new DateTimeOffset(2026, 6, 10, 9, 0, 0, TimeSpan.FromHours(9)),
+            End = new DateTimeOffset(2026, 6, 10, 10, 0, 0, TimeSpan.FromHours(9)),
+            ReminderMinutesBeforeStart = 10,
+            IsAppReminderEnabled = true,
+            IsGoogleEmailReminderEnabled = false,
+            GoogleReminderMetadata = new GoogleReminderMetadata
+            {
+                UseDefault = false,
+                Source = "explicit",
+                AdoptedReminderMinutes = 10,
+                AdoptedReminderMethod = "popup",
+                PopupMinutes = [10]
+            },
+            IsDirty = true,
+            DirtyFields = "Title,Description,Location,Reminder"
+        };
+        await repository.SaveEventAsync(local);
+        api.UpsertRemote("work", new Event
+        {
+            Id = "remote-field-diff",
+            Summary = "Google title",
+            Description = "Google description",
+            Location = "Google room",
+            Start = new EventDateTime { DateTimeDateTimeOffset = local.Start.AddHours(1) },
+            End = new EventDateTime { DateTimeDateTimeOffset = local.End.AddHours(1) },
+            Status = "confirmed",
+            Reminders = new Event.RemindersData
+            {
+                UseDefault = false,
+                Overrides = [new EventReminder { Method = "email", Minutes = 30 }]
+            }
+        });
+        var service = new GoogleCalendarSyncService(repository, api);
+
+        var preview = await service.PreviewAsync(settings);
+
+        var item = Assert.Single(preview.PushItems, entry => entry.LocalId == "field-diff-local");
+        Assert.Contains(item.FieldDiffs!, diff => diff.FieldName == "Title" && diff.LocalValue == "Local title" && diff.GoogleValue == "Google title" && diff.IsDifferent);
+        Assert.Contains(item.FieldDiffs!, diff => diff.FieldName == "Description" && diff.LocalValue == "Local description" && diff.GoogleValue == "Google description" && diff.IsDifferent);
+        Assert.Contains(item.FieldDiffs!, diff => diff.FieldName == "Location" && diff.LocalValue == "Local room" && diff.GoogleValue == "Google room" && diff.IsDifferent);
+        Assert.Contains(item.FieldDiffs!, diff => diff.FieldName == "Reminder" && diff.LocalValue.Contains("popup 10") && diff.GoogleValue.Contains("email 30") && diff.IsDifferent);
+    }
+
+    [Fact]
+    public async Task PreviewAsync_IncludesFieldDiffsForRemoteDirtyConflict()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        var settings = CreateSettings("work");
+        var local = new CalendarEvent
+        {
+            Id = "conflict-local",
+            CalendarId = "work",
+            GoogleEventId = "remote-conflict",
+            Title = "Local conflict",
+            Description = "Local body",
+            Start = new DateTimeOffset(2026, 6, 11, 9, 0, 0, TimeSpan.FromHours(9)),
+            End = new DateTimeOffset(2026, 6, 11, 10, 0, 0, TimeSpan.FromHours(9)),
+            IsDirty = true,
+            DirtyFields = "Title"
+        };
+        await repository.SaveEventAsync(local);
+        api.UpsertRemote("work", new Event
+        {
+            Id = "remote-conflict",
+            Summary = "Google conflict",
+            Description = "Google body",
+            Start = new EventDateTime { DateTimeDateTimeOffset = local.Start },
+            End = new EventDateTime { DateTimeDateTimeOffset = local.End },
+            Status = "confirmed"
+        });
+        var service = new GoogleCalendarSyncService(repository, api);
+
+        var preview = await service.PreviewAsync(settings);
+
+        var item = Assert.Single(preview.ConflictItems, entry => entry.LocalId == "conflict-local");
+        Assert.Contains(nameof(SyncConflictPolicy.SkipLocalDirty), item.Detail);
+        Assert.Contains(item.FieldDiffs!, diff => diff.FieldName == "Title" && diff.LocalValue == "Local conflict" && diff.GoogleValue == "Google conflict" && diff.IsDifferent);
+    }
+
+    [Fact]
     public async Task SyncAsync_PullsRemoteCreateUpdateAndDelete()
     {
         var repository = await CreateRepositoryAsync();

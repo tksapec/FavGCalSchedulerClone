@@ -51,6 +51,33 @@ internal static class SyncDialogs
         grid.Columns.Add(new DataGridTextColumn { Header = "件名", Binding = new Binding(nameof(SyncPreviewItem.Title)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
         grid.Columns.Add(new DataGridTextColumn { Header = "詳細", Binding = new Binding(nameof(SyncPreviewItem.Detail)), Width = 220 });
         grid.Columns.Add(new DataGridTextColumn { Header = "変更内容", Binding = new Binding(nameof(SyncPreviewItem.ChangeFieldsText)), Width = 160 });
+        var fieldDiffItems = new ObservableCollection<SyncFieldDiff>();
+        var fieldDiffGrid = new DataGrid
+        {
+            ItemsSource = fieldDiffItems,
+            AutoGenerateColumns = false,
+            CanUserAddRows = false,
+            IsReadOnly = true,
+            Height = 150,
+            Margin = new Thickness(0, 8, 0, 0)
+        };
+        fieldDiffGrid.Columns.Add(new DataGridTextColumn { Header = "項目", Binding = new Binding(nameof(SyncFieldDiff.DisplayName)), Width = 100 });
+        fieldDiffGrid.Columns.Add(new DataGridTextColumn { Header = "ローカル", Binding = new Binding(nameof(SyncFieldDiff.LocalValue)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
+        fieldDiffGrid.Columns.Add(new DataGridTextColumn { Header = "Google", Binding = new Binding(nameof(SyncFieldDiff.GoogleValue)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
+        fieldDiffGrid.Columns.Add(new DataGridCheckBoxColumn { Header = "差分", Binding = new Binding(nameof(SyncFieldDiff.IsDifferent)), Width = 60 });
+        grid.SelectionChanged += (_, _) =>
+        {
+            fieldDiffItems.Clear();
+            if (grid.SelectedItem is SyncPreviewItem selected)
+            {
+                foreach (var diff in selected.FieldDiffs ?? [])
+                {
+                    fieldDiffItems.Add(diff);
+                }
+            }
+        };
+        DockPanel.SetDock(fieldDiffGrid, Dock.Bottom);
+        panel.Children.Add(fieldDiffGrid);
         panel.Children.Add(grid);
 
         return window.ShowDialog();
@@ -67,7 +94,7 @@ internal static class SyncDialogs
         Func<IReadOnlyList<string>, Task>? discardDirtyItemsAsync = null,
         Func<Task<int>>? refreshGoogleRemindersAsync = null)
     {
-        var window = CreateOwnedDialog(owner, "Google同期診断", 820, 540);
+        var window = CreateOwnedDialog(owner, "Google同期センター", 820, 540);
         var panel = new DockPanel { Margin = new Thickness(12), LastChildFill = true };
         window.Content = panel;
 

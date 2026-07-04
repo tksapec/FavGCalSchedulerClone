@@ -56,6 +56,8 @@ internal static class EventListDialog
             AutoGenerateColumns = false,
             CanUserAddRows = false,
             IsReadOnly = true,
+            SelectionMode = DataGridSelectionMode.Extended,
+            SelectionUnit = DataGridSelectionUnit.FullRow,
             HeadersVisibility = DataGridHeadersVisibility.Column,
             RowHeight = 22,
             FontSize = 12,
@@ -74,6 +76,9 @@ internal static class EventListDialog
         };
 
         AddColumns(grid);
+        var bulkToolbar = CreateBulkToolbar(ui, request, grid, eventItems, status, () => currentFilter);
+        DockPanel.SetDock(bulkToolbar, Dock.Top);
+        panel.Children.Add(bulkToolbar);
         panel.Children.Add(grid);
         UpdateStatus(status, eventItems, currentFilter);
 
@@ -190,6 +195,72 @@ internal static class EventListDialog
         grid.Columns.Add(new DataGridTextColumn { Header = ResultColumnHeaders[7], Binding = new Binding(nameof(CalendarEvent.SummaryDisplayText)), Width = 240 });
     }
 
+    private static FrameworkElement CreateBulkToolbar(
+        DialogUiFactory ui,
+        EventListDialogRequest request,
+        DataGrid grid,
+        ObservableCollection<CalendarEvent> eventItems,
+        TextBlock status,
+        Func<EventListFilter> getCurrentFilter)
+    {
+        var panel = new WrapPanel { Margin = new Thickness(0, 0, 0, 6) };
+        var bulkEdit = new Button { Content = "一括編集", MinWidth = 88, Height = 26, IsEnabled = request.BulkEditAsync is not null, Margin = new Thickness(0, 0, 8, 0) };
+        var bulkDelete = new Button { Content = "一括削除", MinWidth = 88, Height = 26, IsEnabled = request.BulkDeleteAsync is not null, Margin = new Thickness(0, 0, 8, 0) };
+
+        bulkEdit.Click += async (_, _) =>
+        {
+            var ids = GetSelectedIds(grid);
+            if (request.BulkEditAsync is null || ids.Count == 0)
+            {
+                status.Text = "一括編集する行を選択してください。";
+                return;
+            }
+
+            var update = BulkEventUpdateDialog.Show(ui, request.CalendarIds);
+            if (update is null)
+            {
+                return;
+            }
+
+            var updated = await request.BulkEditAsync(ids, update);
+            await ReloadAsync(request, eventItems, status, getCurrentFilter());
+            status.Text = $"一括編集しました: {updated}件";
+        };
+
+        bulkDelete.Click += async (_, _) =>
+        {
+            var ids = GetSelectedIds(grid);
+            if (request.BulkDeleteAsync is null || ids.Count == 0)
+            {
+                status.Text = "一括削除する行を選択してください。";
+                return;
+            }
+
+            if (MessageBox.Show("選択した予定/ToDoを削除しますか。", "一括削除", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            var deleted = await request.BulkDeleteAsync(ids);
+            await ReloadAsync(request, eventItems, status, getCurrentFilter());
+            status.Text = $"一括削除しました: {deleted}件";
+        };
+
+        panel.Children.Add(bulkEdit);
+        panel.Children.Add(bulkDelete);
+        return panel;
+    }
+
+    private static IReadOnlyList<string> GetSelectedIds(DataGrid grid)
+    {
+        return grid.SelectedItems
+            .OfType<CalendarEvent>()
+            .Select(item => item.Id)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+    }
+
     private static async Task ReloadAsync(
         EventListDialogRequest request,
         ObservableCollection<CalendarEvent> eventItems,
@@ -276,4 +347,6 @@ internal sealed record EventListDialogRequest(
     EventListFilter Filter,
     IReadOnlyList<string> CalendarIds,
     Func<EventListFilter, Task<IReadOnlyList<CalendarEvent>>> ReloadEventsAsync,
-    Func<CalendarEvent, Task> EditEventAsync);
+    Func<CalendarEvent, Task> EditEventAsync,
+    Func<IReadOnlyList<string>, BulkEventUpdateRequest, Task<int>>? BulkEditAsync = null,
+    Func<IReadOnlyList<string>, Task<int>>? BulkDeleteAsync = null);

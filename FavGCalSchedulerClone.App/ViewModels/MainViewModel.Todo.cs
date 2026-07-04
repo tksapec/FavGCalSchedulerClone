@@ -50,6 +50,7 @@ public sealed partial class MainViewModel
         }
 
         var originalTodo = CloneEventForEditing(editingTodo);
+        CaptureUndo("ToDo編集", [originalTodo]);
         editingTodo.Title = title.Trim();
         editingTodo.Description = TagService.UpdateTodoMarker(description, priority, progress);
         editingTodo.CalendarId = ResolveEditorCalendarId();
@@ -89,6 +90,7 @@ public sealed partial class MainViewModel
         }
 
         var priority = SelectedEvent.TodoPriority;
+        CaptureUndo("ToDo完了", [SelectedEvent]);
         SelectedEvent.Description = TagService.UpdateTodoMarker(SelectedEvent.Description, priority, 100);
         SelectedEvent.IsDirty = true;
         await _repository.SaveEventAsync(SelectedEvent);
@@ -106,6 +108,7 @@ public sealed partial class MainViewModel
         }
 
         var priority = todoEvent.TodoPriority;
+        CaptureUndo("ToDo完了", [todoEvent]);
         todoEvent.Description = TagService.UpdateTodoMarker(todoEvent.Description, priority, 100);
         todoEvent.IsDirty = true;
         await _repository.SaveEventAsync(todoEvent);
@@ -129,6 +132,7 @@ public sealed partial class MainViewModel
         }
 
         var metadata = todoEvent.TodoMetadata;
+        CaptureUndo("ToDo更新", [todoEvent]);
         var nextPriority = string.IsNullOrWhiteSpace(priority) ? metadata?.Priority ?? "A" : priority;
         var nextProgress = Math.Clamp((metadata?.Progress ?? 0) + (progressDelta ?? 0), 0, 100);
         todoEvent.Description = TagService.UpdateTodoMarker(todoEvent.Description, nextPriority, nextProgress);

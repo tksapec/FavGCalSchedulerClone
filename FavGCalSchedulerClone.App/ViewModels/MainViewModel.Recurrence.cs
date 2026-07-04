@@ -22,6 +22,11 @@ public sealed partial class MainViewModel
 
         if (SelectedEvent is null || recurrenceScope is null)
         {
+            if (SelectedEvent is not null)
+            {
+                CaptureUndo("予定編集", [SelectedEvent]);
+            }
+
             await SaveEventWithCalendarMoveAsync(candidate, SelectedEvent);
             await RecordScheduleHistoryAsync(candidate);
             SelectedEvent = candidate;
@@ -30,6 +35,8 @@ public sealed partial class MainViewModel
             await SyncAfterLocalChangeAsync();
             return;
         }
+
+        CaptureUndo("繰り返し予定編集", [SelectedEvent]);
 
         switch (recurrenceScope.Value)
         {
@@ -59,6 +66,7 @@ public sealed partial class MainViewModel
 
         if (recurrenceScope is null)
         {
+            CaptureUndo("予定削除", [SelectedEvent]);
             await _repository.DeleteEventAsync(SelectedEvent);
             SelectedEvent = null;
             await RefreshCalendarAsync();
@@ -66,6 +74,8 @@ public sealed partial class MainViewModel
             await SyncAfterLocalChangeAsync();
             return;
         }
+
+        CaptureUndo("繰り返し予定削除", [SelectedEvent]);
 
         switch (recurrenceScope.Value)
         {
