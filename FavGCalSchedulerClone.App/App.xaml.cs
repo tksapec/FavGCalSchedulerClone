@@ -40,8 +40,10 @@ public partial class App : System.Windows.Application
         var mainWindow = _serviceProvider.GetRequiredService<MainWindow>();
         MainWindow = mainWindow;
         MainWindow.Show();
-        _ = _serviceProvider.GetRequiredService<IApplicationStartupService>()
-            .InitializeAsync(mainWindow, mainWindow.CreateReminderNotifier);
+        _ = RunStartupInitializationAsync(
+            () => _serviceProvider.GetRequiredService<IApplicationStartupService>()
+                .InitializeAsync(mainWindow, mainWindow.CreateReminderNotifier),
+            _serviceProvider.GetRequiredService<IAppLogger>());
     }
 
     protected override void OnExit(ExitEventArgs e)
@@ -77,6 +79,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<BackupService>();
         services.AddSingleton<CalendarCsvService>();
         services.AddSingleton<FavGCalSchedulerImportService>();
+        services.AddSingleton<IAppLogger, FileAppLogger>();
         services.AddSingleton<IApplicationStartupService, ApplicationStartupService>();
         services.AddSingleton<MainViewModel>();
         services.AddTransient<MainWindow>();
@@ -87,6 +90,18 @@ public partial class App : System.Windows.Application
         services.AddTransient<SyncViewModel>();
         services.AddTransient<ReminderHistoryViewModel>();
         return services.BuildServiceProvider();
+    }
+
+    internal static async Task RunStartupInitializationAsync(Func<Task> initialize, IAppLogger logger)
+    {
+        try
+        {
+            await initialize();
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Application startup initialization failed.");
+        }
     }
 
     private void CreateTrayIcon()

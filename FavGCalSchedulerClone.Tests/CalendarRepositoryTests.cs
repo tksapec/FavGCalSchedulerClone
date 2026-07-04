@@ -219,6 +219,55 @@ public sealed class CalendarRepositoryTests
     }
 
     [Fact]
+    public async Task SaveEventAsync_RoundTripsDateTimeOffsetOffsets()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        var item = new CalendarEvent
+        {
+            Id = "offset-event",
+            Title = "Offset event",
+            CalendarId = "primary",
+            Start = new DateTimeOffset(2026, 7, 4, 9, 30, 0, TimeSpan.FromHours(9)),
+            End = new DateTimeOffset(2026, 7, 4, 10, 30, 0, TimeSpan.FromHours(9)),
+            LastSyncedAt = new DateTimeOffset(2026, 7, 4, 11, 30, 0, TimeSpan.FromHours(9))
+        };
+
+        await repository.SaveEventAsync(item);
+        var loaded = await repository.FindEventByIdAsync("offset-event");
+
+        Assert.NotNull(loaded);
+        Assert.Equal(item.Start, loaded!.Start);
+        Assert.Equal(item.Start.Offset, loaded.Start.Offset);
+        Assert.Equal(item.End, loaded.End);
+        Assert.Equal(item.LastSyncedAt, loaded.LastSyncedAt);
+    }
+
+    [Fact]
+    public async Task InitializeAsync_AllowsFilenameOnlyDatabasePath()
+    {
+        var originalDirectory = Directory.GetCurrentDirectory();
+        var tempDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDirectory);
+        try
+        {
+            Directory.SetCurrentDirectory(tempDirectory);
+            var repository = new CalendarRepository("calendar.db");
+
+            await repository.InitializeAsync();
+
+            Assert.True(File.Exists(Path.Combine(tempDirectory, "calendar.db")));
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(originalDirectory);
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task SaveEventAsync_RoundTripsGoogleReminderMetadata()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");

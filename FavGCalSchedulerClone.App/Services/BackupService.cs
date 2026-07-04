@@ -102,11 +102,11 @@ public sealed class BackupService
 
             if (File.Exists(databasePath))
             {
-                File.Move(databasePath, rollbackPath);
+                await MoveFileWithRetryAsync(databasePath, rollbackPath, overwrite: false, cancellationToken);
                 currentMoved = true;
             }
 
-            File.Move(tempRestorePath, databasePath, overwrite: true);
+            await MoveFileWithRetryAsync(tempRestorePath, databasePath, overwrite: true, cancellationToken);
             return new RestoreResult(databasePath, currentMoved ? rollbackPath : null);
         }
         catch
@@ -120,7 +120,7 @@ public sealed class BackupService
 
             if (currentMoved && !File.Exists(databasePath) && File.Exists(rollbackPath))
             {
-                File.Move(rollbackPath, databasePath);
+                await MoveFileWithRetryAsync(rollbackPath, databasePath, overwrite: false, cancellationToken);
             }
 
             throw;
@@ -202,6 +202,31 @@ public sealed class BackupService
         {
             throw new InvalidDataException("The backup database is not a valid SQLite database.", ex);
         }
+    }
+
+    private static async Task MoveFileWithRetryAsync(string sourcePath, string destinationPath, bool overwrite, CancellationToken cancellationToken)
+    {
+        const int maxAttempts = 5;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                SqliteConnection.ClearAllPools();
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                File.Move(sourcePath, destinationPath, overwrite);
+                return;
+            }
+            catch (Exception ex) when (attempt < maxAttempts && IsTransientFileMoveFailure(ex))
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(50 * attempt), cancellationToken);
+            }
+        }
+    }
+
+    private static bool IsTransientFileMoveFailure(Exception ex)
+    {
+        return ex is IOException or UnauthorizedAccessException;
     }
 
     private static async Task CreateConsistentDatabaseCopyAsync(string databasePath, string destinationPath, CancellationToken cancellationToken)

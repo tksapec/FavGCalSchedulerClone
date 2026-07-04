@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using FavGCalSchedulerClone.App.Models;
 using FavGCalSchedulerClone.App.Repositories;
@@ -538,10 +539,16 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
 
     private SqliteConnection OpenConnection()
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(_databasePath)!);
+        var directory = Path.GetDirectoryName(_databasePath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
         var connection = new SqliteConnection(new SqliteConnectionStringBuilder
         {
-            DataSource = _databasePath
+            DataSource = _databasePath,
+            DefaultTimeout = 10
         }.ToString());
         connection.Open();
         return connection;
@@ -567,14 +574,14 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
                 GoogleEventId = reader.IsDBNull(1) ? null : reader.GetString(1),
                 RecurringEventId = reader.IsDBNull(2) ? null : reader.GetString(2),
                 RecurringParentId = reader.IsDBNull(3) ? null : reader.GetString(3),
-                OriginalStart = reader.IsDBNull(4) ? null : DateTimeOffset.Parse(reader.GetString(4)),
+                OriginalStart = reader.IsDBNull(4) ? null : ParseDateTimeOffset(reader.GetString(4)),
                 IsRecurrenceException = reader.GetInt32(5) != 0,
                 CalendarId = reader.GetString(6),
                 Title = reader.GetString(7),
                 Description = reader.IsDBNull(8) ? null : reader.GetString(8),
                 Location = reader.IsDBNull(9) ? null : reader.GetString(9),
-                Start = DateTimeOffset.Parse(reader.GetString(10)),
-                End = DateTimeOffset.Parse(reader.GetString(11)),
+                Start = ParseDateTimeOffset(reader.GetString(10)),
+                End = ParseDateTimeOffset(reader.GetString(11)),
                 IsAllDay = reader.GetInt32(12) != 0,
                 ColorId = reader.IsDBNull(13) ? null : reader.GetString(13),
                 ReminderMinutesBeforeStart = reader.IsDBNull(14) ? null : reader.GetInt32(14),
@@ -582,8 +589,8 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
                 GoogleEmailReminderEnabled = reader.IsDBNull(16) ? null : reader.GetInt32(16) != 0,
                 RecurrenceJson = reader.IsDBNull(17) ? null : reader.GetString(17),
                 IsDeleted = reader.GetInt32(18) != 0,
-                UpdatedAt = DateTimeOffset.Parse(reader.GetString(19)),
-                LastSyncedAt = reader.IsDBNull(20) ? null : DateTimeOffset.Parse(reader.GetString(20)),
+                UpdatedAt = ParseDateTimeOffset(reader.GetString(19)),
+                LastSyncedAt = reader.IsDBNull(20) ? null : ParseDateTimeOffset(reader.GetString(20)),
                 IsDirty = reader.GetInt32(21) != 0,
                 IsTodoLike = reader.GetInt32(22) != 0,
                 DirtyFields = reader.IsDBNull(23) ? null : reader.GetString(23),
@@ -594,6 +601,14 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         }
 
         return events;
+    }
+
+    private static DateTimeOffset ParseDateTimeOffset(string value)
+    {
+        return DateTimeOffset.Parse(
+            value,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.RoundtripKind);
     }
 
     private static void AddEventParameters(SqliteCommand command, CalendarEvent calendarEvent)
