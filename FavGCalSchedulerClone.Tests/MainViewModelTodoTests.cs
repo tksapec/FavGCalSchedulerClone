@@ -472,6 +472,70 @@ public sealed class MainViewModelTodoTests
     }
 
     [Fact]
+    public async Task SaveCurrentEventAsync_AllDaySameDayAndMultiDayAreSaved()
+    {
+        var viewModel = await CreateViewModelAsync();
+        var start = new DateTime(2026, 7, 4);
+        viewModel.BeginNewEvent(start);
+        viewModel.Title = "Same day all day";
+        viewModel.IsAllDay = true;
+        viewModel.StartDate = start;
+        viewModel.EndDate = start;
+
+        await viewModel.SaveCurrentEventAsync();
+
+        Assert.NotNull(viewModel.SelectedEvent);
+        Assert.Equal(start, viewModel.SelectedEvent!.Start.Date);
+        Assert.Equal(start.AddDays(1), viewModel.SelectedEvent.End.Date);
+
+        viewModel.BeginNewEvent(start);
+        viewModel.Title = "Multi day all day";
+        viewModel.IsAllDay = true;
+        viewModel.StartDate = start;
+        viewModel.EndDate = start.AddDays(2);
+
+        await viewModel.SaveCurrentEventAsync();
+
+        Assert.NotNull(viewModel.SelectedEvent);
+        Assert.Equal(start, viewModel.SelectedEvent!.Start.Date);
+        Assert.Equal(start.AddDays(3), viewModel.SelectedEvent.End.Date);
+    }
+
+    [Fact]
+    public async Task SaveCurrentEventAsync_AllDayEndBeforeStartIsRejected()
+    {
+        var viewModel = await CreateViewModelAsync();
+        viewModel.BeginNewEvent(new DateTime(2026, 7, 4));
+        viewModel.Title = "Invalid all day";
+        viewModel.IsAllDay = true;
+        viewModel.StartDate = new DateTime(2026, 7, 4);
+        viewModel.EndDate = new DateTime(2026, 7, 3);
+
+        await viewModel.SaveCurrentEventAsync();
+
+        Assert.Null(viewModel.SelectedEvent);
+        Assert.Contains("開始日", viewModel.Status);
+    }
+
+    [Fact]
+    public async Task SaveCurrentEventAsync_TimedEndAtStartIsStillRejected()
+    {
+        var viewModel = await CreateViewModelAsync();
+        viewModel.BeginNewEvent(new DateTime(2026, 7, 4));
+        viewModel.Title = "Invalid timed";
+        viewModel.IsAllDay = false;
+        viewModel.StartDate = new DateTime(2026, 7, 4);
+        viewModel.EndDate = new DateTime(2026, 7, 4);
+        viewModel.StartTime = "10:00";
+        viewModel.EndTime = "10:00";
+
+        await viewModel.SaveCurrentEventAsync();
+
+        Assert.Null(viewModel.SelectedEvent);
+        Assert.Contains("開始日時", viewModel.Status);
+    }
+
+    [Fact]
     public async Task SaveTodoAsync_WithExistingEventId_UpdatesTodoWithoutDuplicatingMarker()
     {
         var viewModel = await CreateViewModelAsync();

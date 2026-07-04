@@ -15,16 +15,18 @@ public sealed class GoogleCalendarSyncService
     private const int MaxSyncHistoryCount = 20;
     private readonly CalendarRepository _repository;
     private readonly IGoogleCalendarApi _googleCalendarApi;
+    private readonly IAppLogger? _logger;
 
     public GoogleCalendarSyncService(CalendarRepository repository)
         : this(repository, new GoogleCalendarApi())
     {
     }
 
-    public GoogleCalendarSyncService(CalendarRepository repository, IGoogleCalendarApi googleCalendarApi)
+    public GoogleCalendarSyncService(CalendarRepository repository, IGoogleCalendarApi googleCalendarApi, IAppLogger? logger = null)
     {
         _repository = repository;
         _googleCalendarApi = googleCalendarApi;
+        _logger = logger;
     }
 
     public async Task AuthorizeAsync(string clientJsonPath, CancellationToken cancellationToken = default)
@@ -698,7 +700,8 @@ public sealed class GoogleCalendarSyncService
             var operation = GetPushOperation(localEvent);
             var outcome = await TryPushEventAsync(localEvent, operation, failures, () => localEvent.IsRecurrenceException
                 ? PushRecurrenceExceptionAsync(client, calendarId, localEvent, cancellationToken)
-                : PushNormalEventAsync(client, calendarId, localEvent, cancellationToken));
+                : PushNormalEventAsync(client, calendarId, localEvent, cancellationToken),
+                _logger);
             if (!outcome.Success)
             {
                 failed++;
@@ -717,7 +720,8 @@ public sealed class GoogleCalendarSyncService
         CalendarEvent localEvent,
         string operation,
         ICollection<SyncFailureDiagnostic> failures,
-        Func<Task<SyncPushOutcome>> push)
+        Func<Task<SyncPushOutcome>> push,
+        IAppLogger? logger)
     {
         try
         {
@@ -730,6 +734,7 @@ public sealed class GoogleCalendarSyncService
         catch (Exception ex)
         {
             Debug.WriteLine(ex);
+            logger?.LogError(ex, $"Google Calendar push failed: {operation}");
             failures.Add(CreateFailureDiagnostic(localEvent, operation, ex));
             return SyncPushOutcome.Failed;
         }
@@ -761,16 +766,6 @@ public sealed class GoogleCalendarSyncService
         Debug.WriteLine($"Push event Title={localEvent.Title} Description={localEvent.Description} Location={localEvent.Location} Start={localEvent.Start:O} End={localEvent.End:O} GoogleEventId={localEvent.GoogleEventId} CalendarId={calendarId} IsDirty={localEvent.IsDirty} DirtyFields={localEvent.DirtyFields}");
         if (string.IsNullOrWhiteSpace(localEvent.GoogleEventId))
         {
-            var existingRemote = await FindExactRemoteMatchAsync(client, calendarId, localEvent, cancellationToken);
-            if (!string.IsNullOrWhiteSpace(existingRemote?.Id))
-            {
-                Debug.WriteLine($"Push matched existing Google event localId={localEvent.Id} googleEventId={existingRemote.Id} fields={localEvent.DirtyFields ?? "Unknown"}; updating before mark synced.");
-                await client.UpdateEventAsync(calendarId, existingRemote.Id, googleEvent, cancellationToken);
-                await _repository.MarkSyncedAsync(localEvent, existingRemote.Id);
-                Debug.WriteLine($"Push matched update succeeded and marked synced: localId={localEvent.Id} googleEventId={existingRemote.Id}");
-                return SyncPushOutcome.Pushed;
-            }
-
             var inserted = await client.InsertEventAsync(calendarId, googleEvent, cancellationToken);
             await _repository.MarkSyncedAsync(localEvent, inserted.Id);
             return SyncPushOutcome.Pushed;

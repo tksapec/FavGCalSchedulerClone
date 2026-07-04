@@ -11,11 +11,13 @@ public sealed class ApplicationStartupService : IApplicationStartupService, IDis
     private readonly MainViewModel _viewModel;
     private readonly ReminderNotificationService _reminderService;
     private readonly DispatcherTimer _automaticSyncTimer;
+    private readonly IAppLogger? _logger;
 
-    public ApplicationStartupService(MainViewModel viewModel, ReminderNotificationService reminderService)
+    public ApplicationStartupService(MainViewModel viewModel, ReminderNotificationService reminderService, IAppLogger? logger = null)
     {
         _viewModel = viewModel;
         _reminderService = reminderService;
+        _logger = logger;
         _automaticSyncTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
         _automaticSyncTimer.Tick += async (_, _) => await _viewModel.RunAutomaticSyncIfDueAsync();
     }
@@ -28,6 +30,7 @@ public sealed class ApplicationStartupService : IApplicationStartupService, IDis
         }
         catch (Exception ex)
         {
+            _logger?.LogError(ex, "Main view model initialization failed.");
             MessageBox.Show(owner, ex.Message, "初期化エラー", MessageBoxButton.OK, MessageBoxImage.Error);
         }
 
@@ -40,6 +43,7 @@ public sealed class ApplicationStartupService : IApplicationStartupService, IDis
         catch (Exception ex)
         {
             Debug.WriteLine(ex);
+            _logger?.LogError(ex, "Reminder monitoring startup failed.");
             MessageBox.Show(owner, $"通知監視を開始できませんでした。\n{ex.Message}", "通知エラー", MessageBoxButton.OK, MessageBoxImage.Error);
         }
 
@@ -54,6 +58,7 @@ public sealed class ApplicationStartupService : IApplicationStartupService, IDis
         catch (Exception ex)
         {
             Debug.WriteLine(ex);
+            _logger?.LogError(ex, "Post-startup timer initialization failed.");
         }
     }
 

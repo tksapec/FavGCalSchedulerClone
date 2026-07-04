@@ -18,6 +18,7 @@ public partial class MainWindow : Window
 {
     private readonly MainViewModel _viewModel;
     private readonly ReminderNotificationService _reminderService;
+    private readonly IAppLogger? _logger;
     private readonly DispatcherTimer _operationalStatusTimer;
     private MediaPlayer? _previewSoundPlayer;
     private bool _exitRequested;
@@ -26,11 +27,12 @@ public partial class MainWindow : Window
     private CalendarDay? _dragOverDay;
     private DialogUiFactory DialogUi => new(this, _viewModel.EventColorOptions, _viewModel.SideListFontSize);
 
-    public MainWindow(MainViewModel viewModel, ReminderNotificationService reminderService)
+    public MainWindow(MainViewModel viewModel, ReminderNotificationService reminderService, IAppLogger? logger = null)
     {
         InitializeComponent();
         _viewModel = viewModel;
         _reminderService = reminderService;
+        _logger = logger;
         _operationalStatusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         _operationalStatusTimer.Tick += async (_, _) => await RefreshOperationalStatusAsync();
         DataContext = _viewModel;
@@ -257,6 +259,7 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine(ex);
+            _logger?.LogError(ex, "Operational status refresh failed.");
         }
     }
 

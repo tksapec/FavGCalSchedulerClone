@@ -180,6 +180,12 @@ public sealed partial class MainViewModel
 
         if (IsAllDay)
         {
+            if (EndDate.Date < StartDate.Date)
+            {
+                Status = "終了日は開始日以降にしてください。";
+                return null;
+            }
+
             calendarEvent.Start = new DateTimeOffset(StartDate.Date);
             calendarEvent.End = new DateTimeOffset(EndDate.Date.AddDays(1));
         }
