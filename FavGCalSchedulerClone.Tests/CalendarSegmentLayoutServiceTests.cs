@@ -92,15 +92,15 @@ public sealed class CalendarSegmentLayoutServiceTests
     {
         var days = CreateDays(new DateTime(2026, 5, 10), 7);
         var longEvent = Event("Long", new DateTime(2026, 5, 11), new DateTime(2026, 5, 13));
-        var sameDayEvents = Enumerable.Range(0, 5)
+        var sameDayEvents = Enumerable.Range(0, CalendarSegmentLayoutService.MaxLanes)
             .Select(index => Event($"Short {index}", new DateTime(2026, 5, 11), new DateTime(2026, 5, 12)))
             .ToArray();
 
         CalendarSegmentLayoutService.PopulateSegments(days, [.. sameDayEvents, longEvent]);
 
         Assert.Contains(days[1].Segments, segment => segment.Event == longEvent && segment.Lane == 0);
-        Assert.Equal(5, days[1].Segments.Count(segment => segment.IsVisible));
-        Assert.Equal(4, days[1].Segments.Count(segment => sameDayEvents.Contains(segment.Event)));
+        Assert.Equal(CalendarSegmentLayoutService.MaxLanes, days[1].Segments.Count(segment => segment.IsVisible));
+        Assert.Equal(CalendarSegmentLayoutService.MaxLanes - 1, days[1].Segments.Count(segment => sameDayEvents.Contains(segment.Event)));
     }
 
     [Fact]

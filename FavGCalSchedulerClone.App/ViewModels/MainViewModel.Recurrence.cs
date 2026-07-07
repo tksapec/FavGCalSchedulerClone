@@ -335,6 +335,8 @@ public sealed partial class MainViewModel
         target.IsAllDay = candidate.IsAllDay;
         target.ColorId = candidate.ColorId;
         target.ReminderMinutesBeforeStart = candidate.ReminderMinutesBeforeStart;
+        target.AppReminderMinutesBeforeStart = [.. candidate.AppReminderMinutesBeforeStart];
+        target.GoogleEmailReminderMinutesBeforeStart = [.. candidate.GoogleEmailReminderMinutesBeforeStart];
         target.AppReminderEnabled = candidate.AppReminderEnabled;
         target.GoogleEmailReminderEnabled = candidate.GoogleEmailReminderEnabled;
         target.GoogleReminderMetadata = candidate.GoogleReminderMetadata?.Clone();

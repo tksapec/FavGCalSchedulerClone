@@ -40,29 +40,18 @@ internal static class ScheduleEditorDialog
             IsChecked = request.IsAllDay,
             VerticalAlignment = VerticalAlignment.Center
         };
-        var reminder = new ComboBox
-        {
-            ItemsSource = request.ReminderOptions,
-            DisplayMemberPath = nameof(ReminderOption.Label),
-            SelectedValuePath = nameof(ReminderOption.MinutesBeforeStart),
-            SelectedValue = request.ReminderMinutesBeforeStart
-        };
+        var appReminderEditor = new ReminderListEditor(
+            "アプリ内通知",
+            ResolveReminderValues(request.AppReminderMinutesBeforeStart, request.IsAppReminderEnabled, request.ReminderMinutesBeforeStart),
+            request.ReminderOptions);
+        var googleEmailReminderEditor = new ReminderListEditor(
+            "Googleメール通知",
+            ResolveReminderValues(request.GoogleEmailReminderMinutesBeforeStart, request.IsGoogleEmailReminderEnabled, request.ReminderMinutesBeforeStart),
+            request.ReminderOptions);
         var googleEmailReminder = new TextBlock
         {
             Text = request.GoogleEmailReminderDisplayText,
             Margin = new Thickness(0, ui.Y(4), 0, ui.Y(8))
-        };
-        var appReminderEnabled = new CheckBox
-        {
-            Content = "アプリ内通知",
-            IsChecked = request.IsAppReminderEnabled,
-            Margin = new Thickness(0, 0, ui.X(12), ui.Y(8))
-        };
-        var googleEmailReminderEnabled = new CheckBox
-        {
-            Content = "Googleメール通知",
-            IsChecked = request.IsGoogleEmailReminderEnabled,
-            Margin = new Thickness(0, 0, 0, ui.Y(8))
         };
         var location = new ComboBox
         {
@@ -188,26 +177,15 @@ internal static class ScheduleEditorDialog
         alarmGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         alarmGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         alarmGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        ui.AddLabeledField(alarmGrid, 0, 0, "通知時間", reminder);
-        var reminderModePanel = new StackPanel { Orientation = Orientation.Horizontal };
-        reminderModePanel.Children.Add(appReminderEnabled);
-        reminderModePanel.Children.Add(googleEmailReminderEnabled);
-        Grid.SetRow(reminderModePanel, 1);
-        Grid.SetColumn(reminderModePanel, 0);
-        alarmGrid.Children.Add(reminderModePanel);
+        Grid.SetRow(appReminderEditor.Root, 0);
+        Grid.SetColumn(appReminderEditor.Root, 0);
+        alarmGrid.Children.Add(appReminderEditor.Root);
+        Grid.SetRow(googleEmailReminderEditor.Root, 1);
+        Grid.SetColumn(googleEmailReminderEditor.Root, 0);
+        alarmGrid.Children.Add(googleEmailReminderEditor.Root);
         Grid.SetRow(googleEmailReminder, 2);
         Grid.SetColumn(googleEmailReminder, 0);
         alarmGrid.Children.Add(googleEmailReminder);
-        var quickReminderPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, ui.Y(8)) };
-        quickReminderPanel.Children.Add(ShortcutButton("なし", () => reminder.SelectedValue = null));
-        quickReminderPanel.Children.Add(ShortcutButton("開始時", () => reminder.SelectedValue = 0));
-        quickReminderPanel.Children.Add(ShortcutButton("5分前", () => reminder.SelectedValue = 5));
-        quickReminderPanel.Children.Add(ShortcutButton("10分前", () => reminder.SelectedValue = 10));
-        quickReminderPanel.Children.Add(ShortcutButton("30分前", () => reminder.SelectedValue = 30));
-        quickReminderPanel.Children.Add(ShortcutButton("1時間前", () => reminder.SelectedValue = 60));
-        Grid.SetRow(quickReminderPanel, 3);
-        Grid.SetColumn(quickReminderPanel, 0);
-        alarmGrid.Children.Add(quickReminderPanel);
         alarmGroup.Content = alarmGrid;
 
         var upper = new Grid();
@@ -263,6 +241,8 @@ internal static class ScheduleEditorDialog
         }
 
         UpdateEndDateFromCount();
+        var appReminderValues = appReminderEditor.GetValues();
+        var googleEmailReminderValues = googleEmailReminderEditor.GetValues();
         return new ScheduleEditorResult(
             calendar.SelectedValue?.ToString() ?? request.CalendarId,
             color.SelectedValue?.ToString(),
@@ -271,12 +251,124 @@ internal static class ScheduleEditorDialog
             startTime.Text,
             endTime.Text,
             isAllDay.IsChecked == true,
-            reminder.SelectedValue as int?,
-            appReminderEnabled.IsChecked == true,
-            googleEmailReminderEnabled.IsChecked == true,
+            FirstOrDefaultOrNull(appReminderValues),
+            appReminderValues.Count > 0,
+            googleEmailReminderValues.Count > 0,
             location.Text,
             title.Text,
-            description.Text);
+            description.Text,
+            appReminderValues,
+            googleEmailReminderValues);
+    }
+
+    private static IReadOnlyList<int> ResolveReminderValues(IReadOnlyList<int>? configured, bool enabled, int? fallback)
+    {
+        var values = CalendarEvent.NormalizeReminderMinutes(configured);
+        if (values.Count > 0)
+        {
+            return values;
+        }
+
+        return enabled && fallback is int minutes ? [minutes] : [];
+    }
+
+    private static int? FirstOrDefaultOrNull(IReadOnlyList<int> values) => values.Count == 0 ? null : values[0];
+
+    private sealed class ReminderListEditor
+    {
+        private readonly IReadOnlyList<ReminderOption> _options;
+        private readonly StackPanel _rows = new();
+        private readonly List<ComboBox> _combos = [];
+        private readonly CheckBox _enabled;
+
+        public ReminderListEditor(string title, IReadOnlyList<int> values, IEnumerable<ReminderOption> options)
+        {
+            _options = options.Where(item => item.MinutesBeforeStart is not null).ToArray();
+            _enabled = new CheckBox
+            {
+                Content = title,
+                IsChecked = values.Count > 0,
+                Margin = new Thickness(0, 0, 0, 4)
+            };
+            Root = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
+            Root.Children.Add(_enabled);
+            Root.Children.Add(_rows);
+            var addButton = new Button
+            {
+                Content = "追加",
+                Width = 64,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Margin = new Thickness(0, 2, 0, 0)
+            };
+            addButton.Click += (_, _) => AddRow(DefaultMinutes);
+            Root.Children.Add(addButton);
+            _enabled.Checked += (_, _) => SetRowsEnabled(true);
+            _enabled.Unchecked += (_, _) => SetRowsEnabled(false);
+
+            IEnumerable<int> initialValues = values.Count == 0 ? [DefaultMinutes] : values;
+            foreach (var minutes in initialValues)
+            {
+                AddRow(minutes);
+            }
+
+            SetRowsEnabled(_enabled.IsChecked == true);
+        }
+
+        public StackPanel Root { get; }
+
+        public IReadOnlyList<int> GetValues()
+        {
+            if (_enabled.IsChecked != true)
+            {
+                return [];
+            }
+
+            return CalendarEvent.NormalizeReminderMinutes(_combos.Select(combo => combo.SelectedValue).OfType<int>());
+        }
+
+        private int DefaultMinutes => _options.FirstOrDefault(item => item.MinutesBeforeStart == 10)?.MinutesBeforeStart ?? _options.FirstOrDefault()?.MinutesBeforeStart ?? 0;
+
+        private void AddRow(int selectedMinutes)
+        {
+            var row = new DockPanel { Margin = new Thickness(0, 0, 0, 3) };
+            var remove = new Button
+            {
+                Content = "-",
+                Width = 28,
+                MinWidth = 28,
+                Margin = new Thickness(4, 0, 0, 0)
+            };
+            var combo = new ComboBox
+            {
+                ItemsSource = _options,
+                DisplayMemberPath = nameof(ReminderOption.Label),
+                SelectedValuePath = nameof(ReminderOption.MinutesBeforeStart),
+                SelectedValue = selectedMinutes,
+                MinWidth = 150
+            };
+            DockPanel.SetDock(remove, Dock.Right);
+            row.Children.Add(remove);
+            row.Children.Add(combo);
+            remove.Click += (_, _) =>
+            {
+                if (_combos.Count <= 1)
+                {
+                    combo.SelectedValue = DefaultMinutes;
+                    return;
+                }
+
+                _combos.Remove(combo);
+                _rows.Children.Remove(row);
+            };
+            _combos.Add(combo);
+            _rows.Children.Add(row);
+            SetRowsEnabled(_enabled.IsChecked == true);
+        }
+
+        private void SetRowsEnabled(bool enabled)
+        {
+            _rows.IsEnabled = enabled;
+        }
     }
 
     private static ComboBox TimeComboBox(string selected)
@@ -393,7 +485,9 @@ internal sealed record ScheduleEditorRequest(
     IReadOnlyList<string> TitleHistory,
     IEnumerable<GoogleCalendarSelectionItem> AvailableCalendars,
     IEnumerable<ReminderOption> ReminderOptions,
-    string GoogleEmailReminderDisplayText);
+    string GoogleEmailReminderDisplayText,
+    IReadOnlyList<int>? AppReminderMinutesBeforeStart = null,
+    IReadOnlyList<int>? GoogleEmailReminderMinutesBeforeStart = null);
 
 internal sealed record ScheduleEditorResult(
     string CalendarId,
@@ -408,4 +502,6 @@ internal sealed record ScheduleEditorResult(
     bool IsGoogleEmailReminderEnabled,
     string Location,
     string Title,
-    string Description);
+    string Description,
+    IReadOnlyList<int>? AppReminderMinutesBeforeStart = null,
+    IReadOnlyList<int>? GoogleEmailReminderMinutesBeforeStart = null);

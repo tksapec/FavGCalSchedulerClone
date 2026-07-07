@@ -15,7 +15,7 @@ public static class GoogleReminderDisplayFormatter
         {
             if (metadata.DefaultEmailMinutes.Count > 0)
             {
-                return $"Google既定: email {FormatMinutes(metadata.DefaultEmailMinutes)}";
+                return $"Google既定: email {FormatReminderMinutes(metadata.DefaultEmailMinutes)}";
             }
 
             return string.Equals(metadata.Source, "default-unavailable", StringComparison.Ordinal)
@@ -24,11 +24,11 @@ public static class GoogleReminderDisplayFormatter
         }
 
         return metadata.EmailMinutes.Count > 0
-            ? $"Googleメール通知: {FormatMinutes(metadata.EmailMinutes)}"
+            ? $"Googleメール通知: {FormatReminderMinutes(metadata.EmailMinutes)}"
             : "Googleメール通知: なし";
     }
 
-    private static string FormatMinutes(IEnumerable<int> minutes)
+    public static string FormatReminderMinutes(IEnumerable<int> minutes)
     {
         return string.Join(
             ", ",

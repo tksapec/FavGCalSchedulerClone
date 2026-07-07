@@ -16,7 +16,7 @@ public static class GoogleEventMapper
         Event googleEvent,
         string calendarId,
         IReadOnlyList<GoogleReminderOverride>? defaultReminders,
-        bool adoptEmailRemindersAsLocalNotifications = true)
+        bool adoptEmailRemindersAsLocalNotifications = false)
     {
         var isAllDay = googleEvent.Start?.Date is { Length: > 0 };
         var start = ParseEventDateTime(googleEvent.Start, isAllDay);
@@ -26,6 +26,8 @@ public static class GoogleEventMapper
             defaultReminders,
             adoptEmailRemindersAsLocalNotifications);
 
+        var appReminderMinutes = GetPopupReminderMinutes(reminderMetadata);
+        var emailReminderMinutes = GetEmailReminderMinutes(reminderMetadata);
         var local = new LocalEvent
         {
             Id = string.IsNullOrWhiteSpace(googleEvent.Id) ? Guid.NewGuid().ToString("N") : $"g:{calendarId}:{googleEvent.Id}",
@@ -48,9 +50,11 @@ public static class GoogleEventMapper
             IsDeleted = string.Equals(googleEvent.Status, "cancelled", StringComparison.OrdinalIgnoreCase),
             UpdatedAt = googleEvent.UpdatedDateTimeOffset ?? DateTimeOffset.Now,
             IsDirty = false,
-            ReminderMinutesBeforeStart = reminderMetadata.AdoptedReminderMinutes,
-            IsAppReminderEnabled = HasPopupReminder(reminderMetadata),
-            IsGoogleEmailReminderEnabled = HasEmailReminder(reminderMetadata),
+            ReminderMinutesBeforeStart = FirstOrDefaultOrNull(appReminderMinutes),
+            AppReminderMinutesBeforeStart = appReminderMinutes.ToList(),
+            GoogleEmailReminderMinutesBeforeStart = emailReminderMinutes.ToList(),
+            IsAppReminderEnabled = appReminderMinutes.Count > 0,
+            IsGoogleEmailReminderEnabled = emailReminderMinutes.Count > 0,
             GoogleReminderMetadata = reminderMetadata
         };
         local.IsTodoLike = TagService.IsTodoLike(local);
@@ -89,6 +93,7 @@ public static class GoogleEventMapper
         IReadOnlyList<GoogleReminderOverride>? defaultReminders,
         bool adoptEmailRemindersAsLocalNotifications)
     {
+        _ = adoptEmailRemindersAsLocalNotifications;
         var metadata = new GoogleReminderMetadata
         {
             UseDefault = reminders?.UseDefault,
@@ -111,11 +116,6 @@ public static class GoogleEventMapper
         {
             metadata.AdoptedReminderMinutes = popupSource.Min();
             metadata.AdoptedReminderMethod = useDefault ? "default-popup" : "popup";
-        }
-        else if (emailSource.Count > 0)
-        {
-            metadata.AdoptedReminderMinutes = emailSource.Min();
-            metadata.AdoptedReminderMethod = useDefault ? "default-email" : "email";
         }
         if (reminders?.UseDefault == true && defaultReminders is null)
         {
@@ -150,25 +150,22 @@ public static class GoogleEventMapper
             Overrides = []
         };
         var overrides = new List<EventReminder>();
-        if (localEvent.ReminderMinutesBeforeStart is int minutes)
+        foreach (var minutes in localEvent.EffectiveAppReminderMinutesBeforeStart)
         {
-            if (localEvent.IsAppReminderEnabled)
+            overrides.Add(new EventReminder
             {
-                overrides.Add(new EventReminder
-                {
-                    Method = "popup",
-                    Minutes = minutes
-                });
-            }
+                Method = "popup",
+                Minutes = minutes
+            });
+        }
 
-            if (localEvent.IsGoogleEmailReminderEnabled)
+        foreach (var minutes in GetGoogleEmailReminderMinutesForExport(localEvent))
+        {
+            overrides.Add(new EventReminder
             {
-                overrides.Add(new EventReminder
-                {
-                    Method = "email",
-                    Minutes = minutes
-                });
-            }
+                Method = "email",
+                Minutes = minutes
+            });
         }
 
         reminders.Overrides = overrides;
@@ -187,6 +184,36 @@ public static class GoogleEventMapper
         return metadata.UseDefault == true
             ? metadata.DefaultEmailMinutes.Count > 0
             : metadata.EmailMinutes.Count > 0;
+    }
+
+    private static IReadOnlyList<int> GetPopupReminderMinutes(GoogleReminderMetadata metadata)
+    {
+        var source = metadata.UseDefault == true ? metadata.DefaultPopupMinutes : metadata.PopupMinutes;
+        return CalendarEvent.NormalizeReminderMinutes(source);
+    }
+
+    private static IReadOnlyList<int> GetEmailReminderMinutes(GoogleReminderMetadata metadata)
+    {
+        var source = metadata.UseDefault == true ? metadata.DefaultEmailMinutes : metadata.EmailMinutes;
+        return CalendarEvent.NormalizeReminderMinutes(source);
+    }
+
+    private static IReadOnlyList<int> GetGoogleEmailReminderMinutesForExport(LocalEvent localEvent)
+    {
+        var configured = CalendarEvent.NormalizeReminderMinutes(localEvent.GoogleEmailReminderMinutesBeforeStart);
+        if (configured.Count > 0)
+        {
+            return configured;
+        }
+
+        return localEvent.GoogleEmailReminderEnabled == true && localEvent.ReminderMinutesBeforeStart is int minutes
+            ? [minutes]
+            : [];
+    }
+
+    private static int? FirstOrDefaultOrNull(IReadOnlyList<int> values)
+    {
+        return values.Count == 0 ? null : values[0];
     }
 
     private static DateTimeOffset ParseEventDateTime(EventDateTime? value, bool isAllDay)

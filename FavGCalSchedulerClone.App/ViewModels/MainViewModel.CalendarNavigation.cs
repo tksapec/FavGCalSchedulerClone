@@ -326,7 +326,7 @@ public sealed partial class MainViewModel
                 continue;
             }
 
-            foreach (var calendarEvent in eventsForDate.Take(5))
+            foreach (var calendarEvent in eventsForDate.Take(CalendarSegmentLayoutService.MaxLanes))
             {
                 day.Events.Add(calendarEvent);
             }
@@ -525,59 +525,60 @@ public sealed partial class MainViewModel
 
     private async Task PrefetchAdjacentMonthsAsync(CalendarRefreshRequest request)
     {
+        var context = CreateCalendarSnapshotBuildContext();
+        var months = new[] { request.Month.AddMonths(-1), request.Month.AddMonths(1) };
+        await Task.WhenAll(months.Select(month => PrefetchMonthAsync(request, context, month)));
+    }
+
+    private async Task PrefetchMonthAsync(
+        CalendarRefreshRequest request,
+        CalendarSnapshotBuildContext context,
+        DateTime month)
+    {
         try
         {
-            await Task.Delay(120, request.CancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            Debug.WriteLine($"Calendar prefetch canceled before start: generation={request.Generation}");
-            return;
-        }
-
-        var context = CreateCalendarSnapshotBuildContext();
-        foreach (var month in new[] { request.Month.AddMonths(-1), request.Month.AddMonths(1) })
-        {
-            try
+            request.CancellationToken.ThrowIfCancellationRequested();
+            var key = CreateCalendarCacheKey(month, context);
+            lock (_calendarCacheLock)
             {
-                request.CancellationToken.ThrowIfCancellationRequested();
-                var key = CreateCalendarCacheKey(month, context);
                 if (_calendarCache.ContainsKey(key))
                 {
-                    continue;
+                    return;
                 }
+            }
 
-                Debug.WriteLine($"Calendar prefetch start: {month:yyyy-MM}, generation={request.Generation}");
-                var (gridStart, gridEnd) = DateRangeHelper.MonthGridRange(month, context.WeekStartsOnMonday);
-                var storedEvents = await _repository.LoadEventsAsync(
-                    new DateTimeOffset(gridStart),
-                    new DateTimeOffset(gridEnd),
-                    includeDeleted: true,
-                    request.CancellationToken);
-                request.CancellationToken.ThrowIfCancellationRequested();
-                var snapshot = await Task.Run(
-                    () => BuildCalendarSnapshot(month, gridStart, gridEnd, storedEvents, context, request.CancellationToken),
-                    request.CancellationToken);
-                request.CancellationToken.ThrowIfCancellationRequested();
+            Debug.WriteLine($"Calendar prefetch start: {month:yyyy-MM}, generation={request.Generation}");
+            var (gridStart, gridEnd) = DateRangeHelper.MonthGridRange(month, context.WeekStartsOnMonday);
+            var storedEvents = await _repository.LoadEventsAsync(
+                new DateTimeOffset(gridStart),
+                new DateTimeOffset(gridEnd),
+                includeDeleted: true,
+                request.CancellationToken);
+            request.CancellationToken.ThrowIfCancellationRequested();
+            var snapshot = await Task.Run(
+                () => BuildCalendarSnapshot(month, gridStart, gridEnd, storedEvents, context, request.CancellationToken),
+                request.CancellationToken);
+            request.CancellationToken.ThrowIfCancellationRequested();
+            lock (_calendarCacheLock)
+            {
                 if (!IsLatestCalendarRefresh(request) || _calendarCache.ContainsKey(key))
                 {
                     Debug.WriteLine($"Calendar prefetch discarded: {month:yyyy-MM}, generation={request.Generation}");
-                    continue;
+                    return;
                 }
 
                 StoreCalendarCache(snapshot, key);
-                Debug.WriteLine($"Calendar prefetch complete: {month:yyyy-MM}, generation={request.Generation}");
             }
-            catch (OperationCanceledException)
-            {
-                Debug.WriteLine($"Calendar prefetch canceled: generation={request.Generation}");
-                return;
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine(ex);
-                return;
-            }
+
+            Debug.WriteLine($"Calendar prefetch complete: {month:yyyy-MM}, generation={request.Generation}");
+        }
+        catch (OperationCanceledException)
+        {
+            Debug.WriteLine($"Calendar prefetch canceled: generation={request.Generation}");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(ex);
         }
     }
 
@@ -596,18 +597,24 @@ public sealed partial class MainViewModel
     private CalendarRefreshSnapshot? TryGetCalendarCache(DateTime month)
     {
         var key = CreateCalendarCacheKey(month);
-        if (!_calendarCache.TryGetValue(key, out var snapshot))
+        lock (_calendarCacheLock)
         {
-            return null;
-        }
+            if (!_calendarCache.TryGetValue(key, out var snapshot))
+            {
+                return null;
+            }
 
-        Debug.WriteLine($"Calendar cache hit: {key.Month:yyyy-MM}, weekStartsOnMonday={key.WeekStartsOnMonday}, calendars={key.VisibleCalendarIds}");
-        return snapshot;
+            Debug.WriteLine($"Calendar cache hit: {key.Month:yyyy-MM}, weekStartsOnMonday={key.WeekStartsOnMonday}, calendars={key.VisibleCalendarIds}");
+            return snapshot;
+        }
     }
 
     private void StoreCalendarCache(CalendarRefreshSnapshot snapshot)
     {
-        StoreCalendarCache(snapshot, CreateCalendarCacheKey(snapshot.Month));
+        lock (_calendarCacheLock)
+        {
+            StoreCalendarCache(snapshot, CreateCalendarCacheKey(snapshot.Month));
+        }
     }
 
     private void StoreCalendarCache(CalendarRefreshSnapshot snapshot, CalendarCacheKey key)
@@ -636,7 +643,10 @@ public sealed partial class MainViewModel
 
     private void InvalidateCalendarCache()
     {
-        _calendarCache.Clear();
+        lock (_calendarCacheLock)
+        {
+            _calendarCache.Clear();
+        }
     }
 
     private void RefreshSelectedDayEvents()
@@ -738,7 +748,7 @@ public sealed partial class MainViewModel
             IsHoliday = TagService.HasHolidayWithoutWorkdayOverride(events, date)
         };
 
-        foreach (var calendarEvent in _visibleEvents.Where(e => DateRangeHelper.OccursOn(e, date)).Take(5))
+        foreach (var calendarEvent in _visibleEvents.Where(e => DateRangeHelper.OccursOn(e, date)).Take(CalendarSegmentLayoutService.MaxLanes))
         {
             day.Events.Add(calendarEvent);
         }

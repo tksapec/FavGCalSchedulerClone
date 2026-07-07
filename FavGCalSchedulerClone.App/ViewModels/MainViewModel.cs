@@ -37,6 +37,8 @@ public sealed partial class MainViewModel : ObservableObject
     private string _endTime = "10:00";
     private bool _isAllDay = true;
     private int? _reminderMinutesBeforeStart;
+    private IReadOnlyList<int> _appReminderMinutesBeforeStart = [];
+    private IReadOnlyList<int> _googleEmailReminderMinutesBeforeStart = [];
     private bool _isAppReminderEnabled = true;
     private bool _isGoogleEmailReminderEnabled;
     private string _oauthClientJsonPath = "";
@@ -50,6 +52,7 @@ public sealed partial class MainViewModel : ObservableObject
     private CancellationTokenSource? _calendarRefreshCts;
     private CancellationTokenSource? _deferredCalendarRefreshCts;
     private DateTime? _navigationAnchorDate;
+    private readonly object _calendarCacheLock = new();
     private readonly Dictionary<CalendarCacheKey, CalendarRefreshSnapshot> _calendarCache = [];
     private IReadOnlyDictionary<string, EventDisplayColors> _eventColorPalette = TagService.DefaultEventColorPalette;
     private IReadOnlyList<string> _scheduleTitleHistory = [];
@@ -213,8 +216,17 @@ public sealed partial class MainViewModel : ObservableObject
     internal Action<DateTime, CancellationToken>? BeforeBuildCalendarSnapshot { get; set; }
     internal Action<DateTime>? BeforeSaveDisplayMonth { get; set; }
     internal Action? BeforeRefreshTodos { get; set; }
-    internal TimeSpan NavigationRefreshDelay { get; set; } = TimeSpan.FromMilliseconds(80);
-    internal int CalendarCacheCount => _calendarCache.Count;
+    internal TimeSpan NavigationRefreshDelay { get; set; } = TimeSpan.FromMilliseconds(10);
+    internal int CalendarCacheCount
+    {
+        get
+        {
+            lock (_calendarCacheLock)
+            {
+                return _calendarCache.Count;
+            }
+        }
+    }
 
     public string MonthTitle => CurrentMonth.ToString("yyyy/MM", CultureInfo.InvariantCulture);
     public string JapaneseMonthTitle => CalendarStatusFormatter.FormatJapaneseMonthTitle(CurrentMonth);
@@ -452,6 +464,18 @@ public sealed partial class MainViewModel : ObservableObject
     {
         get => _reminderMinutesBeforeStart;
         set => SetProperty(ref _reminderMinutesBeforeStart, value);
+    }
+
+    public IReadOnlyList<int> AppReminderMinutesBeforeStart
+    {
+        get => _appReminderMinutesBeforeStart;
+        set => SetProperty(ref _appReminderMinutesBeforeStart, CalendarEvent.NormalizeReminderMinutes(value));
+    }
+
+    public IReadOnlyList<int> GoogleEmailReminderMinutesBeforeStart
+    {
+        get => _googleEmailReminderMinutesBeforeStart;
+        set => SetProperty(ref _googleEmailReminderMinutesBeforeStart, CalendarEvent.NormalizeReminderMinutes(value));
     }
 
     public bool IsAppReminderEnabled

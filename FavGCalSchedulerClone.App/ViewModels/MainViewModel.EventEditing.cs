@@ -81,6 +81,8 @@ public sealed partial class MainViewModel
         EndTime = "10:00";
         IsAllDay = _settings.DefaultNewEventIsAllDay;
         ReminderMinutesBeforeStart = _settings.DefaultScheduleReminderMinutes;
+        AppReminderMinutesBeforeStart = _settings.DefaultScheduleReminderMinutes is int defaultMinutes ? [defaultMinutes] : [];
+        GoogleEmailReminderMinutesBeforeStart = [];
         IsAppReminderEnabled = _settings.DefaultScheduleReminderMinutes is not null;
         IsGoogleEmailReminderEnabled = false;
         EditorColorId = null;
@@ -119,6 +121,8 @@ public sealed partial class MainViewModel
         EndTime = calendarEvent.End.ToString("HH:mm", CultureInfo.InvariantCulture);
         IsAllDay = calendarEvent.IsAllDay;
         ReminderMinutesBeforeStart = calendarEvent.ReminderMinutesBeforeStart;
+        AppReminderMinutesBeforeStart = calendarEvent.EffectiveAppReminderMinutesBeforeStart;
+        GoogleEmailReminderMinutesBeforeStart = calendarEvent.EffectiveGoogleEmailReminderMinutesBeforeStart;
         IsAppReminderEnabled = calendarEvent.IsAppReminderEnabled;
         IsGoogleEmailReminderEnabled = calendarEvent.IsGoogleEmailReminderEnabled;
         EditorColorId = calendarEvent.ColorId;
@@ -166,14 +170,19 @@ public sealed partial class MainViewModel
         calendarEvent.Location = string.IsNullOrWhiteSpace(Location) ? null : Location.Trim();
         calendarEvent.CalendarId = ResolveEditorCalendarId();
         calendarEvent.IsAllDay = IsAllDay;
-        var hasReminderMinutes = ReminderMinutesBeforeStart is not null;
-        var appReminderEnabled = hasReminderMinutes && IsAppReminderEnabled;
-        var googleEmailReminderEnabled = hasReminderMinutes && IsGoogleEmailReminderEnabled;
-        var reminderMinutes = appReminderEnabled || googleEmailReminderEnabled ? ReminderMinutesBeforeStart : null;
+        var appReminderMinutes = IsAppReminderEnabled
+            ? CalendarEvent.NormalizeReminderMinutes(AppReminderMinutesBeforeStart.Count > 0 ? AppReminderMinutesBeforeStart : ReminderMinutesBeforeStart is int appMinutes ? [appMinutes] : [])
+            : [];
+        var googleEmailReminderMinutes = IsGoogleEmailReminderEnabled
+            ? CalendarEvent.NormalizeReminderMinutes(GoogleEmailReminderMinutesBeforeStart.Count > 0 ? GoogleEmailReminderMinutesBeforeStart : ReminderMinutesBeforeStart is int emailMinutes ? [emailMinutes] : [])
+            : [];
+        var reminderMinutes = appReminderMinutes.Count == 0 ? null : (int?)appReminderMinutes[0];
         calendarEvent.ReminderMinutesBeforeStart = reminderMinutes;
-        calendarEvent.IsAppReminderEnabled = appReminderEnabled;
-        calendarEvent.IsGoogleEmailReminderEnabled = googleEmailReminderEnabled;
-        calendarEvent.GoogleReminderMetadata = CreateCommonGoogleReminderMetadata(calendarEvent.GoogleReminderMetadata, reminderMinutes, appReminderEnabled, googleEmailReminderEnabled);
+        calendarEvent.AppReminderMinutesBeforeStart = appReminderMinutes.ToList();
+        calendarEvent.GoogleEmailReminderMinutesBeforeStart = googleEmailReminderMinutes.ToList();
+        calendarEvent.IsAppReminderEnabled = appReminderMinutes.Count > 0;
+        calendarEvent.IsGoogleEmailReminderEnabled = googleEmailReminderMinutes.Count > 0;
+        calendarEvent.GoogleReminderMetadata = CreateCommonGoogleReminderMetadata(calendarEvent.GoogleReminderMetadata, appReminderMinutes, googleEmailReminderMinutes);
         calendarEvent.ColorId = EditorColorId;
         calendarEvent.IsDirty = true;
         calendarEvent.IsDeleted = false;
@@ -240,15 +249,16 @@ public sealed partial class MainViewModel
             IsTodoLike = source.IsTodoLike,
             DisplayColor = source.DisplayColor,
             DisplayForegroundColor = source.DisplayForegroundColor,
+            AppReminderMinutesBeforeStart = [.. source.AppReminderMinutesBeforeStart],
+            GoogleEmailReminderMinutesBeforeStart = [.. source.GoogleEmailReminderMinutesBeforeStart],
             IsGeneratedOccurrence = source.IsGeneratedOccurrence
         };
     }
 
     private static GoogleReminderMetadata? CreateCommonGoogleReminderMetadata(
         GoogleReminderMetadata? existing,
-        int? reminderMinutes,
-        bool appReminderEnabled,
-        bool googleEmailReminderEnabled)
+        IReadOnlyList<int> appReminderMinutes,
+        IReadOnlyList<int> googleEmailReminderMinutes)
     {
         if (existing is null)
         {
@@ -259,22 +269,17 @@ public sealed partial class MainViewModel
         {
             UseDefault = false,
             Source = "explicit",
-            AdoptedReminderMinutes = reminderMinutes,
-            AdoptedReminderMethod = reminderMinutes is null
-                ? null
-                : appReminderEnabled ? "popup" : "email"
+            AdoptedReminderMinutes = appReminderMinutes.Count == 0 ? null : appReminderMinutes[0],
+            AdoptedReminderMethod = appReminderMinutes.Count == 0 ? null : "popup"
         };
-        if (reminderMinutes is int minutes)
+        foreach (var minutes in appReminderMinutes)
         {
-            if (appReminderEnabled)
-            {
-                metadata.PopupMinutes.Add(minutes);
-            }
+            metadata.PopupMinutes.Add(minutes);
+        }
 
-            if (googleEmailReminderEnabled)
-            {
-                metadata.EmailMinutes.Add(minutes);
-            }
+        foreach (var minutes in googleEmailReminderMinutes)
+        {
+            metadata.EmailMinutes.Add(minutes);
         }
 
         return metadata;

@@ -997,7 +997,9 @@ public partial class MainWindow : Window
                 await _viewModel.LoadScheduleTitleHistoryAsync(),
                 _viewModel.AvailableCalendars,
                 _viewModel.ReminderOptions,
-                GoogleReminderDisplayFormatter.FormatEmailReminderText(editingEvent?.GoogleReminderMetadata)),
+                GoogleReminderDisplayFormatter.FormatEmailReminderText(editingEvent?.GoogleReminderMetadata),
+                editingEvent?.EffectiveAppReminderMinutesBeforeStart ?? _viewModel.AppReminderMinutesBeforeStart,
+                editingEvent?.EffectiveGoogleEmailReminderMinutesBeforeStart ?? _viewModel.GoogleEmailReminderMinutesBeforeStart),
             () =>
             {
                 if (!_viewModel.HideMainWindowWhileEditingSchedule)
@@ -1026,6 +1028,8 @@ public partial class MainWindow : Window
         _viewModel.EndTime = result.EndTime;
         _viewModel.IsAllDay = result.IsAllDay;
         _viewModel.ReminderMinutesBeforeStart = result.ReminderMinutesBeforeStart;
+        _viewModel.AppReminderMinutesBeforeStart = result.AppReminderMinutesBeforeStart ?? [];
+        _viewModel.GoogleEmailReminderMinutesBeforeStart = result.GoogleEmailReminderMinutesBeforeStart ?? [];
         _viewModel.IsAppReminderEnabled = result.IsAppReminderEnabled;
         _viewModel.IsGoogleEmailReminderEnabled = result.IsGoogleEmailReminderEnabled;
         _viewModel.Location = result.Location;

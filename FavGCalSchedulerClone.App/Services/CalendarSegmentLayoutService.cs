@@ -4,7 +4,7 @@ namespace FavGCalSchedulerClone.App.Services;
 
 public static class CalendarSegmentLayoutService
 {
-    public const int MaxLanes = 5;
+    public const int MaxLanes = 7;
 
     public static void PopulateSegments(
         IReadOnlyList<CalendarDay> days,

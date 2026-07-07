@@ -83,7 +83,7 @@ public sealed class ReminderNotificationServiceTests
         Assert.Equal(2, diagnostics.CandidateCount);
         Assert.Equal(2, diagnostics.Candidates.Count);
         Assert.Contains(diagnostics.Candidates, item => item.Title == "Future reminder" && item.Reason == "通知時刻未到達");
-        Assert.Contains(diagnostics.Candidates, item => item.Title == "No reminder" && item.Reason == "通知設定なし");
+        Assert.Contains(diagnostics.Candidates, item => item.Title == "No reminder" && item.Reason == "アプリ内通知なし");
     }
 
     [Fact]
@@ -160,7 +160,7 @@ public sealed class ReminderNotificationServiceTests
         var detailedJson = await repository.LoadSettingValueAsync("reminder:diagnostics");
 
         Assert.NotEqual(regularJson, detailedJson);
-        Assert.Contains(service.CurrentDiagnostics.Candidates, item => item.Title == "No reminder" && item.Reason == "通知設定なし");
+        Assert.Contains(service.CurrentDiagnostics.Candidates, item => item.Title == "No reminder" && item.Reason == "アプリ内通知なし");
     }
 
     [Fact]
@@ -295,6 +295,36 @@ public sealed class ReminderNotificationServiceTests
         var notification = Assert.Single(notifications);
         Assert.Equal("Design review", notification.Title);
         Assert.Equal(start.AddMinutes(-10), notification.RemindAt);
+    }
+
+    [Fact]
+    public async Task CheckDueRemindersAsync_TriggersEachAppReminderMinuteSeparately()
+    {
+        var repository = await CreateRepositoryAsync();
+        var service = new ReminderNotificationService(repository);
+        var notifications = new List<ReminderNotification>();
+        service.ReminderTriggered += notification =>
+        {
+            notifications.Add(notification);
+            return Task.CompletedTask;
+        };
+
+        var start = new DateTimeOffset(2026, 5, 17, 10, 0, 0, TimeSpan.FromHours(9));
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Title = "Multi reminder",
+            CalendarId = "primary",
+            Start = start,
+            End = start.AddHours(1),
+            AppReminderMinutesBeforeStart = [30, 10],
+            GoogleEmailReminderMinutesBeforeStart = [60]
+        });
+
+        await service.CheckDueRemindersAsync(start.AddMinutes(-30));
+        await service.CheckDueRemindersAsync(start.AddMinutes(-10));
+
+        Assert.Equal([start.AddMinutes(-30), start.AddMinutes(-10)], notifications.Select(item => item.RemindAt).ToArray());
+        Assert.All(notifications, item => Assert.Contains("Multi reminder", item.Title));
     }
 
     [Fact]

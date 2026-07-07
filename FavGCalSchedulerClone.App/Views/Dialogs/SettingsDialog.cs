@@ -161,12 +161,6 @@ internal static class SettingsDialog
 
         var notifyPage = Page();
         var soundEnabled = new CheckBox { Content = "通知時に音声ファイルを再生する", IsChecked = settings.EnableReminderSound };
-        var adoptGoogleEmailReminders = new CheckBox
-        {
-            Content = "Googleのメール通知もアプリ内通知として扱う",
-            IsChecked = settings.AdoptGoogleEmailRemindersAsLocalNotifications,
-            Margin = new Thickness(0, 0, 0, 12)
-        };
         var soundPath = new TextBox { Text = settings.ReminderSoundFilePath ?? "", MinWidth = 430, Margin = new Thickness(0, 8, 0, 8) };
         var browseSound = new Button { Content = "参照", Width = 80 };
         browseSound.Click += (_, _) =>
@@ -199,7 +193,6 @@ internal static class SettingsDialog
                 MessageBoxButton.OK,
                 result.Succeeded ? MessageBoxImage.Information : MessageBoxImage.Warning);
         };
-        notifyPage.Children.Add(adoptGoogleEmailReminders);
         notifyPage.Children.Add(soundEnabled);
         notifyPage.Children.Add(soundPath);
         notifyPage.Children.Add(browseSound);
@@ -292,7 +285,6 @@ internal static class SettingsDialog
         settings.EnableReminderSound = soundEnabled.IsChecked == true;
         settings.ReminderSoundFilePath = string.IsNullOrWhiteSpace(soundPath.Text) ? null : soundPath.Text.Trim();
         settings.ReminderSoundVolume = (int)volume.Value;
-        settings.AdoptGoogleEmailRemindersAsLocalNotifications = adoptGoogleEmailReminders.IsChecked == true;
         settings.OAuthClientJsonPath = string.IsNullOrWhiteSpace(oauthPath.Text) ? null : oauthPath.Text.Trim();
         settings.SyncAfterLocalChange = syncAfterChange.IsChecked == true;
         settings.ShowSyncPreviewBeforeManualSync = syncPreview.IsChecked == true;

@@ -24,6 +24,8 @@ public sealed class CalendarEvent
     public string? DirtyFields { get; set; }
     public bool IsTodoLike { get; set; }
     public int? ReminderMinutesBeforeStart { get; set; }
+    public List<int> AppReminderMinutesBeforeStart { get; set; } = [];
+    public List<int> GoogleEmailReminderMinutesBeforeStart { get; set; } = [];
     internal bool? AppReminderEnabled { get; set; }
     internal bool? GoogleEmailReminderEnabled { get; set; }
     public GoogleReminderMetadata? GoogleReminderMetadata { get; set; }
@@ -50,24 +52,78 @@ public sealed class CalendarEvent
     public string DateDisplayText => IsAllDay ? Start.ToString("yyyy/MM/dd") : Start.ToString("yyyy/MM/dd HH:mm");
     public string ListStartText => IsAllDay ? $"{Start:yyyy/MM/dd} [終日]" : Start.ToString("yyyy/MM/dd HH:mm");
     public string ListEndText => IsAllDay ? $"{End:yyyy/MM/dd} [終日]" : End.ToString("yyyy/MM/dd HH:mm");
-    public string ReminderDisplayText => ReminderMinutesBeforeStart switch
+    public string ReminderDisplayText => PrimaryAppReminderMinutesBeforeStart switch
     {
         null => "",
         0 => "時刻",
-        < 60 => $"{ReminderMinutesBeforeStart}分前",
-        _ when ReminderMinutesBeforeStart % 60 == 0 => $"{ReminderMinutesBeforeStart / 60}時間前",
-        _ => $"{ReminderMinutesBeforeStart}分前"
+        < 60 => $"{PrimaryAppReminderMinutesBeforeStart}分前",
+        _ when PrimaryAppReminderMinutesBeforeStart % 60 == 0 => $"{PrimaryAppReminderMinutesBeforeStart / 60}時間前",
+        _ => $"{PrimaryAppReminderMinutesBeforeStart}分前"
     };
     public bool IsAppReminderEnabled
     {
-        get => AppReminderEnabled ?? ReminderMinutesBeforeStart is not null;
+        get => AppReminderEnabled ?? EffectiveAppReminderMinutesBeforeStart.Count > 0;
         set => AppReminderEnabled = value;
     }
 
     public bool IsGoogleEmailReminderEnabled
     {
-        get => GoogleEmailReminderEnabled ?? HasGoogleEmailReminder();
+        get => GoogleEmailReminderEnabled ?? EffectiveGoogleEmailReminderMinutesBeforeStart.Count > 0;
         set => GoogleEmailReminderEnabled = value;
+    }
+
+    public IReadOnlyList<int> EffectiveAppReminderMinutesBeforeStart
+    {
+        get
+        {
+            if (AppReminderEnabled == false)
+            {
+                return [];
+            }
+
+            var configured = NormalizeReminderMinutes(AppReminderMinutesBeforeStart);
+            if (configured.Count > 0)
+            {
+                return configured;
+            }
+
+            return (AppReminderEnabled ?? ReminderMinutesBeforeStart is not null) && ReminderMinutesBeforeStart is int minutes
+                ? [minutes]
+                : [];
+        }
+    }
+
+    public IReadOnlyList<int> EffectiveGoogleEmailReminderMinutesBeforeStart
+    {
+        get
+        {
+            if (GoogleEmailReminderEnabled == false)
+            {
+                return [];
+            }
+
+            var configured = NormalizeReminderMinutes(GoogleEmailReminderMinutesBeforeStart);
+            if (configured.Count > 0)
+            {
+                return configured;
+            }
+
+            if (GoogleEmailReminderEnabled == true && ReminderMinutesBeforeStart is int minutes)
+            {
+                return [minutes];
+            }
+
+            return GoogleEmailReminderEnabled is null or true ? GetGoogleEmailReminderMinutes() : [];
+        }
+    }
+
+    public int? PrimaryAppReminderMinutesBeforeStart
+    {
+        get
+        {
+            var values = EffectiveAppReminderMinutesBeforeStart;
+            return values.Count == 0 ? null : values[0];
+        }
     }
 
     public string DescriptionPreview => SingleLine(Description);
@@ -100,5 +156,27 @@ public sealed class CalendarEvent
         return GoogleReminderMetadata is not null
             && (GoogleReminderMetadata.EmailMinutes.Count > 0
                 || GoogleReminderMetadata.DefaultEmailMinutes.Count > 0);
+    }
+
+    public static IReadOnlyList<int> NormalizeReminderMinutes(IEnumerable<int>? minutes)
+    {
+        return minutes?
+            .Where(value => value >= 0)
+            .Distinct()
+            .Order()
+            .ToArray() ?? [];
+    }
+
+    private IReadOnlyList<int> GetGoogleEmailReminderMinutes()
+    {
+        if (!HasGoogleEmailReminder())
+        {
+            return [];
+        }
+
+        var source = GoogleReminderMetadata!.UseDefault == true
+            ? GoogleReminderMetadata.DefaultEmailMinutes
+            : GoogleReminderMetadata.EmailMinutes;
+        return NormalizeReminderMinutes(source);
     }
 }

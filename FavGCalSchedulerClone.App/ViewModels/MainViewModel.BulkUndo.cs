@@ -36,16 +36,22 @@ public sealed partial class MainViewModel
                 if (minutes is null || (!appEnabled && !emailEnabled))
                 {
                     calendarEvent.ReminderMinutesBeforeStart = null;
+                    calendarEvent.AppReminderMinutesBeforeStart = [];
+                    calendarEvent.GoogleEmailReminderMinutesBeforeStart = [];
                     calendarEvent.IsAppReminderEnabled = false;
                     calendarEvent.IsGoogleEmailReminderEnabled = false;
-                    calendarEvent.GoogleReminderMetadata = CreateCommonGoogleReminderMetadata(calendarEvent.GoogleReminderMetadata, null, false, false);
+                    calendarEvent.GoogleReminderMetadata = CreateCommonGoogleReminderMetadata(calendarEvent.GoogleReminderMetadata, [], []);
                 }
                 else
                 {
-                    calendarEvent.ReminderMinutesBeforeStart = minutes;
+                    var appReminderMinutes = appEnabled ? CalendarEvent.NormalizeReminderMinutes([minutes.Value]) : [];
+                    var googleEmailReminderMinutes = emailEnabled ? CalendarEvent.NormalizeReminderMinutes([minutes.Value]) : [];
+                    calendarEvent.ReminderMinutesBeforeStart = appReminderMinutes.Count == 0 ? null : appReminderMinutes[0];
+                    calendarEvent.AppReminderMinutesBeforeStart = appReminderMinutes.ToList();
+                    calendarEvent.GoogleEmailReminderMinutesBeforeStart = googleEmailReminderMinutes.ToList();
                     calendarEvent.IsAppReminderEnabled = appEnabled;
                     calendarEvent.IsGoogleEmailReminderEnabled = emailEnabled;
-                    calendarEvent.GoogleReminderMetadata = CreateCommonGoogleReminderMetadata(calendarEvent.GoogleReminderMetadata, minutes, appEnabled, emailEnabled);
+                    calendarEvent.GoogleReminderMetadata = CreateCommonGoogleReminderMetadata(calendarEvent.GoogleReminderMetadata, appReminderMinutes, googleEmailReminderMinutes);
                 }
             }
 

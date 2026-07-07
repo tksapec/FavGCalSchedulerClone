@@ -26,6 +26,8 @@ internal static class EventDirtyFieldTracker
             if (existing.Start != current.Start || existing.End != current.End) fields.Add("StartEnd");
             AddIfChanged(fields, "AllDay", existing.IsAllDay, current.IsAllDay);
             AddIfChanged(fields, "Reminder", existing.ReminderMinutesBeforeStart, current.ReminderMinutesBeforeStart);
+            AddIfChanged(fields, "Reminder", string.Join("|", existing.EffectiveAppReminderMinutesBeforeStart), string.Join("|", current.EffectiveAppReminderMinutesBeforeStart));
+            AddIfChanged(fields, "Reminder", string.Join("|", existing.EffectiveGoogleEmailReminderMinutesBeforeStart), string.Join("|", current.EffectiveGoogleEmailReminderMinutesBeforeStart));
             AddIfChanged(fields, "Reminder", existing.IsAppReminderEnabled, current.IsAppReminderEnabled);
             AddIfChanged(fields, "Reminder", existing.IsGoogleEmailReminderEnabled, current.IsGoogleEmailReminderEnabled);
             AddIfChanged(fields, "Color", Normalize(existing.ColorId), Normalize(current.ColorId));

@@ -321,8 +321,38 @@ public sealed class CalendarRepositoryTests
         var loaded = await repository.FindEventByIdAsync(item.Id);
 
         Assert.NotNull(loaded);
-        Assert.Equal(30, loaded!.ReminderMinutesBeforeStart);
+        Assert.Null(loaded!.ReminderMinutesBeforeStart);
+        Assert.Empty(loaded.AppReminderMinutesBeforeStart);
+        Assert.Equal([30], loaded.GoogleEmailReminderMinutesBeforeStart);
         Assert.False(loaded.IsAppReminderEnabled);
+        Assert.True(loaded.IsGoogleEmailReminderEnabled);
+    }
+
+    [Fact]
+    public async Task SaveEventAsync_RoundTripsSeparateReminderMinuteLists()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        var item = new CalendarEvent
+        {
+            Id = "separate-reminder-minutes",
+            Title = "Separate reminder minutes",
+            CalendarId = "primary",
+            Start = new DateTimeOffset(2026, 5, 16, 11, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 5, 16, 12, 0, 0, TimeSpan.Zero),
+            AppReminderMinutesBeforeStart = [10, 30],
+            GoogleEmailReminderMinutesBeforeStart = [60]
+        };
+
+        await repository.SaveEventAsync(item);
+        var loaded = await repository.FindEventByIdAsync(item.Id);
+
+        Assert.NotNull(loaded);
+        Assert.Equal([10, 30], loaded!.AppReminderMinutesBeforeStart);
+        Assert.Equal([60], loaded.GoogleEmailReminderMinutesBeforeStart);
+        Assert.Equal(10, loaded.ReminderMinutesBeforeStart);
+        Assert.True(loaded.IsAppReminderEnabled);
         Assert.True(loaded.IsGoogleEmailReminderEnabled);
     }
 
@@ -414,7 +444,9 @@ public sealed class CalendarRepositoryTests
         Assert.False(stored1!.IsDirty);
         Assert.Null(stored1.DirtyFields);
         Assert.NotNull(stored1.LastSyncedAt);
-        Assert.Equal(30, stored1.ReminderMinutesBeforeStart);
+        Assert.Null(stored1.ReminderMinutesBeforeStart);
+        Assert.Empty(stored1.AppReminderMinutesBeforeStart);
+        Assert.Equal([30], stored1.GoogleEmailReminderMinutesBeforeStart);
         Assert.False(stored1.IsAppReminderEnabled);
         Assert.True(stored1.IsGoogleEmailReminderEnabled);
         Assert.Equal([30], stored1.GoogleReminderMetadata?.EmailMinutes);

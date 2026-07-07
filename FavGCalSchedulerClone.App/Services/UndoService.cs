@@ -61,6 +61,8 @@ public sealed class UndoService
             DirtyFields = source.DirtyFields,
             IsTodoLike = source.IsTodoLike,
             ReminderMinutesBeforeStart = source.ReminderMinutesBeforeStart,
+            AppReminderMinutesBeforeStart = [.. source.AppReminderMinutesBeforeStart],
+            GoogleEmailReminderMinutesBeforeStart = [.. source.GoogleEmailReminderMinutesBeforeStart],
             AppReminderEnabled = source.AppReminderEnabled,
             GoogleEmailReminderEnabled = source.GoogleEmailReminderEnabled,
             GoogleReminderMetadata = source.GoogleReminderMetadata?.Clone(),

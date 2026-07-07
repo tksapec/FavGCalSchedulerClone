@@ -15,6 +15,7 @@ internal static class AppSettingsNormalizer
         settings.SideListFontSizeIndex = Math.Clamp(settings.SideListFontSizeIndex, 1, 3);
         settings.WindowOpacity = Math.Clamp(settings.WindowOpacity, 64, 255);
         settings.ReminderSoundVolume = Math.Clamp(settings.ReminderSoundVolume, 0, 100);
+        settings.AdoptGoogleEmailRemindersAsLocalNotifications = false;
         settings.IncompleteTodoDisplayPeriodMonths = NormalizeTodoMonths(settings.IncompleteTodoDisplayPeriodMonths);
         settings.CompletedTodoDisplayPeriodMonths = NormalizeTodoMonths(settings.CompletedTodoDisplayPeriodMonths);
         settings.AutomaticSyncIntervalMinutes = settings.AutomaticSyncIntervalMinutes is int interval

@@ -163,6 +163,78 @@ public sealed class ReminderNotificationService : IDisposable
             foreach (var calendarEvent in expandedEvents)
             {
                 var googleReminderReason = GetGoogleReminderDiagnosticReason(calendarEvent);
+                var appReminderMinutes = calendarEvent.EffectiveAppReminderMinutesBeforeStart;
+                if (appReminderMinutes.Count != 1
+                    || calendarEvent.ReminderMinutesBeforeStart != appReminderMinutes[0]
+                    || !calendarEvent.IsAppReminderEnabled)
+                {
+                    if (appReminderMinutes.Count == 0)
+                    {
+                        noReminderCount++;
+                        if (includeAllCandidates || calendarEvent.IsGoogleEmailReminderEnabled || calendarEvent.GoogleReminderMetadata?.HasGoogleReminder == true)
+                        {
+                            candidateDiagnostics.Add(CreateCandidateDiagnostic(
+                                calendarEvent,
+                                current,
+                                null,
+                                null,
+                                false,
+                                false,
+                                null,
+                                googleReminderReason ?? "アプリ内通知なし"));
+                        }
+
+                        continue;
+                    }
+
+                    reminderConfiguredCount++;
+                    foreach (var expandedReminderMinutes in appReminderMinutes)
+                    {
+                        var expandedNotification = CreateReminderNotification(calendarEvent, current, expandedReminderMinutes);
+                        if (expandedNotification is null)
+                        {
+                            candidateDiagnostics.Add(CreateCandidateDiagnostic(calendarEvent, current, expandedReminderMinutes, null, false, false, null, "通知情報を作成できません"));
+                            continue;
+                        }
+
+                        var expandedIsFired = fired.ContainsKey(expandedNotification.OccurrenceKey);
+                        var expandedSnoozedUntil = TryGetSnoozedUntil(snoozed, expandedNotification.OccurrenceKey);
+                        var expandedIsDue = expandedNotification.RemindAt <= current;
+                        string expandedReason;
+                        if (calendarEvent.IsTodoDone)
+                        {
+                            expandedReason = "完了ToDo";
+                        }
+                        else if (expandedSnoozedUntil is not null && expandedSnoozedUntil > current)
+                        {
+                            snoozedExcludedCount++;
+                            expandedReason = "スヌーズ中";
+                        }
+                        else if (expandedIsFired && expandedSnoozedUntil is null)
+                        {
+                            firedExcludedCount++;
+                            expandedReason = "発火済み";
+                        }
+                        else if (!expandedIsDue)
+                        {
+                            expandedReason = googleReminderReason ?? "通知時刻未到達";
+                        }
+                        else if (IsPastForReminder(calendarEvent, current))
+                        {
+                            expandedReason = calendarEvent.IsAllDay ? "終了済みの予定" : "開始済みの予定";
+                        }
+                        else
+                        {
+                            expandedReason = expandedSnoozedUntil is not null ? "スヌーズ期限到達" : "通知対象";
+                            dueNotifications.Add(expandedNotification);
+                        }
+
+                        candidateDiagnostics.Add(CreateCandidateDiagnostic(calendarEvent, current, expandedReminderMinutes, expandedNotification, expandedIsDue, expandedIsFired, expandedSnoozedUntil, expandedReason));
+                    }
+
+                    continue;
+                }
+
                 if (calendarEvent.ReminderMinutesBeforeStart is not int reminderMinutes)
                 {
                     noReminderCount++;
@@ -490,7 +562,7 @@ public sealed class ReminderNotificationService : IDisposable
             return "Googleメール通知のみ（本ツールのポップアップ通知対象外）";
         }
 
-        if (metadata.AdoptedReminderMinutes != calendarEvent.ReminderMinutesBeforeStart)
+        if (metadata.AdoptedReminderMinutes != calendarEvent.PrimaryAppReminderMinutesBeforeStart)
         {
             return "通知設定差分あり";
         }
@@ -513,7 +585,9 @@ public sealed class ReminderNotificationService : IDisposable
                 : "";
         }
 
-        if (!calendarEvent.IsAppReminderEnabled || calendarEvent.IsGoogleEmailReminderEnabled)
+        var appReminderMinutes = calendarEvent.EffectiveAppReminderMinutesBeforeStart;
+        var googleEmailReminderMinutes = calendarEvent.EffectiveGoogleEmailReminderMinutesBeforeStart;
+        if (appReminderMinutes.Count != 1 || googleEmailReminderMinutes.Count > 0)
         {
             return FormatSeparatedReminderText(calendarEvent);
         }
@@ -525,12 +599,12 @@ public sealed class ReminderNotificationService : IDisposable
 
         if (metadata.AdoptedReminderMethod is "email" or "default-email")
         {
-            return metadata.AdoptedReminderMinutes == calendarEvent.ReminderMinutesBeforeStart
-                ? GoogleReminderDisplayFormatter.FormatEmailReminderText(metadata)
+            return metadata.AdoptedReminderMinutes == appReminderMinutes[0]
+                ? FormatSeparatedReminderText(calendarEvent)
                 : "Google email通知設定差分あり";
         }
 
-        if (metadata.AdoptedReminderMinutes != calendarEvent.ReminderMinutesBeforeStart)
+        if (metadata.AdoptedReminderMinutes != appReminderMinutes[0])
         {
             return "通知設定差分あり";
         }
@@ -540,25 +614,15 @@ public sealed class ReminderNotificationService : IDisposable
 
     private static string FormatSeparatedReminderText(CalendarEvent calendarEvent)
     {
-        var appText = calendarEvent.IsAppReminderEnabled && calendarEvent.ReminderMinutesBeforeStart is int minutes
-            ? $"アプリ内通知: {FormatMinute(minutes)}"
+        var appReminderMinutes = calendarEvent.EffectiveAppReminderMinutesBeforeStart;
+        var googleEmailReminderMinutes = calendarEvent.EffectiveGoogleEmailReminderMinutesBeforeStart;
+        var appText = appReminderMinutes.Count > 0
+            ? $"アプリ内通知: {GoogleReminderDisplayFormatter.FormatReminderMinutes(appReminderMinutes)}"
             : "アプリ内通知: なし";
-        var emailText = calendarEvent.IsGoogleEmailReminderEnabled
-            ? FormatGoogleEmailReminderText(calendarEvent)
-            : "Googleメール通知: なし";
-        return $"{appText} / {emailText}";
-    }
-
-    private static string FormatGoogleEmailReminderText(CalendarEvent calendarEvent)
-    {
-        return calendarEvent.ReminderMinutesBeforeStart is int minutes
-            ? $"Googleメール通知: {FormatMinute(minutes)}"
+        var emailText = googleEmailReminderMinutes.Count > 0
+            ? $"Googleメール通知: {GoogleReminderDisplayFormatter.FormatReminderMinutes(googleEmailReminderMinutes)}"
             : GoogleReminderDisplayFormatter.FormatEmailReminderText(calendarEvent.GoogleReminderMetadata);
-    }
-
-    private static string FormatMinute(int minutes)
-    {
-        return minutes == 0 ? "開始時刻" : $"{minutes}分前";
+        return $"{appText} / {emailText}";
     }
 
     private static string FormatDefaultReminders(GoogleReminderMetadata? metadata)
@@ -638,6 +702,11 @@ public sealed class ReminderNotificationService : IDisposable
             return null;
         }
 
+        return CreateReminderNotification(calendarEvent, now, reminderMinutes);
+    }
+
+    private static ReminderNotification? CreateReminderNotification(CalendarEvent calendarEvent, DateTimeOffset now, int reminderMinutes)
+    {
         var baseTime = calendarEvent.IsAllDay
             ? new DateTimeOffset(calendarEvent.Start.Date.AddHours(9), TimeZoneInfo.Local.GetUtcOffset(calendarEvent.Start.Date))
             : calendarEvent.Start;

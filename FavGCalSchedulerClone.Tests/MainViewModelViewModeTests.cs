@@ -147,6 +147,14 @@ public sealed class MainViewModelViewModeTests
     }
 
     [Fact]
+    public async Task NavigationCommands_DefaultRefreshDelayIsShortForResponsiveClicks()
+    {
+        var viewModel = await CreateViewModelAsync();
+
+        Assert.True(viewModel.NavigationRefreshDelay <= TimeSpan.FromMilliseconds(10));
+    }
+
+    [Fact]
     public async Task NavigationCommands_UsePendingDateForRapidWeekAndDayClicks()
     {
         var viewModel = await CreateViewModelAsync();
@@ -294,6 +302,40 @@ public sealed class MainViewModelViewModeTests
     }
 
     [Fact]
+    public async Task Prefetch_StartsOppositeAdjacentMonthWhenOneSideIsBlocked()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        var currentMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        var previousStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var nextStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releasePrevious = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        viewModel.BeforeBuildCalendarSnapshot = (month, token) =>
+        {
+            if (month.Year == currentMonth.AddMonths(-1).Year && month.Month == currentMonth.AddMonths(-1).Month)
+            {
+                previousStarted.TrySetResult();
+                releasePrevious.Task.Wait(token);
+            }
+
+            if (month.Year == currentMonth.AddMonths(1).Year && month.Month == currentMonth.AddMonths(1).Month)
+            {
+                nextStarted.TrySetResult();
+            }
+        };
+
+        await viewModel.InitializeAsync();
+        await previousStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var nextStartedBeforePreviousCompleted = await Task.WhenAny(nextStarted.Task, Task.Delay(100)) == nextStarted.Task;
+        releasePrevious.SetResult();
+
+        Assert.True(nextStartedBeforePreviousCompleted);
+    }
+
+    [Fact]
     public async Task Prefetch_CancelsOlderGenerationWithoutStoringSnapshot()
     {
         var baseline = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
@@ -373,16 +415,33 @@ public sealed class MainViewModelViewModeTests
     }
 
     [Fact]
-    public async Task CalendarDayEvents_LimitsDisplayedItemsToFivePerDay()
+    public async Task CalendarDayEvents_UsesSevenCompactLanesAndTracksOverflow()
     {
         var date = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1).AddDays(12);
-        var events = Enumerable.Range(0, 6)
+        var events = Enumerable.Range(0, 8)
             .Select(index => CreateEvent($"overflow {index}", date))
             .ToArray();
 
         var viewModel = await CreateViewModelAsync(events);
+        var day = viewModel.CalendarDays.Single(day => day.Date == date);
 
-        Assert.Equal(5, viewModel.CalendarDays.Single(day => day.Date == date).Events.Count);
+        Assert.Equal(7, day.Events.Count);
+        Assert.Equal(1, day.HiddenEventCount);
+        Assert.Equal(7, day.Segments.Count(segment => segment.IsVisible));
+    }
+
+    [Fact]
+    public async Task MainWindowMonthTemplate_ShowsHiddenEventCount()
+    {
+        var xamlPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..",
+            "FavGCalSchedulerClone.App",
+            "MainWindow.xaml"));
+        var xaml = await File.ReadAllTextAsync(xamlPath);
+
+        Assert.Contains("HiddenEventText", xaml);
+        Assert.Contains("HasHiddenEvents", xaml);
     }
 
     [Fact]

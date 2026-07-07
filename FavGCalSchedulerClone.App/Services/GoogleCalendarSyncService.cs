@@ -448,10 +448,12 @@ public sealed class GoogleCalendarSyncService
                         upserted++;
                     }
                     else if (await _repository.UpdateGoogleReminderMetadataAsync(
-                            calendarId,
-                            googleEvent.Id,
-                            mapped.ReminderMinutesBeforeStart,
-                            mapped.GoogleReminderMetadata))
+                        calendarId,
+                        googleEvent.Id,
+                        mapped.ReminderMinutesBeforeStart,
+                        mapped.EffectiveAppReminderMinutesBeforeStart,
+                        mapped.EffectiveGoogleEmailReminderMinutesBeforeStart,
+                        mapped.GoogleReminderMetadata))
                     {
                         updated++;
                     }
@@ -1117,18 +1119,13 @@ public sealed class GoogleCalendarSyncService
 
     private static string FormatReminderDiffValue(CalendarEvent calendarEvent)
     {
-        if (calendarEvent.ReminderMinutesBeforeStart is not int minutes)
-        {
-            return "none";
-        }
-
         var parts = new List<string>();
-        if (calendarEvent.IsAppReminderEnabled)
+        foreach (var minutes in calendarEvent.EffectiveAppReminderMinutesBeforeStart)
         {
             parts.Add($"popup {minutes}");
         }
 
-        if (calendarEvent.IsGoogleEmailReminderEnabled)
+        foreach (var minutes in calendarEvent.EffectiveGoogleEmailReminderMinutesBeforeStart)
         {
             parts.Add($"email {minutes}");
         }

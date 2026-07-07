@@ -115,7 +115,7 @@ public sealed class GoogleEventMapperTests
     }
 
     [Fact]
-    public void FromGoogleEvent_UsesEmailOnlyReminderAsLocalReminder()
+    public void FromGoogleEvent_PreservesEmailOnlyReminderWithoutLocalAppAdoption()
     {
         var googleEvent = CreateTimedGoogleEvent();
         googleEvent.Reminders = new Event.RemindersData
@@ -126,10 +126,14 @@ public sealed class GoogleEventMapperTests
 
         var local = GoogleEventMapper.FromGoogleEvent(googleEvent, "primary");
 
-        Assert.Equal(30, local.ReminderMinutesBeforeStart);
+        Assert.Null(local.ReminderMinutesBeforeStart);
+        Assert.Empty(local.AppReminderMinutesBeforeStart);
+        Assert.Equal([30], local.GoogleEmailReminderMinutesBeforeStart);
+        Assert.False(local.IsAppReminderEnabled);
+        Assert.True(local.IsGoogleEmailReminderEnabled);
         Assert.True(local.GoogleReminderMetadata!.HasEmailOnly);
         Assert.Equal([30], local.GoogleReminderMetadata.EmailMinutes);
-        Assert.Equal("email", local.GoogleReminderMetadata.AdoptedReminderMethod);
+        Assert.Null(local.GoogleReminderMetadata.AdoptedReminderMethod);
     }
 
     [Fact]
@@ -151,7 +155,7 @@ public sealed class GoogleEventMapperTests
     }
 
     [Fact]
-    public void FromGoogleEvent_UsesDefaultEmailReminderWhenNoDefaultPopupIsAvailable()
+    public void FromGoogleEvent_PreservesDefaultEmailReminderWithoutLocalAppAdoption()
     {
         var googleEvent = CreateTimedGoogleEvent();
         googleEvent.Reminders = new Event.RemindersData { UseDefault = true };
@@ -161,10 +165,12 @@ public sealed class GoogleEventMapperTests
             "primary",
             [new GoogleReminderOverride("email", 60)]);
 
-        Assert.Equal(60, local.ReminderMinutesBeforeStart);
+        Assert.Null(local.ReminderMinutesBeforeStart);
+        Assert.Empty(local.AppReminderMinutesBeforeStart);
+        Assert.Equal([60], local.GoogleEmailReminderMinutesBeforeStart);
         Assert.True(local.GoogleReminderMetadata!.UseDefault);
         Assert.Equal([60], local.GoogleReminderMetadata.DefaultEmailMinutes);
-        Assert.Equal("default-email", local.GoogleReminderMetadata.AdoptedReminderMethod);
+        Assert.Null(local.GoogleReminderMetadata.AdoptedReminderMethod);
     }
 
     [Fact]
@@ -200,25 +206,22 @@ public sealed class GoogleEventMapperTests
     }
 
     [Fact]
-    public void ToGoogleEvent_WritesEmailReminderWithSameMinutesAsLocalPopupReminder()
+    public void ToGoogleEvent_WritesSeparatePopupAndEmailReminderMinutes()
     {
         var local = new App.Models.CalendarEvent
         {
             Title = "Reminder",
             Start = new DateTimeOffset(2026, 5, 16, 9, 0, 0, TimeSpan.Zero),
             End = new DateTimeOffset(2026, 5, 16, 10, 0, 0, TimeSpan.Zero),
-            ReminderMinutesBeforeStart = 10,
-            GoogleReminderMetadata = new GoogleReminderMetadata
-            {
-                EmailMinutes = [30]
-            }
+            AppReminderMinutesBeforeStart = [10, 30],
+            GoogleEmailReminderMinutesBeforeStart = [60]
         };
 
         var googleEvent = GoogleEventMapper.ToGoogleEvent(local);
 
         Assert.False(googleEvent.Reminders.UseDefault);
         Assert.Equal(
-            [("email", 10), ("popup", 10)],
+            [("email", 60), ("popup", 10), ("popup", 30)],
             googleEvent.Reminders.Overrides
                 .Select(item => (item.Method, item.Minutes.GetValueOrDefault()))
                 .OrderBy(item => item.Method)
@@ -301,9 +304,12 @@ public sealed class GoogleEventMapperTests
 
         var local = GoogleEventMapper.FromGoogleEvent(googleEvent, "primary");
 
-        Assert.Equal(30, local.ReminderMinutesBeforeStart);
+        Assert.Null(local.ReminderMinutesBeforeStart);
+        Assert.Empty(local.AppReminderMinutesBeforeStart);
+        Assert.Equal([30], local.GoogleEmailReminderMinutesBeforeStart);
         Assert.False(local.IsAppReminderEnabled);
         Assert.True(local.IsGoogleEmailReminderEnabled);
+        Assert.Null(local.GoogleReminderMetadata!.AdoptedReminderMethod);
     }
 
     [Fact]

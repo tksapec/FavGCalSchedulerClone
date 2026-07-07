@@ -114,6 +114,8 @@ public static class RecurrenceExpansionService
             IsDirty = source.IsDirty,
             IsTodoLike = source.IsTodoLike,
             ReminderMinutesBeforeStart = source.ReminderMinutesBeforeStart,
+            AppReminderMinutesBeforeStart = [.. source.AppReminderMinutesBeforeStart],
+            GoogleEmailReminderMinutesBeforeStart = [.. source.GoogleEmailReminderMinutesBeforeStart],
             AppReminderEnabled = source.AppReminderEnabled,
             GoogleEmailReminderEnabled = source.GoogleEmailReminderEnabled,
             GoogleReminderMetadata = source.GoogleReminderMetadata,
