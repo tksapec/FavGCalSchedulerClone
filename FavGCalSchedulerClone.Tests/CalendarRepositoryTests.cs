@@ -7,6 +7,119 @@ namespace FavGCalSchedulerClone.Tests;
 public sealed class CalendarRepositoryTests
 {
     [Fact]
+    public async Task InitializeAsync_MigratesLegacyTimestampsToUtcTicksAndPreservesOffsets()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var start = new DateTimeOffset(2026, 5, 2, 0, 0, 0, TimeSpan.FromHours(9));
+        var originalStart = new DateTimeOffset(2026, 5, 2, 0, 0, 0, TimeSpan.FromHours(9));
+        await CreateOldSchemaAsync(dbPath, "legacy", start, start.AddHours(1), originalStart);
+
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+
+        var stored = await repository.FindEventByIdAsync("legacy");
+        Assert.NotNull(stored);
+        Assert.Equal(start, stored!.Start);
+        Assert.Equal(start.Offset, stored.Start.Offset);
+        Assert.Equal(originalStart, stored.OriginalStart);
+
+        await using var connection = OpenTestConnection(dbPath);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT start_utc_ticks, end_utc_ticks, original_start_utc_ticks, updated_at_utc_ticks, last_synced_at_utc_ticks FROM events WHERE id = 'legacy'";
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal(start.UtcTicks, reader.GetInt64(0));
+        Assert.Equal(start.AddHours(1).UtcTicks, reader.GetInt64(1));
+        Assert.Equal(originalStart.UtcTicks, reader.GetInt64(2));
+        Assert.Equal(new DateTimeOffset(2026, 5, 1, 10, 0, 0, TimeSpan.Zero).UtcTicks, reader.GetInt64(3));
+        Assert.True(reader.IsDBNull(4));
+    }
+
+    [Fact]
+    public async Task LoadEventsAsync_UsesUtcTicksForMixedOffsetRangeAndRecurrenceException()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var start = new DateTimeOffset(2026, 5, 2, 0, 0, 0, TimeSpan.FromHours(9));
+        await CreateOldSchemaAsync(dbPath, "offset-event", start, start.AddHours(1));
+        await CreateOldSchemaAsync(
+            dbPath,
+            "offset-exception",
+            new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 6, 1, 1, 0, 0, TimeSpan.Zero),
+            start,
+            isRecurrenceException: true);
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+
+        var events = await repository.LoadEventsAsync(
+            new DateTimeOffset(2026, 5, 1, 14, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 5, 1, 16, 0, 0, TimeSpan.Zero));
+
+        Assert.Contains(events, item => item.Id == "offset-event");
+        Assert.Contains(events, item => item.Id == "offset-exception");
+    }
+
+    [Fact]
+    public async Task SaveEventAsync_WritesLegacyTextAndUtcTicksTogether()
+    {
+        var repository = await CreateRepositoryAsync();
+        var start = new DateTimeOffset(2026, 7, 4, 9, 30, 0, TimeSpan.FromHours(9));
+        var originalStart = start.AddDays(-1);
+        var syncedAt = start.AddHours(2);
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Id = "ticks-written",
+            Title = "Ticks written",
+            CalendarId = "primary",
+            Start = start,
+            End = start.AddHours(1),
+            OriginalStart = originalStart,
+            LastSyncedAt = syncedAt
+        });
+
+        await using var connection = OpenTestConnection(repository.DatabasePath);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT start, start_utc_ticks, end, end_utc_ticks, original_start, original_start_utc_ticks, last_synced_at, last_synced_at_utc_ticks FROM events WHERE id = 'ticks-written'";
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal(start.ToString("O"), reader.GetString(0));
+        Assert.Equal(start.UtcTicks, reader.GetInt64(1));
+        Assert.Equal(start.AddHours(1).ToString("O"), reader.GetString(2));
+        Assert.Equal(start.AddHours(1).UtcTicks, reader.GetInt64(3));
+        Assert.Equal(originalStart.ToString("O"), reader.GetString(4));
+        Assert.Equal(originalStart.UtcTicks, reader.GetInt64(5));
+        Assert.Equal(syncedAt.ToString("O"), reader.GetString(6));
+        Assert.Equal(syncedAt.UtcTicks, reader.GetInt64(7));
+    }
+
+    [Fact]
+    public async Task InitializeAsync_RollsBackUtcTickMigrationWhenLegacyTimestampIsInvalid()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        await CreateOldSchemaAsync(dbPath, "invalid", new DateTimeOffset(2026, 5, 1, 9, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 5, 1, 10, 0, 0, TimeSpan.Zero));
+        await using (var connection = OpenTestConnection(dbPath))
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "UPDATE events SET start = 'not-a-timestamp' WHERE id = 'invalid'";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await Assert.ThrowsAsync<FormatException>(() => new CalendarRepository(dbPath).InitializeAsync());
+
+        await using var verificationConnection = OpenTestConnection(dbPath);
+        await using var pragma = verificationConnection.CreateCommand();
+        pragma.CommandText = "PRAGMA table_info(events)";
+        await using var reader = await pragma.ExecuteReaderAsync();
+        var columns = new List<string>();
+        while (await reader.ReadAsync())
+        {
+            columns.Add(reader.GetString(1));
+        }
+
+        Assert.DoesNotContain("start_utc_ticks", columns, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void AppSettings_DeserializesLegacyJsonWithDefaults()
     {
         var settings = JsonSerializer.Deserialize<AppSettings>(
@@ -588,6 +701,69 @@ public sealed class CalendarRepositoryTests
         var repository = new CalendarRepository(dbPath);
         await repository.InitializeAsync();
         return repository;
+    }
+
+    private static Microsoft.Data.Sqlite.SqliteConnection OpenTestConnection(string dbPath)
+    {
+        var connection = new Microsoft.Data.Sqlite.SqliteConnection(
+            new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = dbPath }.ToString());
+        connection.Open();
+        return connection;
+    }
+
+    private static async Task CreateOldSchemaAsync(
+        string dbPath,
+        string id,
+        DateTimeOffset start,
+        DateTimeOffset end,
+        DateTimeOffset? originalStart = null,
+        bool isRecurrenceException = false)
+    {
+        await using var connection = OpenTestConnection(dbPath);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            CREATE TABLE IF NOT EXISTS events (
+                id TEXT PRIMARY KEY,
+                google_event_id TEXT,
+                recurring_event_id TEXT,
+                recurring_parent_id TEXT,
+                original_start TEXT,
+                is_recurrence_exception INTEGER NOT NULL DEFAULT 0,
+                calendar_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT,
+                location TEXT,
+                start TEXT NOT NULL,
+                end TEXT NOT NULL,
+                is_all_day INTEGER NOT NULL,
+                color_id TEXT,
+                reminder_minutes_before_start INTEGER,
+                app_reminder_enabled INTEGER,
+                google_email_reminder_enabled INTEGER,
+                recurrence_json TEXT,
+                is_deleted INTEGER NOT NULL,
+                updated_at TEXT NOT NULL,
+                last_synced_at TEXT,
+                is_dirty INTEGER NOT NULL,
+                is_todo_like INTEGER NOT NULL,
+                dirty_fields TEXT,
+                google_reminder_metadata_json TEXT,
+                app_reminder_minutes_json TEXT,
+                google_email_reminder_minutes_json TEXT
+            );
+            INSERT INTO events(
+                id, original_start, is_recurrence_exception, calendar_id, title, start, end, is_all_day,
+                is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like)
+            VALUES(
+                $id, $original_start, $is_recurrence_exception, 'primary', $id, $start, $end, 0,
+                0, '2026-05-01T10:00:00.0000000+00:00', NULL, 0, 0);
+            """;
+        command.Parameters.AddWithValue("$id", id);
+        command.Parameters.AddWithValue("$original_start", originalStart?.ToString("O") ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$is_recurrence_exception", isRecurrenceException ? 1 : 0);
+        command.Parameters.AddWithValue("$start", start.ToString("O"));
+        command.Parameters.AddWithValue("$end", end.ToString("O"));
+        await command.ExecuteNonQueryAsync();
     }
 
     private static CalendarEvent DirtyEvent(string id, string title) => new()
