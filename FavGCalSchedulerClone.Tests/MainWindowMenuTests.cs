@@ -164,6 +164,7 @@ public sealed partial class MainWindowMenuTests
         Assert.Contains("TimeSpan.FromMilliseconds(150)", codeBehind);
         Assert.Contains("DayList.ActualHeight", codeBehind);
         Assert.Contains("_viewModel.UpdateMonthLaneCapacity", codeBehind);
+        Assert.Contains("Calendar month layout:", codeBehind);
     }
 
     [Fact]

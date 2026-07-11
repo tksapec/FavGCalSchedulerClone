@@ -11,6 +11,7 @@ namespace FavGCalSchedulerClone.App.ViewModels;
 
 public sealed partial class MainViewModel : ObservableObject
 {
+    internal const int CalendarSnapshotCacheCapacity = 25;
     private const int NoPendingSyncInvocationKind = -1;
     private const string ScheduleTitleHistoryKey = "schedule:title-history";
     private const string ScheduleLocationHistoryKey = "schedule:location-history";
@@ -55,6 +56,7 @@ public sealed partial class MainViewModel : ObservableObject
     private DateTime? _navigationAnchorDate;
     private readonly object _calendarCacheLock = new();
     private readonly Dictionary<CalendarCacheKey, CalendarRefreshSnapshot> _calendarCache = [];
+    private long _calendarDataVersion;
     private IReadOnlyDictionary<string, EventDisplayColors> _eventColorPalette = TagService.DefaultEventColorPalette;
     private IReadOnlyList<string> _scheduleTitleHistory = [];
     private IReadOnlyList<string> _scheduleLocationHistory = [];
@@ -613,7 +615,7 @@ internal sealed record CalendarRefreshRequest(
     bool RefreshTodos,
     CancellationToken CancellationToken);
 
-internal sealed record CalendarCacheKey(DateTime Month, bool WeekStartsOnMonday, string VisibleCalendarIds);
+internal sealed record CalendarCacheKey(DateTime Month, bool WeekStartsOnMonday, string VisibleCalendarIds, long DataVersion);
 
 internal sealed record CalendarSnapshotBuildContext(
     bool WeekStartsOnMonday,

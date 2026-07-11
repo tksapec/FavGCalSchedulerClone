@@ -557,7 +557,7 @@ public sealed partial class MainViewModel
     {
         var normalizedMonth = new DateTime(month.Year, month.Month, 1);
         var visibleCalendars = string.Join("|", context.VisibleCalendarIds.OrderBy(id => id, StringComparer.Ordinal));
-        return new CalendarCacheKey(normalizedMonth, context.WeekStartsOnMonday, visibleCalendars);
+        return new CalendarCacheKey(normalizedMonth, context.WeekStartsOnMonday, visibleCalendars, Volatile.Read(ref _calendarDataVersion));
     }
 
     private CalendarRefreshSnapshot? TryGetCalendarCache(DateTime month)
@@ -586,7 +586,7 @@ public sealed partial class MainViewModel
     private void StoreCalendarCache(CalendarRefreshSnapshot snapshot, CalendarCacheKey key)
     {
         _calendarCache[key] = snapshot;
-        if (_calendarCache.Count <= 5)
+        if (_calendarCache.Count <= CalendarSnapshotCacheCapacity)
         {
             return;
         }
@@ -600,7 +600,7 @@ public sealed partial class MainViewModel
         foreach (var cacheKey in _calendarCache.Keys.Where(candidate => !keep.Contains(candidate)).ToArray())
         {
             _calendarCache.Remove(cacheKey);
-            if (_calendarCache.Count <= 5)
+            if (_calendarCache.Count <= CalendarSnapshotCacheCapacity)
             {
                 break;
             }
@@ -612,6 +612,7 @@ public sealed partial class MainViewModel
         lock (_calendarCacheLock)
         {
             _calendarCache.Clear();
+            Interlocked.Increment(ref _calendarDataVersion);
         }
     }
 

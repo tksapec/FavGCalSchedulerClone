@@ -102,7 +102,11 @@ public partial class MainWindow : Window
         }
 
         _lastMeasuredMonthLaneCapacity = capacity;
-        _viewModel.UpdateMonthLaneCapacity(capacity);
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        if (_viewModel.UpdateMonthLaneCapacity(capacity))
+        {
+            _logger?.LogInfo($"Calendar month layout: lanes={capacity}, elapsed={stopwatch.ElapsedMilliseconds}ms");
+        }
     }
 
     private int CalculateMeasuredMonthLaneCapacity() =>

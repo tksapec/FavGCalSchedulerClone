@@ -302,6 +302,12 @@ public sealed class MainViewModelViewModeTests
     }
 
     [Fact]
+    public void CalendarSnapshotCache_HasWindowSizedCapacity()
+    {
+        Assert.Equal(25, MainViewModel.CalendarSnapshotCacheCapacity);
+    }
+
+    [Fact]
     public async Task Prefetch_StartsOppositeAdjacentMonthWhenOneSideIsBlocked()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
