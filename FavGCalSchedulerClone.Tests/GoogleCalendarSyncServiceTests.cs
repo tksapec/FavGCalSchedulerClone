@@ -367,6 +367,51 @@ public sealed class GoogleCalendarSyncServiceTests
             request => { Assert.Null(request.SyncToken); Assert.Equal("1", request.PageToken); });
     }
 
+    [Fact]
+    public async Task SyncAsync_AndPreviewAsync_ExpiredTokenFullSnapshotUsesLegacyDirtyHandling()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        var settings = CreateSettings("work");
+        var local = new CalendarEvent
+        {
+            Id = "local-dirty",
+            CalendarId = "work",
+            GoogleEventId = "remote-matching",
+            Title = "Local change",
+            Start = DateTimeEvent(2026, 8, 3, 9).DateTimeDateTimeOffset!.Value,
+            End = DateTimeEvent(2026, 8, 3, 10).DateTimeDateTimeOffset!.Value,
+            IsDirty = true,
+            DirtyFields = "Title"
+        };
+        await repository.SaveEventAsync(local);
+        api.UpsertRemote("work", new Event
+        {
+            Id = "remote-matching",
+            Summary = "Google change",
+            Start = DateTimeEvent(2026, 8, 3, 9),
+            End = DateTimeEvent(2026, 8, 3, 10),
+            Status = "confirmed"
+        });
+        var service = new GoogleCalendarSyncService(repository, api);
+        await repository.SaveSyncTokenAsync("work", "stale-token");
+        api.StaleSyncTokens.Add("stale-token");
+
+        var preview = await service.PreviewAsync(settings);
+
+        Assert.Empty(preview.ConflictItems);
+        Assert.Contains(preview.PushItems, item => item.LocalId == local.Id);
+
+        await repository.SaveSyncTokenAsync("work", "stale-token");
+        api.StaleSyncTokens.Add("stale-token");
+        var result = await service.SyncAsync(settings);
+
+        Assert.Equal(1, result.Pushed);
+        Assert.Equal(0, result.Conflicts);
+        Assert.Equal("Local change", api.EventsByCalendar["work"]["remote-matching"].Summary);
+        Assert.False((await repository.FindEventByIdAsync(local.Id))!.IsDirty);
+    }
+
     [Theory]
     [InlineData(SyncConflictPolicy.SkipLocalDirty, "Local title", true, 1, "old-token")]
     [InlineData(SyncConflictPolicy.PreferLocal, "Local title", false, 0, "token-work-1")]

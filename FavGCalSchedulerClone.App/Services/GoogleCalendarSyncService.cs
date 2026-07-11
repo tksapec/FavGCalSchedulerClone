@@ -155,7 +155,7 @@ public sealed class GoogleCalendarSyncService
             var dirtyEvents = (await _repository.LoadDirtyEventsAsync())
                 .Where(item => string.Equals(item.CalendarId, calendarId, StringComparison.Ordinal))
                 .ToArray();
-            var plan = BuildSyncPlan(dirtyEvents, delta.Events, settings.SyncConflictPolicy, !string.IsNullOrWhiteSpace(syncToken));
+            var plan = BuildSyncPlan(dirtyEvents, delta.Events, settings.SyncConflictPolicy, delta.IsIncrementalDelta);
             var execution = await ExecuteSyncPlanAsync(
                 client,
                 calendarId,
@@ -516,16 +516,16 @@ public sealed class GoogleCalendarSyncService
             var syncToken = await _repository.GetSyncTokenAsync(calendarId);
             calendars.Add(new SyncCalendarDiagnostic(calendarId, !string.IsNullOrWhiteSpace(syncToken), calendarDirty.Length));
 
-            IReadOnlyList<Event> remoteChanges;
+            RemoteDelta remoteDelta;
             IReadOnlyList<SyncPlanItem> previewPlan;
             try
             {
-                remoteChanges = await LoadRemoteChangesForPreviewAsync(client, calendarId, syncToken, cancellationToken);
+                remoteDelta = await LoadRemoteChangesForPreviewAsync(client, calendarId, syncToken, cancellationToken);
                 previewPlan = BuildSyncPlan(
                     calendarDirty,
-                    remoteChanges,
+                    remoteDelta.Events,
                     settings.SyncConflictPolicy,
-                    !string.IsNullOrWhiteSpace(syncToken));
+                    remoteDelta.IsIncrementalDelta);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -569,7 +569,7 @@ public sealed class GoogleCalendarSyncService
 
             try
             {
-                foreach (var googleEvent in remoteChanges)
+                foreach (var googleEvent in remoteDelta.Events)
                 {
                     var remoteEvent = GoogleEventMapper.FromGoogleEvent(
                         googleEvent,
@@ -1195,7 +1195,7 @@ public sealed class GoogleCalendarSyncService
             }
             while (!string.IsNullOrWhiteSpace(pageToken));
 
-            return new RemoteDelta(events, nextSyncToken, true);
+            return new RemoteDelta(events, nextSyncToken, true, !string.IsNullOrWhiteSpace(syncToken));
         }
         catch (GoogleApiException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.Gone)
         {
@@ -1206,7 +1206,7 @@ public sealed class GoogleCalendarSyncService
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             failures.Add(CreatePullFailureDiagnostic(calendarId, syncToken, pageToken, ex, "Pull", ex.Message));
-            return new RemoteDelta([], null, false);
+            return new RemoteDelta([], null, false, false);
         }
     }
 
@@ -1492,7 +1492,7 @@ public sealed class GoogleCalendarSyncService
             calendarEvent.UpdatedAt);
     }
 
-    private async Task<IReadOnlyList<Event>> LoadRemoteChangesForPreviewAsync(
+    private async Task<RemoteDelta> LoadRemoteChangesForPreviewAsync(
         IGoogleCalendarClient client,
         string calendarId,
         string? syncToken,
@@ -1519,7 +1519,7 @@ public sealed class GoogleCalendarSyncService
             }
             while (!string.IsNullOrWhiteSpace(pageToken));
 
-            return events;
+            return new RemoteDelta(events, null, true, !string.IsNullOrWhiteSpace(syncToken));
         }
         catch (GoogleApiException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.Gone && !string.IsNullOrWhiteSpace(syncToken))
         {
@@ -1706,7 +1706,7 @@ internal sealed record SyncPlanExecution(
     int Deleted,
     int Recreated);
 
-internal sealed record RemoteDelta(IReadOnlyList<Event> Events, string? NextSyncToken, bool Success);
+internal sealed record RemoteDelta(IReadOnlyList<Event> Events, string? NextSyncToken, bool Success, bool IsIncrementalDelta);
 public sealed record GoogleReminderRefreshResult(int UpdatedExisting, int UpsertedMissing, int Skipped)
 {
     public int TotalAffected => UpdatedExisting + UpsertedMissing;
