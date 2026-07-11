@@ -443,7 +443,28 @@ public sealed class MainViewModelViewModeTests
     }
 
     [Fact]
-    public async Task Prefetch_StartsOppositeAdjacentMonthWhenOneSideIsBlocked()
+    public async Task Prefetch_BuildsTwentyFourMonthsInDistanceOrderAfterTheCurrentMonth()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        var center = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        var prefetched = new List<DateTime>();
+        viewModel.BeforePrefetchCalendarMonth = month => prefetched.Add(month);
+
+        await viewModel.InitializeAsync();
+        await WaitUntilAsync(() => prefetched.Count == 24);
+
+        Assert.Equal(center.AddMonths(-1), prefetched[0]);
+        Assert.Equal(center.AddMonths(1), prefetched[1]);
+        Assert.Equal(center.AddMonths(-12), prefetched[^2]);
+        Assert.Equal(center.AddMonths(12), prefetched[^1]);
+        Assert.Equal(25, viewModel.CalendarCacheCount);
+    }
+
+    [Fact]
+    public async Task Prefetch_ProcessesMonthsInDistanceOrderWhenPreviousMonthIsBlocked()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
         var repository = new CalendarRepository(dbPath);
@@ -472,8 +493,9 @@ public sealed class MainViewModelViewModeTests
         await previousStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var nextStartedBeforePreviousCompleted = await Task.WhenAny(nextStarted.Task, Task.Delay(100)) == nextStarted.Task;
         releasePrevious.SetResult();
+        await nextStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        Assert.True(nextStartedBeforePreviousCompleted);
+        Assert.False(nextStartedBeforePreviousCompleted);
     }
 
     [Fact]

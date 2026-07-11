@@ -67,6 +67,7 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly object _calendarCacheLock = new();
     private readonly Dictionary<CalendarCacheKey, CalendarRefreshSnapshot> _calendarCache = [];
     private CalendarDataWindow? _calendarDataWindow;
+    private CancellationTokenSource? _calendarPrefetchCts;
     private long _calendarDataVersion;
     private IReadOnlyDictionary<string, EventDisplayColors> _eventColorPalette = TagService.DefaultEventColorPalette;
     private IReadOnlyList<string> _scheduleTitleHistory = [];
@@ -233,6 +234,8 @@ public sealed partial class MainViewModel : ObservableObject
     internal Action<DateTime>? BeforeSaveDisplayMonth { get; set; }
     internal Func<DateTime, Task>? BeforeSaveDisplayMonthAsync { get; set; }
     internal Action<CalendarRefreshSnapshot>? BeforeApplyCalendarSnapshot { get; set; }
+    internal Action<DateTime>? BeforePrefetchCalendarMonth { get; set; }
+    internal Action<DateTime>? BeforeReplaceCalendarDataWindow { get; set; }
     internal Action? BeforeRefreshTodos { get; set; }
     internal TimeSpan NavigationRefreshDelay { get; set; } = TimeSpan.FromMilliseconds(10);
     internal int CalendarCacheCount
