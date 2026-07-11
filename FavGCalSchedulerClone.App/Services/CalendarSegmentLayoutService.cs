@@ -4,30 +4,38 @@ namespace FavGCalSchedulerClone.App.Services;
 
 public static class CalendarSegmentLayoutService
 {
-    public const int MaxLanes = 7;
+    public const int MaxLanes = 5;
+    public const int MinimumLanes = 2;
 
-    public static void PopulateSegments(
+    public static CalendarSegmentLayoutResult PopulateSegments(
         IReadOnlyList<CalendarDay> days,
         IEnumerable<CalendarEvent> events,
         int maxLanes = MaxLanes)
     {
+        var laneCapacity = Math.Max(MinimumLanes, maxLanes);
         foreach (var day in days)
         {
             day.Segments.Clear();
         }
 
         var visibleEvents = events.Where(calendarEvent => !calendarEvent.IsDeleted).ToArray();
+        var layoutByDate = days.ToDictionary(
+            day => day.Date.Date,
+            _ => CalendarSegmentLayoutDayResult.Empty);
         for (var rowStart = 0; rowStart < days.Count; rowStart += 7)
         {
             var row = days.Skip(rowStart).Take(7).ToArray();
-            PopulateWeekRow(row, visibleEvents, maxLanes);
+            PopulateWeekRow(row, visibleEvents, laneCapacity, layoutByDate);
         }
+
+        return new CalendarSegmentLayoutResult(layoutByDate);
     }
 
     private static void PopulateWeekRow(
         IReadOnlyList<CalendarDay> row,
         IReadOnlyList<CalendarEvent> events,
-        int maxLanes)
+        int maxLanes,
+        IDictionary<DateTime, CalendarSegmentLayoutDayResult> layoutByDate)
     {
         var slots = new CalendarEventSegment?[row.Count, maxLanes];
         var candidates = events
@@ -75,10 +83,51 @@ public static class CalendarSegmentLayoutService
 
         for (var index = 0; index < row.Count; index++)
         {
+            var visibleSegments = new List<CalendarEventSegment>(maxLanes);
             for (var lane = 0; lane < maxLanes; lane++)
             {
-                row[index].Segments.Add(slots[index, lane] ?? CalendarEventSegment.Empty(row[index].Date, lane));
+                var segment = slots[index, lane] ?? CalendarEventSegment.Empty(row[index].Date, lane);
+                row[index].Segments.Add(segment);
+                if (segment.Event is not null)
+                {
+                    visibleSegments.Add(segment);
+                }
             }
+
+            var totalEventCount = candidates.Count(candidate => candidate.DayIndexes.Contains(index));
+            layoutByDate[row[index].Date.Date] = new CalendarSegmentLayoutDayResult(
+                visibleSegments.Select(segment => segment.Event!).ToArray(),
+                totalEventCount - visibleSegments.Count);
         }
     }
+}
+
+public sealed class CalendarSegmentLayoutResult
+{
+    private readonly IReadOnlyDictionary<DateTime, CalendarSegmentLayoutDayResult> _days;
+
+    internal CalendarSegmentLayoutResult(IReadOnlyDictionary<DateTime, CalendarSegmentLayoutDayResult> days)
+    {
+        _days = days;
+    }
+
+    public CalendarSegmentLayoutDayResult GetDay(DateTime date) =>
+        _days.TryGetValue(date.Date, out var day)
+            ? day
+            : CalendarSegmentLayoutDayResult.Empty;
+}
+
+public sealed class CalendarSegmentLayoutDayResult
+{
+    internal static CalendarSegmentLayoutDayResult Empty { get; } = new([], 0);
+
+    public CalendarSegmentLayoutDayResult(IReadOnlyList<CalendarEvent> visibleEvents, int hiddenEventCount)
+    {
+        VisibleEvents = visibleEvents;
+        HiddenEventCount = Math.Max(0, hiddenEventCount);
+    }
+
+    public IReadOnlyList<CalendarEvent> VisibleEvents { get; }
+    public int VisibleEventCount => VisibleEvents.Count;
+    public int HiddenEventCount { get; }
 }

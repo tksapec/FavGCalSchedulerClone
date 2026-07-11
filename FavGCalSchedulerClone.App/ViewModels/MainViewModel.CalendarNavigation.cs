@@ -313,7 +313,6 @@ public sealed partial class MainViewModel
         _visibleEvents = snapshot.VisibleEvents;
 
         EnsureCalendarDayCapacity((snapshot.GridEnd - snapshot.GridStart).Days);
-        var eventsByDate = CreateEventsByDateIndex(snapshot);
         var index = 0;
         for (var date = snapshot.GridStart; date < snapshot.GridEnd; date = date.AddDays(1), index++)
         {
@@ -321,19 +320,21 @@ public sealed partial class MainViewModel
             UpdateCalendarDayShell(day, date, clearEvents: true);
             day.IsWorkdayOverride = TagService.HasWorkdayOverride(_dayDirectiveEvents, date);
             day.IsHoliday = TagService.HasHolidayWithoutWorkdayOverride(_dayDirectiveEvents, date);
-            if (!eventsByDate.TryGetValue(date.Date, out var eventsForDate))
-            {
-                continue;
-            }
+        }
 
-            foreach (var calendarEvent in eventsForDate.Take(CalendarSegmentLayoutService.MaxLanes))
+        var layoutResult = CalendarSegmentLayoutService.PopulateSegments(CalendarDays, _visibleEvents);
+        index = 0;
+        for (var date = snapshot.GridStart; date < snapshot.GridEnd; date = date.AddDays(1), index++)
+        {
+            var day = CalendarDays[index];
+            var layoutDay = layoutResult.GetDay(date);
+            foreach (var calendarEvent in layoutDay.VisibleEvents)
             {
                 day.Events.Add(calendarEvent);
             }
 
-            day.HiddenEventCount = Math.Max(0, eventsForDate.Count - day.Events.Count);
+            day.HiddenEventCount = layoutDay.HiddenEventCount;
         }
-        CalendarSegmentLayoutService.PopulateSegments(CalendarDays, _visibleEvents);
 
         CalendarDay? selectedDay;
         DateTime? visibleAnchorDate;
@@ -360,43 +361,6 @@ public sealed partial class MainViewModel
         RefreshSelectedDayEvents();
         RefreshSevenDayEvents();
     }
-
-    private static Dictionary<DateTime, List<CalendarEvent>> CreateEventsByDateIndex(CalendarRefreshSnapshot snapshot)
-    {
-        var result = new Dictionary<DateTime, List<CalendarEvent>>();
-        var gridLastDate = snapshot.GridEnd.AddDays(-1).Date;
-        foreach (var calendarEvent in snapshot.VisibleEvents)
-        {
-            var firstDate = MaxDate(snapshot.GridStart.Date, calendarEvent.Start.Date);
-            var lastDate = MinDate(gridLastDate, calendarEvent.End.Date);
-            if (lastDate < firstDate)
-            {
-                lastDate = firstDate;
-            }
-
-            for (var date = firstDate; date <= lastDate; date = date.AddDays(1))
-            {
-                if (!DateRangeHelper.OccursOn(calendarEvent, date))
-                {
-                    continue;
-                }
-
-                if (!result.TryGetValue(date, out var eventsForDate))
-                {
-                    eventsForDate = [];
-                    result[date] = eventsForDate;
-                }
-
-                eventsForDate.Add(calendarEvent);
-            }
-        }
-
-        return result;
-    }
-
-    private static DateTime MaxDate(DateTime left, DateTime right) => left >= right ? left : right;
-
-    private static DateTime MinDate(DateTime left, DateTime right) => left <= right ? left : right;
 
     private async Task RefreshCalendarPreservingSelectionAsync(CalendarRefreshRequest request)
     {
@@ -748,12 +712,14 @@ public sealed partial class MainViewModel
             IsHoliday = TagService.HasHolidayWithoutWorkdayOverride(events, date)
         };
 
-        foreach (var calendarEvent in _visibleEvents.Where(e => DateRangeHelper.OccursOn(e, date)).Take(CalendarSegmentLayoutService.MaxLanes))
+        var layoutResult = CalendarSegmentLayoutService.PopulateSegments([day], _visibleEvents);
+        var layoutDay = layoutResult.GetDay(date);
+        foreach (var calendarEvent in layoutDay.VisibleEvents)
         {
             day.Events.Add(calendarEvent);
         }
 
-        day.HiddenEventCount = Math.Max(0, _visibleEvents.Count(e => DateRangeHelper.OccursOn(e, date)) - day.Events.Count);
+        day.HiddenEventCount = layoutDay.HiddenEventCount;
 
         return day;
     }

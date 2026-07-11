@@ -415,7 +415,7 @@ public sealed class MainViewModelViewModeTests
     }
 
     [Fact]
-    public async Task CalendarDayEvents_UsesSevenCompactLanesAndTracksOverflow()
+    public async Task CalendarDayEvents_UsesFiveCompactLanesAndTracksOverflow()
     {
         var date = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1).AddDays(12);
         var events = Enumerable.Range(0, 8)
@@ -425,9 +425,9 @@ public sealed class MainViewModelViewModeTests
         var viewModel = await CreateViewModelAsync(events);
         var day = viewModel.CalendarDays.Single(day => day.Date == date);
 
-        Assert.Equal(7, day.Events.Count);
-        Assert.Equal(1, day.HiddenEventCount);
-        Assert.Equal(7, day.Segments.Count(segment => segment.IsVisible));
+        Assert.Equal(5, day.Events.Count);
+        Assert.Equal(3, day.HiddenEventCount);
+        Assert.Equal(5, day.Segments.Count(segment => segment.IsVisible));
     }
 
     [Fact]

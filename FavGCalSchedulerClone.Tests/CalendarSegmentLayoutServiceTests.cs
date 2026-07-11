@@ -104,6 +104,54 @@ public sealed class CalendarSegmentLayoutServiceTests
     }
 
     [Fact]
+    public void PopulateSegments_DefaultCapacityShowsFiveOfSevenEvents()
+    {
+        var days = CreateDays(new DateTime(2026, 5, 10), 7);
+        var events = Enumerable.Range(0, 7)
+            .Select(index => Event($"Event {index}", new DateTime(2026, 5, 11), new DateTime(2026, 5, 12)))
+            .ToArray();
+
+        var result = CalendarSegmentLayoutService.PopulateSegments(days, events);
+
+        Assert.Equal(5, days[1].Segments.Count(segment => segment.IsVisible));
+        Assert.Equal(5, result.GetDay(days[1].Date).VisibleEventCount);
+        Assert.Equal(2, result.GetDay(days[1].Date).HiddenEventCount);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void PopulateSegments_ClampsLaneCapacityToTwo(int requestedCapacity)
+    {
+        var days = CreateDays(new DateTime(2026, 5, 10), 7);
+        var events = Enumerable.Range(0, 3)
+            .Select(index => Event($"Event {index}", new DateTime(2026, 5, 11), new DateTime(2026, 5, 12)))
+            .ToArray();
+
+        CalendarSegmentLayoutService.PopulateSegments(days, events, requestedCapacity);
+
+        Assert.Equal(2, days[1].Segments.Count(segment => segment.IsVisible));
+        Assert.Equal(2, days[1].Segments.Count);
+    }
+
+    [Fact]
+    public void PopulateSegments_CountsMultiDaySegmentWhenComputingVisibleAndHiddenEvents()
+    {
+        var days = CreateDays(new DateTime(2026, 5, 10), 7);
+        var multiDay = Event("Multi day", new DateTime(2026, 5, 11), new DateTime(2026, 5, 14));
+        var shortEvents = Enumerable.Range(0, 2)
+            .Select(index => Event($"Short {index}", new DateTime(2026, 5, 12), new DateTime(2026, 5, 13)))
+            .ToArray();
+
+        var result = CalendarSegmentLayoutService.PopulateSegments(days, [multiDay, .. shortEvents], maxLanes: 2);
+
+        var layoutDay = result.GetDay(new DateTime(2026, 5, 12));
+        Assert.Contains(multiDay, layoutDay.VisibleEvents);
+        Assert.Equal(2, layoutDay.VisibleEventCount);
+        Assert.Equal(1, layoutDay.HiddenEventCount);
+    }
+
+    [Fact]
     public void PopulateSegments_UsesExistingColorForTodoSegment()
     {
         var days = CreateDays(new DateTime(2026, 5, 10), 7);
