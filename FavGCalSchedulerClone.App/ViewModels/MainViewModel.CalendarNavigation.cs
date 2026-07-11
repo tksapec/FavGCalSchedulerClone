@@ -555,9 +555,9 @@ public sealed partial class MainViewModel
         day.IsHoliday = false;
         if (clearEvents)
         {
-            day.Events.Clear();
+            day.ReplaceEvents([]);
             day.HiddenEventCount = 0;
-            day.Segments.Clear();
+            day.ReplaceSegments([]);
         }
     }
 
@@ -809,13 +809,8 @@ public sealed partial class MainViewModel
         var layoutResult = CalendarSegmentLayoutService.PopulateSegments(days, _visibleEvents, laneCapacity);
         foreach (var day in days)
         {
-            day.Events.Clear();
             var layoutDay = layoutResult.GetDay(day.Date);
-            foreach (var calendarEvent in layoutDay.VisibleEvents)
-            {
-                day.Events.Add(calendarEvent);
-            }
-
+            day.ReplaceEvents(layoutDay.VisibleEvents);
             day.HiddenEventCount = layoutDay.HiddenEventCount;
         }
     }

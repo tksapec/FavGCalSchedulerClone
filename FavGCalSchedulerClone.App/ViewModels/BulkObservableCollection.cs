@@ -2,7 +2,7 @@ using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 
-namespace FavGCalSchedulerClone.App.ViewModels;
+namespace FavGCalSchedulerClone.App.Collections;
 
 public sealed class BulkObservableCollection<T> : ObservableCollection<T>
 {

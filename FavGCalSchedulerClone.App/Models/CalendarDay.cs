@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using FavGCalSchedulerClone.App.Collections;
 
 namespace FavGCalSchedulerClone.App.Models;
 
@@ -11,6 +12,8 @@ public sealed class CalendarDay : INotifyPropertyChanged
     private bool _isHoliday;
     private bool _isWorkdayOverride;
     private int _hiddenEventCount;
+    private readonly BulkObservableCollection<CalendarEvent> _events = [];
+    private readonly BulkObservableCollection<CalendarEventSegment> _segments = [];
 
     public DateTime Date
     {
@@ -78,8 +81,12 @@ public sealed class CalendarDay : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsWorkdayOverride)));
         }
     }
-    public ObservableCollection<CalendarEvent> Events { get; } = [];
-    public ObservableCollection<CalendarEventSegment> Segments { get; } = [];
+    public ObservableCollection<CalendarEvent> Events => _events;
+    public ObservableCollection<CalendarEventSegment> Segments => _segments;
+
+    public void ReplaceEvents(IEnumerable<CalendarEvent> events) => _events.ReplaceAll(events);
+
+    public void ReplaceSegments(IEnumerable<CalendarEventSegment> segments) => _segments.ReplaceAll(segments);
     public int HiddenEventCount
     {
         get => _hiddenEventCount;

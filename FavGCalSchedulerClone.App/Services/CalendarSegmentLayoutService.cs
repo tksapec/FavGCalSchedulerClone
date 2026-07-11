@@ -13,11 +13,6 @@ public static class CalendarSegmentLayoutService
         int maxLanes = MaxLanes)
     {
         var laneCapacity = Math.Max(MinimumLanes, maxLanes);
-        foreach (var day in days)
-        {
-            day.Segments.Clear();
-        }
-
         var visibleEvents = events.Where(calendarEvent => !calendarEvent.IsDeleted).ToArray();
         var layoutByDate = days.ToDictionary(
             day => day.Date.Date,
@@ -83,17 +78,19 @@ public static class CalendarSegmentLayoutService
 
         for (var index = 0; index < row.Count; index++)
         {
+            var daySegments = new List<CalendarEventSegment>(maxLanes);
             var visibleSegments = new List<CalendarEventSegment>(maxLanes);
             for (var lane = 0; lane < maxLanes; lane++)
             {
                 var segment = slots[index, lane] ?? CalendarEventSegment.Empty(row[index].Date, lane);
-                row[index].Segments.Add(segment);
+                daySegments.Add(segment);
                 if (segment.Event is not null)
                 {
                     visibleSegments.Add(segment);
                 }
             }
 
+            row[index].ReplaceSegments(daySegments);
             var totalEventCount = candidates.Count(candidate => candidate.DayIndexes.Contains(index));
             layoutByDate[row[index].Date.Date] = new CalendarSegmentLayoutDayResult(
                 visibleSegments.Select(segment => segment.Event!).ToArray(),
