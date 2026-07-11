@@ -24,7 +24,7 @@ public sealed class CalendarRepositoryTests
         Assert.Equal(0, settings.StartupTabIndex);
         Assert.True(settings.ConfirmBeforeDelete);
         Assert.True(settings.CloseButtonExitsApplication);
-        Assert.True(settings.DefaultNewEventIsAllDay);
+        Assert.False(settings.DefaultNewEventIsAllDay);
         Assert.True(settings.UseWindowsToastNotifications);
         Assert.Equal(CalendarViewMode.Month, settings.StartupCalendarViewMode);
         Assert.Equal(2, settings.CalendarLabelFontSizeIndex);
@@ -388,6 +388,130 @@ public sealed class CalendarRepositoryTests
     }
 
     [Fact]
+    public async Task LoadEventsAsync_DoesNotReturnFutureRecurringMasterBeforeRange()
+    {
+        var repository = await CreateRepositoryAsync();
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Id = "future-series",
+            Title = "Future series",
+            CalendarId = "primary",
+            Start = new DateTimeOffset(2026, 12, 1, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 12, 1, 10, 0, 0, TimeSpan.Zero),
+            RecurrenceJson = "[\"RRULE:FREQ=DAILY;COUNT=3\"]"
+        });
+
+        var events = await repository.LoadEventsAsync(
+            new DateTimeOffset(2026, 5, 1, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero));
+
+        Assert.DoesNotContain(events, item => item.Id == "future-series");
+    }
+
+    [Fact]
+    public async Task LoadEventsAsync_DoesNotReturnDistantRecurrenceExceptionOutsideRange()
+    {
+        var repository = await CreateRepositoryAsync();
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Id = "old-exception",
+            Title = "Old exception",
+            CalendarId = "primary",
+            RecurringParentId = "series-1",
+            OriginalStart = new DateTimeOffset(2025, 1, 10, 9, 0, 0, TimeSpan.Zero),
+            IsRecurrenceException = true,
+            Start = new DateTimeOffset(2025, 1, 11, 11, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2025, 1, 11, 12, 0, 0, TimeSpan.Zero)
+        });
+
+        var events = await repository.LoadEventsAsync(
+            new DateTimeOffset(2026, 5, 1, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero));
+
+        Assert.DoesNotContain(events, item => item.Id == "old-exception");
+    }
+
+    [Fact]
+    public async Task LoadEventsAsync_ReturnsDeletedExceptionByOriginalStartWhenIncludingDeleted()
+    {
+        var repository = await CreateRepositoryAsync();
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Id = "deleted-visible-exception",
+            Title = "Deleted visible exception",
+            CalendarId = "primary",
+            RecurringParentId = "series-1",
+            OriginalStart = new DateTimeOffset(2026, 5, 10, 9, 0, 0, TimeSpan.Zero),
+            IsRecurrenceException = true,
+            IsDeleted = true,
+            Start = new DateTimeOffset(2026, 7, 1, 11, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 7, 1, 12, 0, 0, TimeSpan.Zero)
+        });
+
+        var withoutDeleted = await repository.LoadEventsAsync(
+            new DateTimeOffset(2026, 5, 1, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero));
+        var withDeleted = await repository.LoadEventsAsync(
+            new DateTimeOffset(2026, 5, 1, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero),
+            includeDeleted: true);
+
+        Assert.DoesNotContain(withoutDeleted, item => item.Id == "deleted-visible-exception");
+        Assert.Contains(withDeleted, item => item.Id == "deleted-visible-exception");
+    }
+
+    [Fact]
+    public async Task LoadEventsAsync_ReturnsOverlappingRegularEventsAndOrphanExceptions()
+    {
+        var repository = await CreateRepositoryAsync();
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Id = "regular",
+            Title = "Regular",
+            CalendarId = "primary",
+            Start = new DateTimeOffset(2026, 5, 10, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 5, 10, 10, 0, 0, TimeSpan.Zero)
+        });
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Id = "orphan-exception",
+            Title = "Orphan exception",
+            CalendarId = "primary",
+            IsRecurrenceException = true,
+            Start = new DateTimeOffset(2026, 5, 11, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 5, 11, 10, 0, 0, TimeSpan.Zero)
+        });
+
+        var events = await repository.LoadEventsAsync(
+            new DateTimeOffset(2026, 5, 1, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero));
+
+        Assert.Contains(events, item => item.Id == "regular");
+        Assert.Contains(events, item => item.Id == "orphan-exception");
+    }
+
+    [Fact]
+    public async Task LoadEventsAsync_QueryDoesNotUseUnboundedRecurrenceOrClauses()
+    {
+        var sourcePath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..",
+            "FavGCalSchedulerClone.App",
+            "Services",
+            "CalendarRepository.cs"));
+        var source = await File.ReadAllTextAsync(sourcePath);
+        var methodStart = source.IndexOf("public async Task<IReadOnlyList<CalendarEvent>> LoadEventsAsync", StringComparison.Ordinal);
+        var methodEnd = source.IndexOf("public async Task<IReadOnlyList<CalendarEvent>> LoadTodoEventsAsync", methodStart, StringComparison.Ordinal);
+        Assert.True(methodStart >= 0);
+        Assert.True(methodEnd > methodStart);
+        var method = source[methodStart..methodEnd];
+
+        Assert.Contains("WITH candidate_ids", method);
+        Assert.DoesNotContain("OR recurrence_json IS NOT NULL", method);
+        Assert.DoesNotContain("OR is_recurrence_exception = 1", method);
+    }
+
+    [Fact]
     public async Task InitializeAsync_EnablesWalJournalMode()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
@@ -456,6 +580,14 @@ public sealed class CalendarRepositoryTests
         Assert.True(stored3!.IsDirty);
         Assert.Equal(stored3BeforeSync?.DirtyFields, stored3.DirtyFields);
         Assert.Null(stored3.LastSyncedAt);
+    }
+
+    private static async Task<CalendarRepository> CreateRepositoryAsync()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        return repository;
     }
 
     private static CalendarEvent DirtyEvent(string id, string title) => new()

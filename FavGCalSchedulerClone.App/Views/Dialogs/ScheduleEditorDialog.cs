@@ -195,8 +195,6 @@ internal static class ScheduleEditorDialog
         Grid.SetColumn(alarmGroup, 1);
         upper.Children.Add(timeGroup);
         upper.Children.Add(alarmGroup);
-        Grid.SetRow(upper, 0);
-        root.Children.Add(upper);
 
         var detailsGroup = new GroupBox { Header = "予定詳細", Padding = ui.Thickness(18, 14, 18, 10), Margin = new Thickness(0, 0, 0, ui.Y(10)) };
         var details = new Grid();
@@ -214,8 +212,24 @@ internal static class ScheduleEditorDialog
         ui.AddLabeledField(details, 1, 4, "カレンダー", calendar);
         ui.AddLabeledField(details, 2, 0, "内容", description, columnSpan: 5, stretchVertically: true);
         detailsGroup.Content = details;
+
+        var form = new Grid();
+        form.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        form.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        Grid.SetRow(upper, 0);
+        form.Children.Add(upper);
         Grid.SetRow(detailsGroup, 1);
-        root.Children.Add(detailsGroup);
+        form.Children.Add(detailsGroup);
+
+        var formScrollViewer = new ScrollViewer
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Content = form
+        };
+        Grid.SetRow(formScrollViewer, 0);
+        Grid.SetRowSpan(formScrollViewer, 2);
+        root.Children.Add(formScrollViewer);
 
         var buttons = ui.DialogButtons(window, request.IsNew ? "登録" : "保存", "キャンセル");
         Grid.SetRow(buttons, 2);

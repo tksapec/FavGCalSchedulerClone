@@ -123,6 +123,22 @@ public sealed class DialogDtoTests
     }
 
     [Fact]
+    public async Task ScheduleEditor_UsesScrollableFormAndKeepsButtonsOutsideTheScrollArea()
+    {
+        var scheduleCode = await File.ReadAllTextAsync(DialogSourcePath("ScheduleEditorDialog.cs"));
+
+        Assert.Contains("var formScrollViewer = new ScrollViewer", scheduleCode);
+        Assert.Contains("VerticalScrollBarVisibility = ScrollBarVisibility.Auto", scheduleCode);
+        Assert.Contains("Content = form", scheduleCode);
+        Assert.Contains("ScheduleDescriptionMinHeightPhysical", scheduleCode);
+        Assert.Contains("MinHeight = ui.Y(ScheduleDescriptionMinHeightPhysical)", scheduleCode);
+        Assert.Contains("Grid.SetRow(buttons, 2)", scheduleCode);
+        Assert.Contains("root.Children.Add(formScrollViewer)", scheduleCode);
+        Assert.True(scheduleCode.IndexOf("root.Children.Add(formScrollViewer)", StringComparison.Ordinal)
+                    < scheduleCode.IndexOf("root.Children.Add(buttons)", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task SyncDiagnosticsDialog_ShowsDirtyItemsTab()
     {
         var dialogPath = Path.GetFullPath(Path.Combine(

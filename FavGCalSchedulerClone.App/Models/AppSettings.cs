@@ -11,7 +11,7 @@ public sealed class AppSettings
     public int StartupTodoTabIndex { get; set; }
     public bool ConfirmBeforeDelete { get; set; } = true;
     public bool CloseButtonExitsApplication { get; set; } = true;
-    public bool DefaultNewEventIsAllDay { get; set; } = true;
+    public bool DefaultNewEventIsAllDay { get; set; }
     public bool HideMainWindowWhileEditingSchedule { get; set; }
     public bool ReuseLastScheduleInput { get; set; }
     public int? DefaultScheduleReminderMinutes { get; set; }

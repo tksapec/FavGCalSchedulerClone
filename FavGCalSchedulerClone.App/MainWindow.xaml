@@ -427,13 +427,15 @@
                                         <Border Style="{StaticResource DayCell}" AllowDrop="True"
                                                 MouseLeftButtonDown="DayCell_MouseLeftButtonDown" MouseRightButtonDown="DayCell_MouseRightButtonDown"
                                                 DragEnter="DayCell_DragOver" DragOver="DayCell_DragOver" DragLeave="DayCell_DragLeave" Drop="DayCell_Drop">
-                                            <DockPanel LastChildFill="True">
-                                                <TextBlock DockPanel.Dock="Top" Text="{Binding Date.Day}" Foreground="#334155"
+                                            <Grid x:Name="MonthDayCellLayout">
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="*" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <TextBlock Grid.Row="0" Text="{Binding Date.Day}" Foreground="#334155"
                                                            FontSize="15" FontWeight="SemiBold" Margin="5,5,5,0" />
-                                                <TextBlock DockPanel.Dock="Bottom" Text="{Binding HiddenEventText}" Foreground="#B45309"
-                                                           FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Right"
-                                                           Margin="0,1,5,2" Visibility="{Binding HasHiddenEvents, Converter={StaticResource BoolToVisibilityConverter}}" />
-                                                <ItemsControl ItemsSource="{Binding Segments}" Margin="0,3,0,0" HorizontalAlignment="Stretch" ClipToBounds="False">
+                                                <ItemsControl Grid.Row="1" ItemsSource="{Binding Segments}" Margin="0,3,0,0" HorizontalAlignment="Stretch" ClipToBounds="True">
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate>
                                                             <Border Style="{StaticResource EventSegmentBar}"
@@ -454,7 +456,10 @@
                                                         </DataTemplate>
                                                     </ItemsControl.ItemTemplate>
                                                 </ItemsControl>
-                                            </DockPanel>
+                                                <TextBlock Grid.Row="2" Text="{Binding HiddenEventText}" Foreground="#B45309"
+                                                           FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Right"
+                                                           Margin="0,1,5,2" Visibility="{Binding HasHiddenEvents, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                            </Grid>
                                         </Border>
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>

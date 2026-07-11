@@ -58,6 +58,8 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_events_google ON events(calendar_id, google_event_id);");
         await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_events_recurring_parent ON events(recurring_parent_id, original_start);");
         await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_events_recurring_event ON events(recurring_event_id, original_start);");
+        await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_events_recurring_master_start ON events(start) WHERE recurrence_json IS NOT NULL AND is_recurrence_exception = 0;");
+        await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_events_exception_original_start ON events(original_start) WHERE is_recurrence_exception = 1;");
         await ExecuteAsync(connection, "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);");
         await ExecuteAsync(connection, "CREATE TABLE IF NOT EXISTS tags (name TEXT PRIMARY KEY, color TEXT NOT NULL, is_visible INTEGER NOT NULL, priority INTEGER NOT NULL);");
         await SeedTagsAsync(connection);
@@ -154,20 +156,36 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
     {
         await using var connection = OpenConnection();
         await using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
+        var deletedPredicate = includeDeleted ? "" : " AND is_deleted = 0";
+        command.CommandText = $"""
+            WITH candidate_ids(id) AS (
+                SELECT id
+                FROM events
+                WHERE start < $end
+                  AND end > $start{deletedPredicate}
+                UNION
+                SELECT id
+                FROM events
+                WHERE recurrence_json IS NOT NULL
+                  AND is_recurrence_exception = 0
+                  AND start < $end{deletedPredicate}
+                UNION
+                SELECT id
+                FROM events
+                WHERE is_recurrence_exception = 1
+                  AND original_start IS NOT NULL
+                  AND original_start >= $start
+                  AND original_start < $end{deletedPredicate}
+            )
+            SELECT events.id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
                    calendar_id, title, description, location, start, end, is_all_day,
                    color_id, reminder_minutes_before_start, app_reminder_enabled, google_email_reminder_enabled, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields, google_reminder_metadata_json, app_reminder_minutes_json, google_email_reminder_minutes_json
             FROM events
-            WHERE ((start < $end AND end > $start)
-                OR recurrence_json IS NOT NULL
-                OR is_recurrence_exception = 1)
-              AND ($includeDeleted = 1 OR is_deleted = 0)
-            ORDER BY start, title
+            JOIN candidate_ids ON candidate_ids.id = events.id
+            ORDER BY events.start, events.title
             """;
         command.Parameters.AddWithValue("$start", start.ToString("O"));
         command.Parameters.AddWithValue("$end", end.ToString("O"));
-        command.Parameters.AddWithValue("$includeDeleted", includeDeleted ? 1 : 0);
         return await ReadEventsAsync(command, cancellationToken);
     }
 
