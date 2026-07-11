@@ -145,7 +145,7 @@ public sealed class MainViewModelViewModeTests
         Assert.Equal(0, loadCount);
         Assert.Equal(0, saveCount);
         release.SetResult();
-        await WaitUntilAsync(() => loadCount >= 1 && saveCount == 1);
+        await WaitUntilAsync(() => saveCount == 1);
         await WaitUntilAsync(() => viewModel.SelectedDay?.Date == selectedBaseline.AddMonths(3).Date);
     }
 
@@ -309,7 +309,7 @@ public sealed class MainViewModelViewModeTests
     [Fact]
     public async Task NavigationRefresh_DoesNotApplyCanceledOlderLoad()
     {
-        var firstTarget = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1).AddMonths(3);
+        var firstTarget = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1).AddMonths(24);
         var secondTarget = firstTarget.AddMonths(1);
         var viewModel = await CreateViewModelAsync([
             CreateEvent("first target", firstTarget.AddDays(4)),
@@ -346,7 +346,7 @@ public sealed class MainViewModelViewModeTests
     [Fact]
     public async Task NavigationRefresh_CancelsOlderSnapshotBuild()
     {
-        var firstTarget = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1).AddMonths(5);
+        var firstTarget = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1).AddMonths(24);
         var secondTarget = firstTarget.AddMonths(1);
         var viewModel = await CreateViewModelAsync([
             CreateEvent("first build target", firstTarget.AddDays(4)),
@@ -405,6 +405,69 @@ public sealed class MainViewModelViewModeTests
 
         await Task.Delay(viewModel.NavigationRefreshDelay + TimeSpan.FromMilliseconds(100));
         Assert.Equal(0, loadCount);
+    }
+
+    [Fact]
+    public async Task Navigation_CachedMonthDoesNotRebuildTheWideDataWindow()
+    {
+        var viewModel = await CreateViewModelAsync();
+        await WaitUntilAsync(() => viewModel.CalendarCacheCount == MainViewModel.CalendarSnapshotCacheCapacity);
+        var prefetchLoads = 0;
+        var prefetchBuilds = 0;
+        viewModel.BeforeLoadCalendarPrefetchDataAsync = (_, _) =>
+        {
+            prefetchLoads++;
+            return Task.CompletedTask;
+        };
+        viewModel.BeforeBuildCalendarPrefetchDataWindow = (_, _) => prefetchBuilds++;
+
+        viewModel.NextMonthCommand.Execute(null);
+        await Task.Delay(300);
+
+        Assert.Equal(0, prefetchLoads);
+        Assert.Equal(0, prefetchBuilds);
+    }
+
+    [Fact]
+    public async Task Navigation_PrefetchPipelinesDoNotOverlapWhenCanceledBuildIsSlow()
+    {
+        var baseline = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        var firstTarget = baseline.AddMonths(24);
+        var secondTarget = firstTarget.AddMonths(2);
+        var viewModel = await CreateViewModelAsync();
+        viewModel.NavigationRefreshDelay = TimeSpan.Zero;
+        var firstPrefetchStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondPrefetchStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstPrefetch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstTargetBuilds = 0;
+        var secondTargetBuilds = 0;
+        viewModel.BeforeBuildCalendarSnapshot = (month, _) =>
+        {
+            if (month.Year == firstTarget.Year && month.Month == firstTarget.Month
+                && Interlocked.Increment(ref firstTargetBuilds) == 2)
+            {
+                firstPrefetchStarted.TrySetResult();
+                releaseFirstPrefetch.Task.Wait();
+            }
+
+            if (month.Year == secondTarget.Year && month.Month == secondTarget.Month
+                && Interlocked.Increment(ref secondTargetBuilds) == 2)
+            {
+                secondPrefetchStarted.TrySetResult();
+            }
+        };
+
+        viewModel.CurrentMonth = firstTarget;
+        await firstPrefetchStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        viewModel.CurrentMonth = secondTarget;
+
+        var secondStartedWhileFirstWasBlocked = await Task.WhenAny(
+            secondPrefetchStarted.Task,
+            Task.Delay(300)) == secondPrefetchStarted.Task;
+        releaseFirstPrefetch.SetResult();
+        await secondPrefetchStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(secondStartedWhileFirstWasBlocked);
     }
 
     [Fact]
@@ -502,7 +565,7 @@ public sealed class MainViewModelViewModeTests
     public async Task Prefetch_CancelsOlderGenerationWithoutStoringSnapshot()
     {
         var baseline = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
-        var target = baseline.AddMonths(4);
+        var target = baseline.AddMonths(24);
         var blockedPrefetchMonth = target.AddMonths(-1);
         var viewModel = await CreateViewModelAsync([
             CreateEvent("blocked prefetch", blockedPrefetchMonth.AddDays(2))

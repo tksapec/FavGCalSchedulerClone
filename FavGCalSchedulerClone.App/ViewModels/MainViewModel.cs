@@ -68,6 +68,7 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly Dictionary<CalendarCacheKey, CalendarRefreshSnapshot> _calendarCache = [];
     private CalendarDataWindow? _calendarDataWindow;
     private CancellationTokenSource? _calendarPrefetchCts;
+    private readonly SemaphoreSlim _calendarPrefetchPipelineGate = new(1, 1);
     private long _calendarDataVersion;
     private IReadOnlyDictionary<string, EventDisplayColors> _eventColorPalette = TagService.DefaultEventColorPalette;
     private IReadOnlyList<string> _scheduleTitleHistory = [];
@@ -230,7 +231,9 @@ public sealed partial class MainViewModel : ObservableObject
     public AsyncRelayCommand SetSelectedTodoPriorityCCommand { get; }
     public AsyncRelayCommand UndoLastChangeCommand { get; }
     internal Func<DateTime, CancellationToken, Task>? BeforeLoadCalendarSnapshotAsync { get; set; }
+    internal Func<DateTime, CancellationToken, Task>? BeforeLoadCalendarPrefetchDataAsync { get; set; }
     internal Action<DateTime, CancellationToken>? BeforeBuildCalendarSnapshot { get; set; }
+    internal Action<DateTime, CancellationToken>? BeforeBuildCalendarPrefetchDataWindow { get; set; }
     internal Action<DateTime>? BeforeSaveDisplayMonth { get; set; }
     internal Func<DateTime, Task>? BeforeSaveDisplayMonthAsync { get; set; }
     internal Action<CalendarRefreshSnapshot>? BeforeApplyCalendarSnapshot { get; set; }

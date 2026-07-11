@@ -281,7 +281,7 @@ public sealed partial class MainViewModel
             BeforeRefreshTodos?.Invoke();
             await RefreshTodosAsync();
         }
-        if (IsLatestCalendarRefresh(request))
+        if (IsLatestCalendarRefresh(request) && ShouldStartCalendarPrefetch(request, cacheHit))
         {
             StartCalendarPrefetch(request);
         }
@@ -699,18 +699,55 @@ public sealed partial class MainViewModel
         _ = BuildCalendarPrefetchPipelineAsync(request, replacement.Token);
     }
 
+    private bool ShouldStartCalendarPrefetch(CalendarRefreshRequest request, bool cacheHit)
+    {
+        if (cacheHit)
+        {
+            return false;
+        }
+
+        var context = CreateCalendarSnapshotBuildContext();
+        var dataVersion = Volatile.Read(ref _calendarDataVersion);
+        var (rangeStart, _) = DateRangeHelper.MonthGridRange(request.Month.AddMonths(-12), context.WeekStartsOnMonday);
+        var (_, rangeEnd) = DateRangeHelper.MonthGridRange(request.Month.AddMonths(12), context.WeekStartsOnMonday);
+        lock (_calendarCacheLock)
+        {
+            return _calendarDataWindow is not { } dataWindow
+                || dataWindow.DataVersion != dataVersion
+                || dataWindow.WeekStartsOnMonday != context.WeekStartsOnMonday
+                || dataWindow.RangeStart > rangeStart
+                || dataWindow.RangeEnd < rangeEnd;
+        }
+    }
+
     private async Task BuildCalendarPrefetchPipelineAsync(CalendarRefreshRequest request, CancellationToken cancellationToken)
     {
         var total = Stopwatch.StartNew();
+        var enteredPipeline = false;
         try
         {
+            await _calendarPrefetchPipelineGate.WaitAsync(cancellationToken);
+            enteredPipeline = true;
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!IsLatestCalendarRefresh(request))
+            {
+                return;
+            }
+
             var context = CreateCalendarSnapshotBuildContext();
             var dataVersion = Volatile.Read(ref _calendarDataVersion);
             var (rangeStart, _) = DateRangeHelper.MonthGridRange(request.Month.AddMonths(-12), context.WeekStartsOnMonday);
             var (_, rangeEnd) = DateRangeHelper.MonthGridRange(request.Month.AddMonths(12), context.WeekStartsOnMonday);
+            if (BeforeLoadCalendarPrefetchDataAsync is { } beforeLoadCalendarPrefetchDataAsync)
+            {
+                await beforeLoadCalendarPrefetchDataAsync(request.Month, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
             var db = Stopwatch.StartNew();
             var storedEvents = await _repository.LoadEventsAsync(
                 new DateTimeOffset(rangeStart), new DateTimeOffset(rangeEnd), includeDeleted: true, cancellationToken);
+            BeforeBuildCalendarPrefetchDataWindow?.Invoke(request.Month, cancellationToken);
             var dataWindow = await Task.Run(
                 () => BuildCalendarDataWindow(rangeStart, rangeEnd, context.WeekStartsOnMonday, dataVersion, storedEvents, cancellationToken),
                 cancellationToken);
@@ -783,6 +820,13 @@ public sealed partial class MainViewModel
         catch (Exception ex)
         {
             _logger?.LogError(ex, $"Calendar prefetch {request.Month:yyyy-MM} failed");
+        }
+        finally
+        {
+            if (enteredPipeline)
+            {
+                _calendarPrefetchPipelineGate.Release();
+            }
         }
     }
 
