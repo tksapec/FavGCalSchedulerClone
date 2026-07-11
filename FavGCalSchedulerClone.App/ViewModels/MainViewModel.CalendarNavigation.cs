@@ -586,8 +586,8 @@ public sealed partial class MainViewModel
     {
         try
         {
-            await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken);
-            await PersistDisplayMonthAsync(month, version, cancellationToken);
+            await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken).ConfigureAwait(false);
+            await PersistDisplayMonthAsync(month, version, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -600,12 +600,12 @@ public sealed partial class MainViewModel
         cancellation?.Cancel();
         cancellation?.Dispose();
         var version = Volatile.Read(ref _displayMonthPersistenceVersion);
-        await PersistDisplayMonthAsync(_settings.DisplayMonth, version, CancellationToken.None);
+        await PersistDisplayMonthAsync(_settings.DisplayMonth, version, CancellationToken.None).ConfigureAwait(false);
     }
 
     private async Task PersistDisplayMonthAsync(DateTime month, long version, CancellationToken cancellationToken)
     {
-        await _displayMonthPersistenceGate.WaitAsync(cancellationToken);
+        await _displayMonthPersistenceGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -615,7 +615,12 @@ public sealed partial class MainViewModel
             }
 
             BeforeSaveDisplayMonth?.Invoke(month);
-            await _repository.SaveSettingsAsync(_settings);
+            if (BeforeSaveDisplayMonthAsync is { } beforeSaveDisplayMonthAsync)
+            {
+                await beforeSaveDisplayMonthAsync(month).ConfigureAwait(false);
+            }
+
+            await _repository.SaveSettingsAsync(_settings).ConfigureAwait(false);
             _logger?.LogInfo($"DisplayMonth persisted: {month:yyyy-MM}");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

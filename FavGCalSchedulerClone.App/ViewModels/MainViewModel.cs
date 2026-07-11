@@ -230,6 +230,7 @@ public sealed partial class MainViewModel : ObservableObject
     internal Func<DateTime, CancellationToken, Task>? BeforeLoadCalendarSnapshotAsync { get; set; }
     internal Action<DateTime, CancellationToken>? BeforeBuildCalendarSnapshot { get; set; }
     internal Action<DateTime>? BeforeSaveDisplayMonth { get; set; }
+    internal Func<DateTime, Task>? BeforeSaveDisplayMonthAsync { get; set; }
     internal Action<CalendarRefreshSnapshot>? BeforeApplyCalendarSnapshot { get; set; }
     internal Action? BeforeRefreshTodos { get; set; }
     internal TimeSpan NavigationRefreshDelay { get; set; } = TimeSpan.FromMilliseconds(10);

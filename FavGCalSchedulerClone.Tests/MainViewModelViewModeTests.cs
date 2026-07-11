@@ -182,6 +182,41 @@ public sealed class MainViewModelViewModeTests
     }
 
     [Fact]
+    public async Task FlushDisplayMonthPersistenceAsync_CompletesWhenInflightSaveStartedOnBlockedSynchronizationContext()
+    {
+        var viewModel = await CreateViewModelAsync();
+        using var saveStarted = new ManualResetEventSlim();
+        var releaseSave = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        viewModel.BeforeSaveDisplayMonthAsync = async _ =>
+        {
+            saveStarted.Set();
+            await releaseSave.Task.ConfigureAwait(false);
+        };
+
+        var originalContext = SynchronizationContext.Current;
+        var blockedContext = new QueuedSynchronizationContext();
+        SynchronizationContext.SetSynchronizationContext(blockedContext);
+        try
+        {
+            viewModel.NextMonthCommand.Execute(null);
+
+            Assert.True(SpinWait.SpinUntil(() => blockedContext.PendingCount > 0, TimeSpan.FromSeconds(2)));
+            Assert.True(blockedContext.PumpUntil(() => saveStarted.IsSet, TimeSpan.FromSeconds(2)));
+
+            var flushTask = Task.Run(viewModel.FlushDisplayMonthPersistenceAsync);
+            releaseSave.SetResult();
+
+#pragma warning disable xUnit1031 // This intentionally models App.OnExit synchronously waiting on the dispatcher thread.
+            Assert.True(flushTask.Wait(TimeSpan.FromSeconds(2)), "Exit flush must not require the blocked UI synchronization context.");
+#pragma warning restore xUnit1031
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(originalContext);
+        }
+    }
+
+    [Fact]
     public async Task CachedNavigation_AppliesSnapshotOnlyOnce()
     {
         var viewModel = await CreateViewModelAsync();
@@ -1002,6 +1037,61 @@ public sealed class MainViewModelViewModeTests
             }
 
             await Task.Delay(25);
+        }
+    }
+
+    private sealed class QueuedSynchronizationContext : SynchronizationContext
+    {
+        private readonly Queue<(SendOrPostCallback Callback, object? State)> _callbacks = [];
+
+        public int PendingCount
+        {
+            get
+            {
+                lock (_callbacks)
+                {
+                    return _callbacks.Count;
+                }
+            }
+        }
+
+        public override void Post(SendOrPostCallback callback, object? state)
+        {
+            lock (_callbacks)
+            {
+                _callbacks.Enqueue((callback, state));
+            }
+        }
+
+        public bool PumpUntil(Func<bool> condition, TimeSpan timeout)
+        {
+            var deadline = DateTime.UtcNow + timeout;
+            while (!condition())
+            {
+                (SendOrPostCallback Callback, object? State)? item = null;
+                lock (_callbacks)
+                {
+                    if (_callbacks.Count > 0)
+                    {
+                        item = _callbacks.Dequeue();
+                    }
+                }
+
+                if (item is not null)
+                {
+                    item.Value.Callback(item.Value.State);
+                    continue;
+                }
+
+                if (DateTime.UtcNow >= deadline)
+                {
+                    return false;
+                }
+
+                Thread.Sleep(10);
+            }
+
+            return true;
         }
     }
 }
