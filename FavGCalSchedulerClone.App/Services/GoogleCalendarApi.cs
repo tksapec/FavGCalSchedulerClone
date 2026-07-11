@@ -51,7 +51,7 @@ public sealed class GoogleCalendarApi : IGoogleCalendarApi
         return new GoogleCalendarClient(service);
     }
 
-    private sealed class GoogleCalendarClient : IConditionalGoogleCalendarClient
+    internal sealed class GoogleCalendarClient : IConditionalGoogleCalendarClient
     {
         private readonly CalendarService _service;
 
@@ -62,17 +62,34 @@ public sealed class GoogleCalendarApi : IGoogleCalendarApi
 
         public async Task<IReadOnlyList<GoogleCalendarInfo>> ListCalendarsAsync(CancellationToken cancellationToken = default)
         {
-            var request = _service.CalendarList.List();
-            var page = await request.ExecuteAsync(cancellationToken);
-            return (page.Items ?? [])
-                .Where(item => !string.IsNullOrWhiteSpace(item.Id))
-                .Select(item => new GoogleCalendarInfo(
-                    item.Id!,
-                    item.SummaryOverride ?? item.Summary ?? item.Id!,
-                    (item.DefaultReminders ?? [])
-                        .Where(reminder => !string.IsNullOrWhiteSpace(reminder.Method) && reminder.Minutes is not null)
-                        .Select(reminder => new GoogleReminderOverride(reminder.Method!, reminder.Minutes!.Value))
-                        .ToArray()))
+            var calendars = new Dictionary<string, GoogleCalendarInfo>(StringComparer.Ordinal);
+            string? pageToken = null;
+            do
+            {
+                var request = _service.CalendarList.List();
+                request.PageToken = pageToken;
+                var page = await request.ExecuteAsync(cancellationToken);
+                foreach (var item in page.Items ?? [])
+                {
+                    if (string.IsNullOrWhiteSpace(item.Id))
+                    {
+                        continue;
+                    }
+
+                    calendars.TryAdd(item.Id, new GoogleCalendarInfo(
+                        item.Id,
+                        item.SummaryOverride ?? item.Summary ?? item.Id,
+                        (item.DefaultReminders ?? [])
+                            .Where(reminder => !string.IsNullOrWhiteSpace(reminder.Method) && reminder.Minutes is not null)
+                            .Select(reminder => new GoogleReminderOverride(reminder.Method!, reminder.Minutes!.Value))
+                            .ToArray()));
+                }
+
+                pageToken = page.NextPageToken;
+            }
+            while (!string.IsNullOrWhiteSpace(pageToken));
+
+            return calendars.Values
                 .OrderBy(item => item.Summary, StringComparer.CurrentCultureIgnoreCase)
                 .ToArray();
         }
