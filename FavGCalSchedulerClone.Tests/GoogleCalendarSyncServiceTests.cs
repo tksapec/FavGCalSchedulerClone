@@ -1149,13 +1149,22 @@ public sealed class GoogleCalendarSyncServiceTests
         Assert.Equal(remainsDirty, (await repository.FindEventByIdAsync(local.Id))!.IsDirty);
     }
 
-    [Fact]
-    public async Task SyncDirtyEventsAsync_PreferGooglePullsLinkedDirtyEventInsteadOfPushing()
+    [Theory]
+    [InlineData(SyncConflictPolicy.SkipLocalDirty, 0, 0, 1, true, "local title")]
+    [InlineData(SyncConflictPolicy.PreferLocal, 1, 0, 0, false, "local title")]
+    [InlineData(SyncConflictPolicy.PreferGoogle, 0, 1, 0, false, "remote title")]
+    public async Task SyncDirtyEventsAsync_LinkedDirtyEventAppliesConflictPolicy(
+        SyncConflictPolicy policy,
+        int expectedPushed,
+        int expectedPulled,
+        int expectedSkipped,
+        bool remainsDirty,
+        string expectedTitle)
     {
         var repository = await CreateRepositoryAsync();
         var api = new FakeGoogleCalendarApi();
         var settings = CreateSettings("work");
-        settings.SyncConflictPolicy = SyncConflictPolicy.PreferGoogle;
+        settings.SyncConflictPolicy = policy;
         var local = new CalendarEvent
         {
             CalendarId = "work",
@@ -1179,10 +1188,55 @@ public sealed class GoogleCalendarSyncServiceTests
             settings,
             new HashSet<string>(StringComparer.Ordinal) { local.Id });
 
+        Assert.Equal(expectedPushed, result.Pushed);
+        Assert.Equal(expectedPulled, result.Pulled);
+        Assert.Equal(expectedSkipped, result.Skipped);
+        Assert.Equal(remainsDirty, (await repository.FindEventByIdAsync(local.Id))!.IsDirty);
+        Assert.Equal(expectedTitle, (await repository.FindEventByIdAsync(local.Id))!.Title);
+    }
+
+    [Theory]
+    [InlineData(SyncConflictPolicy.SkipLocalDirty)]
+    [InlineData(SyncConflictPolicy.PreferLocal)]
+    [InlineData(SyncConflictPolicy.PreferGoogle)]
+    public async Task SyncDirtyEventsAsync_LinkedRemoteLookupFailureDoesNotExecuteIncompleteConflictPlan(SyncConflictPolicy policy)
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi { GetFailuresRemaining = 1 };
+        var settings = CreateSettings("work");
+        settings.SyncConflictPolicy = policy;
+        var local = new CalendarEvent
+        {
+            CalendarId = "work",
+            GoogleEventId = "remote-lookup-failure",
+            Title = "local title",
+            Start = new DateTimeOffset(2026, 8, 3, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 8, 3, 10, 0, 0, TimeSpan.Zero),
+            IsDirty = true
+        };
+        await repository.SaveEventAsync(local);
+        api.UpsertRemote("work", new Event
+        {
+            Id = local.GoogleEventId,
+            Summary = "remote title",
+            Start = DateTimeEvent(2026, 8, 3, 9),
+            End = DateTimeEvent(2026, 8, 3, 10),
+            Status = "confirmed"
+        });
+
+        var result = await new GoogleCalendarSyncService(repository, api).SyncDirtyEventsAsync(
+            settings,
+            new HashSet<string>(StringComparer.Ordinal) { local.Id });
+
         Assert.Equal(0, result.Pushed);
-        Assert.Equal(1, result.Pulled);
-        Assert.False((await repository.FindEventByIdAsync(local.Id))!.IsDirty);
-        Assert.Equal("remote title", (await repository.FindEventByIdAsync(local.Id))!.Title);
+        Assert.Equal(0, result.Pulled);
+        Assert.Equal(0, result.Skipped);
+        Assert.Equal(1, result.Failed);
+        Assert.DoesNotContain(api.Operations, item => item.StartsWith("update:work:remote-lookup-failure", StringComparison.Ordinal));
+        var stored = await repository.FindEventByIdAsync(local.Id);
+        Assert.NotNull(stored);
+        Assert.True(stored.IsDirty);
+        Assert.Equal("remote title", api.EventsByCalendar["work"]["remote-lookup-failure"].Summary);
     }
 
     [Fact]
@@ -2260,6 +2314,7 @@ public sealed class GoogleCalendarSyncServiceTests
         public bool ThrowOnUpdateNotFound { get; set; }
         public bool ThrowOnConditionalUpdate { get; set; }
         public bool ThrowOnGet { get; set; }
+        public int GetFailuresRemaining { get; set; }
         public bool ThrowOnList { get; set; }
         public int PageSize { get; set; } = int.MaxValue;
         public HashSet<string> StaleSyncTokens { get; } = new(StringComparer.Ordinal);
@@ -2350,7 +2405,7 @@ public sealed class GoogleCalendarSyncServiceTests
 
         public Task<Event> GetEventAsync(string calendarId, string eventId, CancellationToken cancellationToken = default)
         {
-            if (ThrowOnGet)
+            if (ThrowOnGet || GetFailuresRemaining-- > 0)
             {
                 throw new InvalidOperationException("get failed");
             }

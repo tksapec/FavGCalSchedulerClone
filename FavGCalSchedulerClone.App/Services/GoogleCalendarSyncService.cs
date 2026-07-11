@@ -268,8 +268,11 @@ public sealed class GoogleCalendarSyncService
             var selectedDirty = dirtyEvents
                 .Where(item => item.CalendarId == calendarId && localIds.Contains(item.Id))
                 .ToArray();
-            var remoteEvents = await LoadRemoteEventsForDirtyAsync(client, calendarId, selectedDirty, failures, cancellationToken);
-            var plan = BuildSyncPlan(selectedDirty, remoteEvents, settings.SyncConflictPolicy, RemoteSyncMode.Incremental);
+            var remoteLookup = await LoadRemoteEventsForDirtyAsync(client, calendarId, selectedDirty, failures, cancellationToken);
+            var executableDirty = selectedDirty
+                .Where(item => !remoteLookup.FailedLocalIds.Contains(item.Id))
+                .ToArray();
+            var plan = BuildSyncPlan(executableDirty, remoteLookup.Events, settings.SyncConflictPolicy, RemoteSyncMode.Incremental);
             var execution = await ExecuteSyncPlanAsync(
                 client,
                 calendarId,
@@ -282,7 +285,7 @@ public sealed class GoogleCalendarSyncService
             pulled += execution.Pulled;
             skipped += execution.Skipped;
             conflicts += execution.Conflicts;
-            failed += execution.Failed;
+            failed += remoteLookup.FailedLocalIds.Count + execution.Failed;
             deleted += execution.Deleted;
             recreated += execution.Recreated;
         }
@@ -1233,7 +1236,7 @@ public sealed class GoogleCalendarSyncService
         }
     }
 
-    private static async Task<IReadOnlyList<Event>> LoadRemoteEventsForDirtyAsync(
+    private static async Task<RemoteDirtyLookupResult> LoadRemoteEventsForDirtyAsync(
         IGoogleCalendarClient client,
         string calendarId,
         IReadOnlyList<CalendarEvent> dirtyEvents,
@@ -1241,6 +1244,7 @@ public sealed class GoogleCalendarSyncService
         CancellationToken cancellationToken)
     {
         var remoteEvents = new List<Event>();
+        var failedLocalIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var localEvent in dirtyEvents.Where(item => !string.IsNullOrWhiteSpace(item.GoogleEventId)))
         {
             try
@@ -1250,10 +1254,11 @@ public sealed class GoogleCalendarSyncService
             catch (Exception ex) when (ex is not OperationCanceledException && !IsNotFound(ex))
             {
                 failures.Add(CreateFailureDiagnostic(localEvent, "LoadRemoteForDirty", ex));
+                failedLocalIds.Add(localEvent.Id);
             }
         }
 
-        return remoteEvents;
+        return new RemoteDirtyLookupResult(remoteEvents, failedLocalIds);
     }
 
     private async Task<SyncPullSummary> PullRemoteEventsAsync(
@@ -1763,6 +1768,8 @@ internal sealed record SyncPlanExecution(
     int Failed,
     int Deleted,
     int Recreated);
+
+internal sealed record RemoteDirtyLookupResult(IReadOnlyList<Event> Events, IReadOnlySet<string> FailedLocalIds);
 
 internal sealed record RemoteDelta(IReadOnlyList<Event> Events, string? NextSyncToken, bool Success, RemoteSyncMode Mode);
 public sealed record GoogleReminderRefreshResult(int UpdatedExisting, int UpsertedMissing, int Skipped)
