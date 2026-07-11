@@ -1,6 +1,7 @@
 using FavGCalSchedulerClone.App.Models;
 using FavGCalSchedulerClone.App.Services;
 using FavGCalSchedulerClone.App.ViewModels;
+using Google;
 using Google.Apis.Calendar.v3.Data;
 
 namespace FavGCalSchedulerClone.Tests;
@@ -330,6 +331,40 @@ public sealed class GoogleCalendarSyncServiceTests
         local = (await repository.LoadEventsAsync(local.Start.AddDays(-1), local.End.AddDays(1), includeDeleted: true)).Single();
         Assert.True(local.IsDeleted);
         Assert.False(local.IsDirty);
+    }
+
+    [Fact]
+    public async Task SyncAsync_AndPreviewAsync_RetryExpiredTokenWithCompletePagedRemoteDelta()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi { PageSize = 1 };
+        var settings = CreateSettings("work");
+        var service = new GoogleCalendarSyncService(repository, api);
+        api.UpsertRemote("work", new Event { Id = "remote-first", Summary = "First remote event", Start = DateTimeEvent(2026, 8, 1, 9), End = DateTimeEvent(2026, 8, 1, 10), Status = "confirmed" });
+        api.UpsertRemote("work", new Event { Id = "remote-second", Summary = "Second remote event", Start = DateTimeEvent(2026, 8, 2, 9), End = DateTimeEvent(2026, 8, 2, 10), Status = "confirmed" });
+        await repository.SaveSyncTokenAsync("work", "stale-token");
+        api.StaleSyncTokens.Add("stale-token");
+
+        var preview = await service.PreviewAsync(settings);
+
+        Assert.Equal(2, preview.PullItems.Count);
+        Assert.Null(await repository.GetSyncTokenAsync("work"));
+        Assert.Collection(api.ListRequests,
+            request => Assert.Equal("stale-token", request.SyncToken),
+            request => { Assert.Null(request.SyncToken); Assert.Null(request.PageToken); },
+            request => { Assert.Null(request.SyncToken); Assert.Equal("1", request.PageToken); });
+
+        api.ListRequests.Clear();
+        await repository.SaveSyncTokenAsync("work", "stale-token");
+        api.StaleSyncTokens.Add("stale-token");
+        var result = await service.SyncAsync(settings);
+
+        Assert.Equal(2, result.Pulled);
+        Assert.Equal("token-work-2", await repository.GetSyncTokenAsync("work"));
+        Assert.Collection(api.ListRequests,
+            request => Assert.Equal("stale-token", request.SyncToken),
+            request => { Assert.Null(request.SyncToken); Assert.Null(request.PageToken); },
+            request => { Assert.Null(request.SyncToken); Assert.Equal("1", request.PageToken); });
     }
 
     [Theory]
@@ -2000,6 +2035,8 @@ public sealed class GoogleCalendarSyncServiceTests
         public bool ThrowOnConditionalUpdate { get; set; }
         public bool ThrowOnGet { get; set; }
         public bool ThrowOnList { get; set; }
+        public int PageSize { get; set; } = int.MaxValue;
+        public HashSet<string> StaleSyncTokens { get; } = new(StringComparer.Ordinal);
         public TaskCompletionSource? ListStarted { get; set; }
         public TaskCompletionSource? ContinueList { get; set; }
 
@@ -2109,6 +2146,14 @@ public sealed class GoogleCalendarSyncServiceTests
                 throw new InvalidOperationException("list failed");
             }
 
+            if (!string.IsNullOrWhiteSpace(request.SyncToken) && StaleSyncTokens.Remove(request.SyncToken))
+            {
+                throw new GoogleApiException("FakeGoogleCalendar", "sync token expired")
+                {
+                    HttpStatusCode = System.Net.HttpStatusCode.Gone
+                };
+            }
+
             if (ListStarted is not null && ContinueList is not null)
             {
                 var continueList = ContinueList;
@@ -2128,7 +2173,11 @@ public sealed class GoogleCalendarSyncServiceTests
             {
                 ChangedRemoteKeys.Remove($"{request.CalendarId}:{googleEvent.Id}");
             }
-            return new GoogleEventPage(events, null, $"token-{request.CalendarId}-{events.Length}");
+            var offset = int.TryParse(request.PageToken, out var parsedOffset) ? parsedOffset : 0;
+            var pageEvents = events.Skip(offset).Take(PageSize).ToArray();
+            var nextOffset = offset + pageEvents.Length;
+            var nextPageToken = nextOffset < events.Length ? nextOffset.ToString() : null;
+            return new GoogleEventPage(pageEvents, nextPageToken, nextPageToken is null ? $"token-{request.CalendarId}-{events.Length}" : null);
         }
 
         public Task<IReadOnlyList<Event>> ListInstancesAsync(

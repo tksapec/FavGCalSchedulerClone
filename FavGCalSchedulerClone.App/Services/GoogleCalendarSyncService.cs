@@ -1492,32 +1492,40 @@ public sealed class GoogleCalendarSyncService
             calendarEvent.UpdatedAt);
     }
 
-    private static async Task<IReadOnlyList<Event>> LoadRemoteChangesForPreviewAsync(
+    private async Task<IReadOnlyList<Event>> LoadRemoteChangesForPreviewAsync(
         IGoogleCalendarClient client,
         string calendarId,
         string? syncToken,
         CancellationToken cancellationToken)
     {
-        var events = new List<Event>();
-        string? pageToken = null;
-        do
+        try
         {
-            var page = await client.ListEventsAsync(
-                new GoogleEventListRequest(
-                    calendarId,
-                    syncToken,
-                    pageToken,
-                    string.IsNullOrWhiteSpace(syncToken) ? DateTimeOffset.Now.AddYears(-5) : null,
-                    ShowDeleted: true,
-                    SingleEvents: false,
-                    MaxResults: 2500),
-                cancellationToken);
-            events.AddRange(page.Items);
-            pageToken = page.NextPageToken;
-        }
-        while (!string.IsNullOrWhiteSpace(pageToken));
+            var events = new List<Event>();
+            string? pageToken = null;
+            do
+            {
+                var page = await client.ListEventsAsync(
+                    new GoogleEventListRequest(
+                        calendarId,
+                        syncToken,
+                        pageToken,
+                        string.IsNullOrWhiteSpace(syncToken) ? DateTimeOffset.Now.AddYears(-5) : null,
+                        ShowDeleted: true,
+                        SingleEvents: false,
+                        MaxResults: 2500),
+                    cancellationToken);
+                events.AddRange(page.Items);
+                pageToken = page.NextPageToken;
+            }
+            while (!string.IsNullOrWhiteSpace(pageToken));
 
-        return events;
+            return events;
+        }
+        catch (GoogleApiException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.Gone && !string.IsNullOrWhiteSpace(syncToken))
+        {
+            await _repository.SaveSyncTokenAsync(calendarId, null);
+            return await LoadRemoteChangesForPreviewAsync(client, calendarId, null, cancellationToken);
+        }
     }
 
     private async Task SaveSyncResultAsync(SyncResult result, bool keepHistory)

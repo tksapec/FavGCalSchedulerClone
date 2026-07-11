@@ -60,6 +60,34 @@ public sealed class CalendarRepositoryTests
     }
 
     [Fact]
+    public async Task LoadTodoEventsAsync_OrdersMixedOffsetEventsByUtcStartThenTitle()
+    {
+        var repository = await CreateRepositoryAsync();
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Id = "same-utc-alpha", CalendarId = "primary", Title = "#todo0% Alpha", IsTodoLike = true,
+            Start = new DateTimeOffset(2026, 8, 1, 9, 0, 0, TimeSpan.FromHours(9)),
+            End = new DateTimeOffset(2026, 8, 1, 10, 0, 0, TimeSpan.FromHours(9))
+        });
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Id = "same-utc-zulu", CalendarId = "primary", Title = "#todo0% Zulu", IsTodoLike = true,
+            Start = new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 8, 1, 1, 0, 0, TimeSpan.Zero)
+        });
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Id = "later-utc", CalendarId = "primary", Title = "#todo0% Later", IsTodoLike = true,
+            Start = new DateTimeOffset(2026, 8, 1, 1, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 8, 1, 2, 0, 0, TimeSpan.Zero)
+        });
+
+        var events = await repository.LoadTodoEventsAsync();
+
+        Assert.Equal(["same-utc-alpha", "same-utc-zulu", "later-utc"], events.Select(item => item.Id));
+    }
+
+    [Fact]
     public async Task SaveEventAsync_WritesLegacyTextAndUtcTicksTogether()
     {
         var repository = await CreateRepositoryAsync();

@@ -212,7 +212,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
                    color_id, reminder_minutes_before_start, app_reminder_enabled, google_email_reminder_enabled, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields, google_reminder_metadata_json, app_reminder_minutes_json, google_email_reminder_minutes_json
             FROM events
             WHERE is_todo_like = 1 AND is_deleted = 0
-            ORDER BY start, title
+            ORDER BY start_utc_ticks, title
             """;
         return await ReadEventsAsync(command);
     }
