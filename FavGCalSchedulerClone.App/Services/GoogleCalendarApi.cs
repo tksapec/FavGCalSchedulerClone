@@ -82,9 +82,20 @@ public sealed class GoogleCalendarApi : IGoogleCalendarApi
             return await _service.Events.Insert(googleEvent, calendarId).ExecuteAsync(cancellationToken);
         }
 
-        public async Task<Event> UpdateEventAsync(string calendarId, string eventId, Event googleEvent, CancellationToken cancellationToken = default)
+        public async Task<Event> UpdateEventAsync(
+            string calendarId,
+            string eventId,
+            Event googleEvent,
+            CancellationToken cancellationToken = default,
+            string? ifMatchETag = null)
         {
-            return await _service.Events.Update(googleEvent, calendarId, eventId).ExecuteAsync(cancellationToken);
+            var request = _service.Events.Update(googleEvent, calendarId, eventId);
+            if (!string.IsNullOrWhiteSpace(ifMatchETag))
+            {
+                request.ModifyRequest = message => message.Headers.TryAddWithoutValidation("If-Match", ifMatchETag);
+            }
+
+            return await request.ExecuteAsync(cancellationToken);
         }
 
         public async Task DeleteEventAsync(string calendarId, string eventId, CancellationToken cancellationToken = default)
