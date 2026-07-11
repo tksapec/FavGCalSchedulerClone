@@ -144,17 +144,38 @@ public sealed class GoogleCalendarSyncService
 
         foreach (var calendarId in await ResolveTargetCalendarIdsAsync(settings))
         {
-            var push = await PushDirtyEventsAsync(client, calendarId, failures, localIds: null, cancellationToken);
-            pushed += push.Pushed;
-            failed += push.Failed;
-            deleted += push.Deleted;
-            recreated += push.Recreated;
+            var syncToken = await _repository.GetSyncTokenAsync(calendarId);
+            var delta = await LoadRemoteDeltaAsync(client, calendarId, syncToken, failures, cancellationToken);
+            if (!delta.Success)
+            {
+                failed++;
+                continue;
+            }
 
-            var pull = await PullRemoteEventsAsync(client, calendarId, settings.SyncConflictPolicy, failures, reminderDefaults, settings.AdoptGoogleEmailRemindersAsLocalNotifications, cancellationToken);
-            pulled += pull.Pulled;
-            skipped += pull.Skipped;
-            conflicts += pull.Conflicts;
-            failed += pull.Failed;
+            var dirtyEvents = (await _repository.LoadDirtyEventsAsync())
+                .Where(item => string.Equals(item.CalendarId, calendarId, StringComparison.Ordinal))
+                .ToArray();
+            var plan = BuildSyncPlan(dirtyEvents, delta.Events, settings.SyncConflictPolicy, !string.IsNullOrWhiteSpace(syncToken));
+            var execution = await ExecuteSyncPlanAsync(
+                client,
+                calendarId,
+                plan,
+                failures,
+                reminderDefaults,
+                settings.AdoptGoogleEmailRemindersAsLocalNotifications,
+                cancellationToken);
+            pushed += execution.Pushed;
+            pulled += execution.Pulled;
+            skipped += execution.Skipped;
+            conflicts += execution.Conflicts;
+            failed += execution.Failed;
+            deleted += execution.Deleted;
+            recreated += execution.Recreated;
+
+            if (execution.Failed == 0 && execution.Skipped == 0)
+            {
+                await _repository.SaveSyncTokenAsync(calendarId, delta.NextSyncToken);
+            }
         }
 
         var reminderRefreshMessage = string.Empty;
@@ -495,8 +516,31 @@ public sealed class GoogleCalendarSyncService
             var syncToken = await _repository.GetSyncTokenAsync(calendarId);
             calendars.Add(new SyncCalendarDiagnostic(calendarId, !string.IsNullOrWhiteSpace(syncToken), calendarDirty.Length));
 
+            IReadOnlyList<Event> remoteChanges;
+            IReadOnlyList<SyncPlanItem> previewPlan;
+            try
+            {
+                remoteChanges = await LoadRemoteChangesForPreviewAsync(client, calendarId, syncToken, cancellationToken);
+                previewPlan = BuildSyncPlan(
+                    calendarDirty,
+                    remoteChanges,
+                    settings.SyncConflictPolicy,
+                    !string.IsNullOrWhiteSpace(syncToken));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                errorItems.Add(new SyncPreviewItem(calendarId, null, null, "Preview error", null, "error", ex.Message));
+                continue;
+            }
+
             foreach (var localEvent in calendarDirty)
             {
+                var planItem = previewPlan.FirstOrDefault(item => string.Equals(item.LocalEvent?.Id, localEvent.Id, StringComparison.Ordinal));
+                if (planItem?.Action != SyncPlanAction.PushLocal)
+                {
+                    continue;
+                }
+
                 var item = ToPreviewItem(calendarId, localEvent, localEvent.IsDeleted ? "delete" : "push", localEvent.IsDeleted ? "Googleから削除予定" : "Googleへ送信予定");
                 var remoteForDiff = await TryLoadRemoteForPreviewAsync(
                     client,
@@ -519,7 +563,7 @@ public sealed class GoogleCalendarSyncService
 
             try
             {
-                foreach (var googleEvent in await LoadRemoteChangesForPreviewAsync(client, calendarId, syncToken, cancellationToken))
+                foreach (var googleEvent in remoteChanges)
                 {
                     var remoteEvent = GoogleEventMapper.FromGoogleEvent(
                         googleEvent,
@@ -528,8 +572,10 @@ public sealed class GoogleCalendarSyncService
                         settings.AdoptGoogleEmailRemindersAsLocalNotifications);
                     var item = ToPreviewItem(calendarId, remoteEvent, "pull", "Googleから取得予定");
                     var local = await _repository.FindEventByGoogleEventIdAsync(calendarId, googleEvent.Id);
-                    if (local?.IsDirty == true)
+                    var planItem = previewPlan.FirstOrDefault(entry => string.Equals(entry.RemoteEvent?.Id, googleEvent.Id, StringComparison.Ordinal));
+                    if (planItem is { Action: SyncPlanAction.SkipConflict, LocalEvent: not null } plannedConflict)
                     {
+                        local = plannedConflict.LocalEvent;
                         conflictItems.Add(item with { Detail = $"ローカル未同期変更とGoogle変更が競合: {settings.SyncConflictPolicy}" });
                         var conflictIndex = conflictItems.Count - 1;
                         conflictItems[conflictIndex] = conflictItems[conflictIndex] with
@@ -979,6 +1025,173 @@ public sealed class GoogleCalendarSyncService
         return instances
             .FirstOrDefault(item => MatchesOriginalStart(item, localEvent.OriginalStart.Value, localEvent.IsAllDay))
             ?.Id;
+    }
+
+    private static IReadOnlyList<SyncPlanItem> BuildSyncPlan(
+        IReadOnlyList<CalendarEvent> dirtyEvents,
+        IReadOnlyList<Event> remoteEvents,
+        SyncConflictPolicy conflictPolicy,
+        bool isIncrementalDelta)
+    {
+        var dirtyByGoogleId = dirtyEvents
+            .Where(item => !string.IsNullOrWhiteSpace(item.GoogleEventId))
+            .ToDictionary(item => item.GoogleEventId!, StringComparer.Ordinal);
+        var plannedLocalIds = new HashSet<string>(StringComparer.Ordinal);
+        var plan = new List<SyncPlanItem>();
+
+        foreach (var remoteEvent in remoteEvents)
+        {
+            if (string.IsNullOrWhiteSpace(remoteEvent.Id))
+            {
+                continue;
+            }
+
+            if (dirtyByGoogleId.TryGetValue(remoteEvent.Id, out var dirtyLocal))
+            {
+                if (!isIncrementalDelta)
+                {
+                    continue;
+                }
+
+                plannedLocalIds.Add(dirtyLocal.Id);
+                plan.Add(new SyncPlanItem(
+                    conflictPolicy switch
+                    {
+                        SyncConflictPolicy.SkipLocalDirty => SyncPlanAction.SkipConflict,
+                        SyncConflictPolicy.PreferLocal => SyncPlanAction.PushLocal,
+                        SyncConflictPolicy.PreferGoogle => SyncPlanAction.PullRemote,
+                        _ => throw new ArgumentOutOfRangeException(nameof(conflictPolicy))
+                    },
+                    dirtyLocal,
+                    remoteEvent,
+                    IsConflict: true));
+                continue;
+            }
+
+            plan.Add(new SyncPlanItem(SyncPlanAction.PullRemote, null, remoteEvent, IsConflict: false));
+        }
+
+        foreach (var dirtyLocal in dirtyEvents.Where(item => !plannedLocalIds.Contains(item.Id)))
+        {
+            plan.Add(new SyncPlanItem(SyncPlanAction.PushLocal, dirtyLocal, null, IsConflict: false));
+        }
+
+        return plan;
+    }
+
+    private async Task<SyncPlanExecution> ExecuteSyncPlanAsync(
+        IGoogleCalendarClient client,
+        string calendarId,
+        IReadOnlyList<SyncPlanItem> plan,
+        ICollection<SyncFailureDiagnostic> failures,
+        IReadOnlyDictionary<string, IReadOnlyList<GoogleReminderOverride>> reminderDefaults,
+        bool adoptEmailRemindersAsLocalNotifications,
+        CancellationToken cancellationToken)
+    {
+        var pushed = 0;
+        var pulled = 0;
+        var skipped = 0;
+        var conflicts = 0;
+        var failed = 0;
+        var deleted = 0;
+        var recreated = 0;
+
+        foreach (var item in plan)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            switch (item.Action)
+            {
+                case SyncPlanAction.SkipConflict:
+                    skipped++;
+                    conflicts++;
+                    break;
+
+                case SyncPlanAction.PullRemote:
+                    try
+                    {
+                        await _repository.UpsertSyncedEventAsync(GoogleEventMapper.FromGoogleEvent(
+                            item.RemoteEvent!,
+                            calendarId,
+                            GetDefaultReminders(reminderDefaults, calendarId),
+                            adoptEmailRemindersAsLocalNotifications));
+                        pulled++;
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        failures.Add(CreatePullFailureDiagnostic(calendarId, null, null, ex, "PlanPull", ex.Message));
+                        failed++;
+                    }
+                    break;
+
+                case SyncPlanAction.PushLocal:
+                    var localEvent = item.LocalEvent!;
+                    var operation = GetPushOperation(localEvent);
+                    var outcome = await TryPushEventAsync(localEvent, operation, failures, () => localEvent.IsRecurrenceException
+                        ? PushRecurrenceExceptionAsync(client, calendarId, localEvent, cancellationToken)
+                        : PushNormalEventAsync(client, calendarId, localEvent, cancellationToken), _logger);
+                    if (!outcome.Success)
+                    {
+                        failed++;
+                        break;
+                    }
+
+                    pushed++;
+                    deleted += outcome.Deleted ? 1 : 0;
+                    recreated += outcome.Recreated ? 1 : 0;
+                    break;
+
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
+        }
+
+        return new SyncPlanExecution(pushed, pulled, skipped, conflicts, failed, deleted, recreated);
+    }
+
+    private async Task<RemoteDelta> LoadRemoteDeltaAsync(
+        IGoogleCalendarClient client,
+        string calendarId,
+        string? syncToken,
+        ICollection<SyncFailureDiagnostic> failures,
+        CancellationToken cancellationToken)
+    {
+        var events = new List<Event>();
+        string? pageToken = null;
+        string? nextSyncToken = null;
+        try
+        {
+            do
+            {
+                var page = await client.ListEventsAsync(new GoogleEventListRequest(
+                    calendarId,
+                    syncToken,
+                    pageToken,
+                    string.IsNullOrWhiteSpace(syncToken) ? DateTimeOffset.Now.AddYears(-5) : null,
+                    ShowDeleted: true,
+                    SingleEvents: false,
+                    MaxResults: 2500), cancellationToken);
+                events.AddRange(page.Items);
+                pageToken = page.NextPageToken;
+                if (string.IsNullOrWhiteSpace(pageToken))
+                {
+                    nextSyncToken = page.NextSyncToken;
+                }
+            }
+            while (!string.IsNullOrWhiteSpace(pageToken));
+
+            return new RemoteDelta(events, nextSyncToken, true);
+        }
+        catch (GoogleApiException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.Gone)
+        {
+            failures.Add(CreatePullFailureDiagnostic(calendarId, syncToken, pageToken, ex, "SyncTokenExpired", "410 Gone: sync token was reset before retry."));
+            await _repository.SaveSyncTokenAsync(calendarId, null);
+            return await LoadRemoteDeltaAsync(client, calendarId, null, failures, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            failures.Add(CreatePullFailureDiagnostic(calendarId, syncToken, pageToken, ex, "Pull", ex.Message));
+            return new RemoteDelta([], null, false);
+        }
     }
 
     private async Task<SyncPullSummary> PullRemoteEventsAsync(
@@ -1447,6 +1660,29 @@ public enum GoogleNotFoundSyncAction
 
 internal sealed record SyncPushSummary(int Pushed, int Failed, int Deleted, int Recreated);
 internal sealed record SyncPullSummary(int Pulled, int Skipped, int Conflicts, int Failed);
+internal enum SyncPlanAction
+{
+    PushLocal,
+    PullRemote,
+    SkipConflict
+}
+
+internal sealed record SyncPlanItem(
+    SyncPlanAction Action,
+    CalendarEvent? LocalEvent,
+    Event? RemoteEvent,
+    bool IsConflict);
+
+internal sealed record SyncPlanExecution(
+    int Pushed,
+    int Pulled,
+    int Skipped,
+    int Conflicts,
+    int Failed,
+    int Deleted,
+    int Recreated);
+
+internal sealed record RemoteDelta(IReadOnlyList<Event> Events, string? NextSyncToken, bool Success);
 public sealed record GoogleReminderRefreshResult(int UpdatedExisting, int UpsertedMissing, int Skipped)
 {
     public int TotalAffected => UpdatedExisting + UpsertedMissing;
