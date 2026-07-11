@@ -155,7 +155,7 @@ public sealed class GoogleCalendarSyncService
             var dirtyEvents = (await _repository.LoadDirtyEventsAsync())
                 .Where(item => string.Equals(item.CalendarId, calendarId, StringComparison.Ordinal))
                 .ToArray();
-            var plan = BuildSyncPlan(dirtyEvents, delta.Events, settings.SyncConflictPolicy, delta.IsIncrementalDelta);
+            var plan = BuildSyncPlan(dirtyEvents, delta.Events, settings.SyncConflictPolicy, delta.Mode);
             var execution = await ExecuteSyncPlanAsync(
                 client,
                 calendarId,
@@ -247,8 +247,12 @@ public sealed class GoogleCalendarSyncService
         }
 
         var client = await _googleCalendarApi.CreateClientAsync(settings.OAuthClientJsonPath!, cancellationToken);
+        var reminderDefaults = await LoadCalendarReminderDefaultsAsync(client, cancellationToken);
         var failures = new List<SyncFailureDiagnostic>();
         var pushed = 0;
+        var pulled = 0;
+        var skipped = 0;
+        var conflicts = 0;
         var failed = 0;
         var deleted = 0;
         var recreated = 0;
@@ -261,18 +265,33 @@ public sealed class GoogleCalendarSyncService
 
         foreach (var calendarId in targetCalendars)
         {
-            var push = await PushDirtyEventsAsync(client, calendarId, failures, localIds, cancellationToken);
-            pushed += push.Pushed;
-            failed += push.Failed;
-            deleted += push.Deleted;
-            recreated += push.Recreated;
+            var selectedDirty = dirtyEvents
+                .Where(item => item.CalendarId == calendarId && localIds.Contains(item.Id))
+                .ToArray();
+            var remoteEvents = await LoadRemoteEventsForDirtyAsync(client, calendarId, selectedDirty, failures, cancellationToken);
+            var plan = BuildSyncPlan(selectedDirty, remoteEvents, settings.SyncConflictPolicy, RemoteSyncMode.Incremental);
+            var execution = await ExecuteSyncPlanAsync(
+                client,
+                calendarId,
+                plan,
+                failures,
+                reminderDefaults,
+                settings.AdoptGoogleEmailRemindersAsLocalNotifications,
+                cancellationToken);
+            pushed += execution.Pushed;
+            pulled += execution.Pulled;
+            skipped += execution.Skipped;
+            conflicts += execution.Conflicts;
+            failed += execution.Failed;
+            deleted += execution.Deleted;
+            recreated += execution.Recreated;
         }
 
         var result = new SyncResult(
             pushed,
-            0,
-            0,
-            0,
+            pulled,
+            skipped,
+            conflicts,
             failed,
             deleted,
             recreated,
@@ -525,7 +544,7 @@ public sealed class GoogleCalendarSyncService
                     calendarDirty,
                     remoteDelta.Events,
                     settings.SyncConflictPolicy,
-                    remoteDelta.IsIncrementalDelta);
+                    remoteDelta.Mode);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -851,7 +870,7 @@ public sealed class GoogleCalendarSyncService
         try
         {
             var remoteEvent = plannedRemoteEvent ?? await client.GetEventAsync(calendarId, localEvent.GoogleEventId, cancellationToken);
-            ApplyAppOwnedFields(remoteEvent, localPayload, includeOriginalStartTime: false);
+            ApplyAppOwnedFields(remoteEvent, localPayload, includeOriginalStartTime: false, includeRecurrence: true);
             await UpdateEventAsync(client, calendarId, localEvent.GoogleEventId, remoteEvent, remoteEvent.ETag, cancellationToken);
             await _repository.MarkSyncedAsync(localEvent);
             Debug.WriteLine($"Push update succeeded and marked synced: {localEvent.Id}");
@@ -866,7 +885,7 @@ public sealed class GoogleCalendarSyncService
     }
 
 
-    private static void ApplyAppOwnedFields(Event destination, Event source, bool includeOriginalStartTime)
+    private static void ApplyAppOwnedFields(Event destination, Event source, bool includeOriginalStartTime, bool includeRecurrence)
     {
         destination.Summary = source.Summary;
         destination.Description = source.Description;
@@ -876,6 +895,10 @@ public sealed class GoogleCalendarSyncService
         destination.End = source.End;
         destination.Status = source.Status;
         destination.Reminders = source.Reminders;
+        if (includeRecurrence)
+        {
+            destination.Recurrence = source.Recurrence?.ToArray();
+        }
         if (includeOriginalStartTime)
         {
             destination.OriginalStartTime = source.OriginalStartTime;
@@ -938,7 +961,7 @@ public sealed class GoogleCalendarSyncService
         try
         {
             var remoteEvent = plannedRemoteEvent ?? await client.GetEventAsync(calendarId, remoteEventId, cancellationToken);
-            ApplyAppOwnedFields(remoteEvent, GoogleEventMapper.ToGoogleEvent(localEvent), includeOriginalStartTime: true);
+            ApplyAppOwnedFields(remoteEvent, GoogleEventMapper.ToGoogleEvent(localEvent), includeOriginalStartTime: true, includeRecurrence: false);
             localEvent.GoogleReminderMetadata = GoogleEventMapper.FromGoogleEvent(remoteEvent, calendarId).GoogleReminderMetadata;
             await UpdateEventAsync(client, calendarId, remoteEventId, remoteEvent, remoteEvent.ETag, cancellationToken);
             await _repository.MarkSyncedAsync(localEvent, remoteEventId);
@@ -1047,7 +1070,7 @@ public sealed class GoogleCalendarSyncService
         IReadOnlyList<CalendarEvent> dirtyEvents,
         IReadOnlyList<Event> remoteEvents,
         SyncConflictPolicy conflictPolicy,
-        bool isIncrementalDelta)
+        RemoteSyncMode remoteSyncMode)
     {
         var dirtyByGoogleId = dirtyEvents
             .Where(item => !string.IsNullOrWhiteSpace(item.GoogleEventId))
@@ -1064,11 +1087,6 @@ public sealed class GoogleCalendarSyncService
 
             if (dirtyByGoogleId.TryGetValue(remoteEvent.Id, out var dirtyLocal))
             {
-                if (!isIncrementalDelta)
-                {
-                    continue;
-                }
-
                 plannedLocalIds.Add(dirtyLocal.Id);
                 plan.Add(new SyncPlanItem(
                     conflictPolicy switch
@@ -1195,19 +1213,47 @@ public sealed class GoogleCalendarSyncService
             }
             while (!string.IsNullOrWhiteSpace(pageToken));
 
-            return new RemoteDelta(events, nextSyncToken, true, !string.IsNullOrWhiteSpace(syncToken));
+            return new RemoteDelta(
+                events,
+                nextSyncToken,
+                true,
+                string.IsNullOrWhiteSpace(syncToken) ? RemoteSyncMode.InitialFull : RemoteSyncMode.Incremental);
         }
         catch (GoogleApiException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.Gone)
         {
             failures.Add(CreatePullFailureDiagnostic(calendarId, syncToken, pageToken, ex, "SyncTokenExpired", "410 Gone: sync token was reset before retry."));
             await _repository.SaveSyncTokenAsync(calendarId, null);
-            return await LoadRemoteDeltaAsync(client, calendarId, null, failures, cancellationToken);
+            var recovery = await LoadRemoteDeltaAsync(client, calendarId, null, failures, cancellationToken);
+            return recovery with { Mode = RemoteSyncMode.RecoveryFull };
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             failures.Add(CreatePullFailureDiagnostic(calendarId, syncToken, pageToken, ex, "Pull", ex.Message));
-            return new RemoteDelta([], null, false, false);
+            return new RemoteDelta([], null, false, RemoteSyncMode.Incremental);
         }
+    }
+
+    private static async Task<IReadOnlyList<Event>> LoadRemoteEventsForDirtyAsync(
+        IGoogleCalendarClient client,
+        string calendarId,
+        IReadOnlyList<CalendarEvent> dirtyEvents,
+        ICollection<SyncFailureDiagnostic> failures,
+        CancellationToken cancellationToken)
+    {
+        var remoteEvents = new List<Event>();
+        foreach (var localEvent in dirtyEvents.Where(item => !string.IsNullOrWhiteSpace(item.GoogleEventId)))
+        {
+            try
+            {
+                remoteEvents.Add(await client.GetEventAsync(calendarId, localEvent.GoogleEventId!, cancellationToken));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && !IsNotFound(ex))
+            {
+                failures.Add(CreateFailureDiagnostic(localEvent, "LoadRemoteForDirty", ex));
+            }
+        }
+
+        return remoteEvents;
     }
 
     private async Task<SyncPullSummary> PullRemoteEventsAsync(
@@ -1519,12 +1565,17 @@ public sealed class GoogleCalendarSyncService
             }
             while (!string.IsNullOrWhiteSpace(pageToken));
 
-            return new RemoteDelta(events, null, true, !string.IsNullOrWhiteSpace(syncToken));
+            return new RemoteDelta(
+                events,
+                null,
+                true,
+                string.IsNullOrWhiteSpace(syncToken) ? RemoteSyncMode.InitialFull : RemoteSyncMode.Incremental);
         }
         catch (GoogleApiException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.Gone && !string.IsNullOrWhiteSpace(syncToken))
         {
             await _repository.SaveSyncTokenAsync(calendarId, null);
-            return await LoadRemoteChangesForPreviewAsync(client, calendarId, null, cancellationToken);
+            var recovery = await LoadRemoteChangesForPreviewAsync(client, calendarId, null, cancellationToken);
+            return recovery with { Mode = RemoteSyncMode.RecoveryFull };
         }
     }
 
@@ -1691,6 +1742,13 @@ internal enum SyncPlanAction
     SkipConflict
 }
 
+internal enum RemoteSyncMode
+{
+    InitialFull,
+    Incremental,
+    RecoveryFull
+}
+
 internal sealed record SyncPlanItem(
     SyncPlanAction Action,
     CalendarEvent? LocalEvent,
@@ -1706,7 +1764,7 @@ internal sealed record SyncPlanExecution(
     int Deleted,
     int Recreated);
 
-internal sealed record RemoteDelta(IReadOnlyList<Event> Events, string? NextSyncToken, bool Success, bool IsIncrementalDelta);
+internal sealed record RemoteDelta(IReadOnlyList<Event> Events, string? NextSyncToken, bool Success, RemoteSyncMode Mode);
 public sealed record GoogleReminderRefreshResult(int UpdatedExisting, int UpsertedMissing, int Skipped)
 {
     public int TotalAffected => UpdatedExisting + UpsertedMissing;
