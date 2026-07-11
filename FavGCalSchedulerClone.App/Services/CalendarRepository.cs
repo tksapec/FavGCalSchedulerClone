@@ -29,6 +29,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
                 recurring_event_id TEXT,
                 recurring_parent_id TEXT,
                 original_start TEXT,
+                original_start_utc_ticks INTEGER,
                 is_recurrence_exception INTEGER NOT NULL DEFAULT 0,
                 calendar_id TEXT NOT NULL,
                 title TEXT NOT NULL,
@@ -36,6 +37,8 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
                 location TEXT,
                 start TEXT NOT NULL,
                 end TEXT NOT NULL,
+                start_utc_ticks INTEGER,
+                end_utc_ticks INTEGER,
                 is_all_day INTEGER NOT NULL,
                 color_id TEXT,
                 reminder_minutes_before_start INTEGER,
@@ -45,6 +48,8 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
                 is_deleted INTEGER NOT NULL,
                 updated_at TEXT NOT NULL,
                 last_synced_at TEXT,
+                updated_at_utc_ticks INTEGER,
+                last_synced_at_utc_ticks INTEGER,
                 is_dirty INTEGER NOT NULL,
                 is_todo_like INTEGER NOT NULL,
                 dirty_fields TEXT,
@@ -53,13 +58,21 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
                 google_email_reminder_minutes_json TEXT
             );
             """);
-        await EnsureEventColumnsAsync(connection);
-        await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_events_dates ON events(start, end);");
-        await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_events_google ON events(calendar_id, google_event_id);");
-        await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_events_recurring_parent ON events(recurring_parent_id, original_start);");
-        await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_events_recurring_event ON events(recurring_event_id, original_start);");
-        await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_events_recurring_master_start ON events(start) WHERE recurrence_json IS NOT NULL AND is_recurrence_exception = 0;");
-        await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_events_exception_original_start ON events(original_start) WHERE is_recurrence_exception = 1;");
+        await using (var transaction = connection.BeginTransaction())
+        {
+            try
+            {
+                await EnsureEventColumnsAsync(connection, transaction);
+                await BackfillUtcTicksAsync(connection, transaction);
+                await CreateEventIndexesAsync(connection, transaction);
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+        }
         await ExecuteAsync(connection, "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);");
         await ExecuteAsync(connection, "CREATE TABLE IF NOT EXISTS tags (name TEXT PRIMARY KEY, color TEXT NOT NULL, is_visible INTEGER NOT NULL, priority INTEGER NOT NULL);");
         await SeedTagsAsync(connection);
@@ -161,31 +174,31 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
             WITH candidate_ids(id) AS (
                 SELECT id
                 FROM events
-                WHERE start < $end
-                  AND end > $start{deletedPredicate}
+                WHERE start_utc_ticks < $end_utc_ticks
+                  AND end_utc_ticks > $start_utc_ticks{deletedPredicate}
                 UNION
                 SELECT id
                 FROM events
                 WHERE recurrence_json IS NOT NULL
                   AND is_recurrence_exception = 0
-                  AND start < $end{deletedPredicate}
+                  AND start_utc_ticks < $end_utc_ticks{deletedPredicate}
                 UNION
                 SELECT id
                 FROM events
                 WHERE is_recurrence_exception = 1
-                  AND original_start IS NOT NULL
-                  AND original_start >= $start
-                  AND original_start < $end{deletedPredicate}
+                  AND original_start_utc_ticks IS NOT NULL
+                  AND original_start_utc_ticks >= $start_utc_ticks
+                  AND original_start_utc_ticks < $end_utc_ticks{deletedPredicate}
             )
             SELECT events.id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
                    calendar_id, title, description, location, start, end, is_all_day,
                    color_id, reminder_minutes_before_start, app_reminder_enabled, google_email_reminder_enabled, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields, google_reminder_metadata_json, app_reminder_minutes_json, google_email_reminder_minutes_json
             FROM events
             JOIN candidate_ids ON candidate_ids.id = events.id
-            ORDER BY events.start, events.title
+            ORDER BY events.start_utc_ticks, events.title
             """;
-        command.Parameters.AddWithValue("$start", start.ToString("O"));
-        command.Parameters.AddWithValue("$end", end.ToString("O"));
+        command.Parameters.AddWithValue("$start_utc_ticks", start.UtcTicks);
+        command.Parameters.AddWithValue("$end_utc_ticks", end.UtcTicks);
         return await ReadEventsAsync(command, cancellationToken);
     }
 
@@ -199,7 +212,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
                    color_id, reminder_minutes_before_start, app_reminder_enabled, google_email_reminder_enabled, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields, google_reminder_metadata_json, app_reminder_minutes_json, google_email_reminder_minutes_json
             FROM events
             WHERE is_todo_like = 1 AND is_deleted = 0
-            ORDER BY start, title
+            ORDER BY start_utc_ticks, title
             """;
         return await ReadEventsAsync(command);
     }
@@ -214,7 +227,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
                    color_id, reminder_minutes_before_start, app_reminder_enabled, google_email_reminder_enabled, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields, google_reminder_metadata_json, app_reminder_minutes_json, google_email_reminder_minutes_json
             FROM events
             WHERE is_dirty = 1
-            ORDER BY updated_at
+            ORDER BY updated_at_utc_ticks
             """;
         return await ReadEventsAsync(command);
     }
@@ -340,7 +353,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
             FROM events
             WHERE ($recurring_parent_id IS NOT NULL AND recurring_parent_id = $recurring_parent_id)
                OR ($recurring_event_id IS NOT NULL AND recurring_event_id = $recurring_event_id)
-            ORDER BY original_start, start
+            ORDER BY original_start_utc_ticks, start_utc_ticks
             """;
         command.Parameters.AddWithValue("$recurring_parent_id", (object?)recurringParentId ?? DBNull.Value);
         command.Parameters.AddWithValue("$recurring_event_id", (object?)recurringEventId ?? DBNull.Value);
@@ -386,7 +399,8 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
                 google_reminder_metadata_json = $google_reminder_metadata_json,
                 app_reminder_minutes_json = $app_reminder_minutes_json,
                 google_email_reminder_minutes_json = $google_email_reminder_minutes_json,
-                last_synced_at = $last_synced_at
+                last_synced_at = $last_synced_at,
+                last_synced_at_utc_ticks = $last_synced_at_utc_ticks
             WHERE id = $id
             """;
         var appReminderMinutes = CalendarEvent.NormalizeReminderMinutes(calendarEvent.EffectiveAppReminderMinutesBeforeStart);
@@ -401,7 +415,9 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
             : JsonSerializer.Serialize(calendarEvent.GoogleReminderMetadata));
         command.Parameters.AddWithValue("$app_reminder_minutes_json", SerializeReminderMinutes(appReminderMinutes));
         command.Parameters.AddWithValue("$google_email_reminder_minutes_json", SerializeReminderMinutes(googleEmailReminderMinutes));
-        command.Parameters.AddWithValue("$last_synced_at", DateTimeOffset.Now.ToString("O"));
+        var syncedAt = DateTimeOffset.Now;
+        command.Parameters.AddWithValue("$last_synced_at", syncedAt.ToString("O"));
+        command.Parameters.AddWithValue("$last_synced_at_utc_ticks", syncedAt.UtcTicks);
         await command.ExecuteNonQueryAsync();
     }
 
@@ -422,7 +438,8 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         await using var transaction = connection.BeginTransaction();
         try
         {
-            var now = DateTimeOffset.Now.ToString("O");
+            var syncedAt = DateTimeOffset.Now;
+            var now = syncedAt.ToString("O");
             for (var offset = 0; offset < idList.Length; offset += chunkSize)
             {
                 var chunk = idList.Skip(offset).Take(chunkSize).ToArray();
@@ -433,10 +450,12 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
                     UPDATE events
                     SET is_dirty = 0,
                         dirty_fields = NULL,
-                        last_synced_at = $last_synced_at
+                        last_synced_at = $last_synced_at,
+                        last_synced_at_utc_ticks = $last_synced_at_utc_ticks
                     WHERE id IN ({placeholders})
                     """;
                 command.Parameters.AddWithValue("$last_synced_at", now);
+                command.Parameters.AddWithValue("$last_synced_at_utc_ticks", syncedAt.UtcTicks);
                 for (var index = 0; index < chunk.Length; index++)
                 {
                     command.Parameters.AddWithValue($"$id{index}", chunk[index]);
@@ -529,13 +548,15 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         await using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT OR REPLACE INTO events(
-                id, google_event_id, recurring_event_id, recurring_parent_id, original_start, is_recurrence_exception,
+                id, google_event_id, recurring_event_id, recurring_parent_id, original_start, original_start_utc_ticks, is_recurrence_exception,
                 calendar_id, title, description, location, start, end, is_all_day,
-                color_id, reminder_minutes_before_start, app_reminder_enabled, google_email_reminder_enabled, recurrence_json, is_deleted, updated_at, last_synced_at, is_dirty, is_todo_like, dirty_fields, google_reminder_metadata_json, app_reminder_minutes_json, google_email_reminder_minutes_json)
+                start_utc_ticks, end_utc_ticks,
+                color_id, reminder_minutes_before_start, app_reminder_enabled, google_email_reminder_enabled, recurrence_json, is_deleted, updated_at, last_synced_at, updated_at_utc_ticks, last_synced_at_utc_ticks, is_dirty, is_todo_like, dirty_fields, google_reminder_metadata_json, app_reminder_minutes_json, google_email_reminder_minutes_json)
             VALUES(
-                $id, $google_event_id, $recurring_event_id, $recurring_parent_id, $original_start, $is_recurrence_exception,
+                $id, $google_event_id, $recurring_event_id, $recurring_parent_id, $original_start, $original_start_utc_ticks, $is_recurrence_exception,
                 $calendar_id, $title, $description, $location, $start, $end, $is_all_day,
-                $color_id, $reminder_minutes_before_start, $app_reminder_enabled, $google_email_reminder_enabled, $recurrence_json, $is_deleted, $updated_at, $last_synced_at, $is_dirty, $is_todo_like, $dirty_fields, $google_reminder_metadata_json, $app_reminder_minutes_json, $google_email_reminder_minutes_json)
+                $start_utc_ticks, $end_utc_ticks,
+                $color_id, $reminder_minutes_before_start, $app_reminder_enabled, $google_email_reminder_enabled, $recurrence_json, $is_deleted, $updated_at, $last_synced_at, $updated_at_utc_ticks, $last_synced_at_utc_ticks, $is_dirty, $is_todo_like, $dirty_fields, $google_reminder_metadata_json, $app_reminder_minutes_json, $google_email_reminder_minutes_json)
             """;
         AddEventParameters(command, calendarEvent);
         await command.ExecuteNonQueryAsync();
@@ -590,6 +611,14 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
     private static async Task ExecuteAsync(SqliteConnection connection, string sql)
     {
         await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async Task ExecuteAsync(SqliteConnection connection, SqliteTransaction transaction, string sql)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = sql;
         await command.ExecuteNonQueryAsync();
     }
@@ -659,6 +688,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         command.Parameters.AddWithValue("$recurring_event_id", (object?)calendarEvent.RecurringEventId ?? DBNull.Value);
         command.Parameters.AddWithValue("$recurring_parent_id", (object?)calendarEvent.RecurringParentId ?? DBNull.Value);
         command.Parameters.AddWithValue("$original_start", calendarEvent.OriginalStart?.ToString("O") ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$original_start_utc_ticks", calendarEvent.OriginalStart?.UtcTicks ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$is_recurrence_exception", calendarEvent.IsRecurrenceException ? 1 : 0);
         command.Parameters.AddWithValue("$calendar_id", calendarEvent.CalendarId);
         command.Parameters.AddWithValue("$title", calendarEvent.Title);
@@ -666,6 +696,8 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         command.Parameters.AddWithValue("$location", (object?)calendarEvent.Location ?? DBNull.Value);
         command.Parameters.AddWithValue("$start", calendarEvent.Start.ToString("O"));
         command.Parameters.AddWithValue("$end", calendarEvent.End.ToString("O"));
+        command.Parameters.AddWithValue("$start_utc_ticks", calendarEvent.Start.UtcTicks);
+        command.Parameters.AddWithValue("$end_utc_ticks", calendarEvent.End.UtcTicks);
         command.Parameters.AddWithValue("$is_all_day", calendarEvent.IsAllDay ? 1 : 0);
         command.Parameters.AddWithValue("$color_id", (object?)calendarEvent.ColorId ?? DBNull.Value);
         command.Parameters.AddWithValue("$reminder_minutes_before_start", appReminderMinutes.Count == 0 ? DBNull.Value : appReminderMinutes[0]);
@@ -675,6 +707,8 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         command.Parameters.AddWithValue("$is_deleted", calendarEvent.IsDeleted ? 1 : 0);
         command.Parameters.AddWithValue("$updated_at", calendarEvent.UpdatedAt.ToString("O"));
         command.Parameters.AddWithValue("$last_synced_at", calendarEvent.LastSyncedAt?.ToString("O") ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$updated_at_utc_ticks", calendarEvent.UpdatedAt.UtcTicks);
+        command.Parameters.AddWithValue("$last_synced_at_utc_ticks", calendarEvent.LastSyncedAt?.UtcTicks ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$is_dirty", calendarEvent.IsDirty ? 1 : 0);
         command.Parameters.AddWithValue("$is_todo_like", calendarEvent.IsTodoLike ? 1 : 0);
         command.Parameters.AddWithValue("$dirty_fields", (object?)calendarEvent.DirtyFields ?? DBNull.Value);
@@ -685,19 +719,91 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         command.Parameters.AddWithValue("$google_email_reminder_minutes_json", SerializeReminderMinutes(googleEmailReminderMinutes));
     }
 
-    private static async Task EnsureEventColumnsAsync(SqliteConnection connection)
+    private static async Task EnsureEventColumnsAsync(SqliteConnection connection, SqliteTransaction transaction)
     {
-        await EnsureColumnAsync(connection, "events", "recurring_event_id", "TEXT");
-        await EnsureColumnAsync(connection, "events", "recurring_parent_id", "TEXT");
-        await EnsureColumnAsync(connection, "events", "original_start", "TEXT");
-        await EnsureColumnAsync(connection, "events", "is_recurrence_exception", "INTEGER NOT NULL DEFAULT 0");
-        await EnsureColumnAsync(connection, "events", "reminder_minutes_before_start", "INTEGER");
-        await EnsureColumnAsync(connection, "events", "app_reminder_enabled", "INTEGER");
-        await EnsureColumnAsync(connection, "events", "google_email_reminder_enabled", "INTEGER");
-        await EnsureColumnAsync(connection, "events", "dirty_fields", "TEXT");
-        await EnsureColumnAsync(connection, "events", "google_reminder_metadata_json", "TEXT");
-        await EnsureColumnAsync(connection, "events", "app_reminder_minutes_json", "TEXT");
-        await EnsureColumnAsync(connection, "events", "google_email_reminder_minutes_json", "TEXT");
+        await EnsureColumnAsync(connection, transaction, "events", "recurring_event_id", "TEXT");
+        await EnsureColumnAsync(connection, transaction, "events", "recurring_parent_id", "TEXT");
+        await EnsureColumnAsync(connection, transaction, "events", "original_start", "TEXT");
+        await EnsureColumnAsync(connection, transaction, "events", "original_start_utc_ticks", "INTEGER");
+        await EnsureColumnAsync(connection, transaction, "events", "is_recurrence_exception", "INTEGER NOT NULL DEFAULT 0");
+        await EnsureColumnAsync(connection, transaction, "events", "reminder_minutes_before_start", "INTEGER");
+        await EnsureColumnAsync(connection, transaction, "events", "app_reminder_enabled", "INTEGER");
+        await EnsureColumnAsync(connection, transaction, "events", "google_email_reminder_enabled", "INTEGER");
+        await EnsureColumnAsync(connection, transaction, "events", "dirty_fields", "TEXT");
+        await EnsureColumnAsync(connection, transaction, "events", "google_reminder_metadata_json", "TEXT");
+        await EnsureColumnAsync(connection, transaction, "events", "app_reminder_minutes_json", "TEXT");
+        await EnsureColumnAsync(connection, transaction, "events", "google_email_reminder_minutes_json", "TEXT");
+        await EnsureColumnAsync(connection, transaction, "events", "start_utc_ticks", "INTEGER");
+        await EnsureColumnAsync(connection, transaction, "events", "end_utc_ticks", "INTEGER");
+        await EnsureColumnAsync(connection, transaction, "events", "updated_at_utc_ticks", "INTEGER");
+        await EnsureColumnAsync(connection, transaction, "events", "last_synced_at_utc_ticks", "INTEGER");
+    }
+
+    private static async Task BackfillUtcTicksAsync(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        var rows = new List<(string Id, string Start, string End, string? OriginalStart, string UpdatedAt, string? LastSyncedAt)>();
+        await using (var select = connection.CreateCommand())
+        {
+            select.Transaction = transaction;
+            select.CommandText = """
+                SELECT id, start, end, original_start, updated_at, last_synced_at
+                FROM events
+                WHERE start_utc_ticks IS NULL
+                   OR end_utc_ticks IS NULL
+                   OR updated_at_utc_ticks IS NULL
+                   OR (original_start IS NOT NULL AND original_start_utc_ticks IS NULL)
+                   OR (last_synced_at IS NOT NULL AND last_synced_at_utc_ticks IS NULL)
+                """;
+            await using var reader = await select.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                rows.Add((
+                    reader.GetString(0),
+                    reader.GetString(1),
+                    reader.GetString(2),
+                    reader.IsDBNull(3) ? null : reader.GetString(3),
+                    reader.GetString(4),
+                    reader.IsDBNull(5) ? null : reader.GetString(5)));
+            }
+        }
+
+        foreach (var row in rows)
+        {
+            await using var update = connection.CreateCommand();
+            update.Transaction = transaction;
+            update.CommandText = """
+                UPDATE events
+                SET start_utc_ticks = $start_utc_ticks,
+                    end_utc_ticks = $end_utc_ticks,
+                    original_start_utc_ticks = $original_start_utc_ticks,
+                    updated_at_utc_ticks = $updated_at_utc_ticks,
+                    last_synced_at_utc_ticks = $last_synced_at_utc_ticks
+                WHERE id = $id
+                """;
+            update.Parameters.AddWithValue("$id", row.Id);
+            update.Parameters.AddWithValue("$start_utc_ticks", ParseDateTimeOffset(row.Start).UtcTicks);
+            update.Parameters.AddWithValue("$end_utc_ticks", ParseDateTimeOffset(row.End).UtcTicks);
+            update.Parameters.AddWithValue("$original_start_utc_ticks", row.OriginalStart is null ? DBNull.Value : ParseDateTimeOffset(row.OriginalStart).UtcTicks);
+            update.Parameters.AddWithValue("$updated_at_utc_ticks", ParseDateTimeOffset(row.UpdatedAt).UtcTicks);
+            update.Parameters.AddWithValue("$last_synced_at_utc_ticks", row.LastSyncedAt is null ? DBNull.Value : ParseDateTimeOffset(row.LastSyncedAt).UtcTicks);
+            await update.ExecuteNonQueryAsync();
+        }
+    }
+
+    private static async Task CreateEventIndexesAsync(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        await ExecuteAsync(connection, transaction, "CREATE INDEX IF NOT EXISTS ix_events_dates ON events(start, end);");
+        await ExecuteAsync(connection, transaction, "CREATE INDEX IF NOT EXISTS ix_events_utc_dates ON events(start_utc_ticks, end_utc_ticks);");
+        await ExecuteAsync(connection, transaction, "CREATE INDEX IF NOT EXISTS ix_events_google ON events(calendar_id, google_event_id);");
+        await ExecuteAsync(connection, transaction, "CREATE INDEX IF NOT EXISTS ix_events_recurring_parent ON events(recurring_parent_id, original_start);");
+        await ExecuteAsync(connection, transaction, "CREATE INDEX IF NOT EXISTS ix_events_utc_recurring_parent ON events(recurring_parent_id, original_start_utc_ticks);");
+        await ExecuteAsync(connection, transaction, "CREATE INDEX IF NOT EXISTS ix_events_recurring_event ON events(recurring_event_id, original_start);");
+        await ExecuteAsync(connection, transaction, "CREATE INDEX IF NOT EXISTS ix_events_utc_recurring_event ON events(recurring_event_id, original_start_utc_ticks);");
+        await ExecuteAsync(connection, transaction, "CREATE INDEX IF NOT EXISTS ix_events_recurring_master_start ON events(start) WHERE recurrence_json IS NOT NULL AND is_recurrence_exception = 0;");
+        await ExecuteAsync(connection, transaction, "CREATE INDEX IF NOT EXISTS ix_events_utc_recurring_master_start ON events(start_utc_ticks) WHERE recurrence_json IS NOT NULL AND is_recurrence_exception = 0;");
+        await ExecuteAsync(connection, transaction, "CREATE INDEX IF NOT EXISTS ix_events_exception_original_start ON events(original_start) WHERE is_recurrence_exception = 1;");
+        await ExecuteAsync(connection, transaction, "CREATE INDEX IF NOT EXISTS ix_events_utc_exception_original_start ON events(original_start_utc_ticks) WHERE is_recurrence_exception = 1;");
+        await ExecuteAsync(connection, transaction, "CREATE INDEX IF NOT EXISTS ix_events_utc_dirty_updated ON events(updated_at_utc_ticks) WHERE is_dirty = 1;");
     }
 
     private static bool HasGooglePopupReminder(GoogleReminderMetadata? metadata)
@@ -748,9 +854,10 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         }
     }
 
-    private static async Task EnsureColumnAsync(SqliteConnection connection, string tableName, string columnName, string sqlDefinition)
+    private static async Task EnsureColumnAsync(SqliteConnection connection, SqliteTransaction transaction, string tableName, string columnName, string sqlDefinition)
     {
         await using var pragma = connection.CreateCommand();
+        pragma.Transaction = transaction;
         pragma.CommandText = $"PRAGMA table_info({tableName})";
         await using var reader = await pragma.ExecuteReaderAsync();
         while (await reader.ReadAsync())
@@ -761,6 +868,6 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
             }
         }
 
-        await ExecuteAsync(connection, $"ALTER TABLE {tableName} ADD COLUMN {columnName} {sqlDefinition};");
+        await ExecuteAsync(connection, transaction, $"ALTER TABLE {tableName} ADD COLUMN {columnName} {sqlDefinition};");
     }
 }

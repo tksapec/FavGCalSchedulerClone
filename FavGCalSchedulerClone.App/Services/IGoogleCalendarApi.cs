@@ -28,6 +28,16 @@ public interface IGoogleCalendarClient
         CancellationToken cancellationToken = default);
 }
 
+internal interface IConditionalGoogleCalendarClient : IGoogleCalendarClient
+{
+    Task<Event> UpdateEventAsync(
+        string calendarId,
+        string eventId,
+        Event googleEvent,
+        CancellationToken cancellationToken,
+        string? ifMatchETag);
+}
+
 public sealed record GoogleEventListRequest(
     string CalendarId,
     string? SyncToken,
