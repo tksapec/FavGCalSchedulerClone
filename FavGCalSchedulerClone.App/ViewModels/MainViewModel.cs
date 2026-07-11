@@ -20,7 +20,10 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly BackupService _backupService;
     private readonly CalendarCsvService _csvService;
     private readonly FavGCalSchedulerImportService _favGCalImportService;
+    private readonly IAppLogger? _logger;
     private readonly UndoService _undoService = new();
+    private readonly BulkObservableCollection<CalendarDay> _calendarDays = [];
+    private readonly BulkObservableCollection<CalendarDay> _visibleCalendarDays = [];
     private IReadOnlyList<CalendarEvent> _storedEvents = [];
     private IReadOnlyList<CalendarEvent> _visibleEvents = [];
     private IReadOnlyList<CalendarEvent> _dayDirectiveEvents = [];
@@ -56,6 +59,7 @@ public sealed partial class MainViewModel : ObservableObject
     private DateTime? _navigationAnchorDate;
     private readonly object _calendarCacheLock = new();
     private readonly Dictionary<CalendarCacheKey, CalendarRefreshSnapshot> _calendarCache = [];
+    private CalendarDataWindow? _calendarDataWindow;
     private long _calendarDataVersion;
     private IReadOnlyDictionary<string, EventDisplayColors> _eventColorPalette = TagService.DefaultEventColorPalette;
     private IReadOnlyList<string> _scheduleTitleHistory = [];
@@ -87,7 +91,7 @@ public sealed partial class MainViewModel : ObservableObject
     private TodoQuickFilter _todoQuickFilter = TodoQuickFilter.All;
 
     public MainViewModel(CalendarRepository repository, GoogleCalendarSyncService syncService)
-        : this(repository, syncService, new BackupService(), new CalendarCsvService(), new FavGCalSchedulerImportService(repository))
+        : this(repository, syncService, new BackupService(), new CalendarCsvService(), new FavGCalSchedulerImportService(repository), null)
     {
     }
 
@@ -96,13 +100,15 @@ public sealed partial class MainViewModel : ObservableObject
         GoogleCalendarSyncService syncService,
         BackupService backupService,
         CalendarCsvService csvService,
-        FavGCalSchedulerImportService favGCalImportService)
+        FavGCalSchedulerImportService favGCalImportService,
+        IAppLogger? logger = null)
     {
         _repository = repository;
         _syncService = syncService;
         _backupService = backupService;
         _csvService = csvService;
         _favGCalImportService = favGCalImportService;
+        _logger = logger;
 
         PreviousMonthCommand = new RelayCommand(() => NavigatePrimary(-1));
         NextMonthCommand = new RelayCommand(() => NavigatePrimary(1));
@@ -160,8 +166,8 @@ public sealed partial class MainViewModel : ObservableObject
         return Task.CompletedTask;
     }
 
-    public ObservableCollection<CalendarDay> CalendarDays { get; } = [];
-    public ObservableCollection<CalendarDay> VisibleCalendarDays { get; } = [];
+    public ObservableCollection<CalendarDay> CalendarDays => _calendarDays;
+    public ObservableCollection<CalendarDay> VisibleCalendarDays => _visibleCalendarDays;
     public ObservableCollection<CalendarEvent> SelectedDayEvents { get; } = [];
     public ObservableCollection<CalendarEvent> SevenDayEvents { get; } = [];
     public ObservableCollection<CalendarEvent> TodoEvents { get; } = [];
@@ -622,6 +628,15 @@ internal sealed record CalendarSnapshotBuildContext(
     IReadOnlySet<string> VisibleCalendarIds,
     IReadOnlyDictionary<string, string> CalendarNames,
     IReadOnlyDictionary<string, EventDisplayColors> EventColorPalette);
+
+internal sealed record CalendarDataWindow(
+    DateTime RangeStart,
+    DateTime RangeEnd,
+    bool WeekStartsOnMonday,
+    long DataVersion,
+    IReadOnlyList<CalendarEvent> StoredEvents,
+    IReadOnlyList<CalendarEvent> ExpandedEvents,
+    IReadOnlyDictionary<DateTime, IReadOnlyList<CalendarEvent>> EventsByDate);
 
 internal sealed record CalendarRefreshSnapshot(
     DateTime Month,

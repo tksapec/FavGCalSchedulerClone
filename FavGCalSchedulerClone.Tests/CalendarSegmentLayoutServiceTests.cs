@@ -135,6 +135,26 @@ public sealed class CalendarSegmentLayoutServiceTests
     }
 
     [Theory]
+    [InlineData(5, 5, 2)]
+    [InlineData(6, 6, 1)]
+    [InlineData(7, 7, 0)]
+    public void PopulateSegments_ReportsOnlyEventsThatDoNotFitInMeasuredLanes(
+        int laneCapacity,
+        int expectedVisible,
+        int expectedHidden)
+    {
+        var days = CreateDays(new DateTime(2026, 5, 10), 7);
+        var events = Enumerable.Range(0, 7)
+            .Select(index => Event($"Event {index}", new DateTime(2026, 5, 11), new DateTime(2026, 5, 12)))
+            .ToArray();
+
+        var result = CalendarSegmentLayoutService.PopulateSegments(days, events, laneCapacity);
+
+        Assert.Equal(expectedVisible, result.GetDay(days[1].Date).VisibleEventCount);
+        Assert.Equal(expectedHidden, result.GetDay(days[1].Date).HiddenEventCount);
+    }
+
+    [Theory]
     [InlineData(0)]
     [InlineData(1)]
     public void PopulateSegments_ClampsLaneCapacityToTwo(int requestedCapacity)

@@ -123,10 +123,13 @@ public sealed class MainViewModelViewModeTests
         viewModel.NavigationRefreshDelay = TimeSpan.FromMilliseconds(200);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         viewModel.BeforeSaveDisplayMonth = _ => saveCount++;
-        viewModel.BeforeLoadCalendarSnapshotAsync = (_, token) =>
+        viewModel.BeforeBuildCalendarSnapshot = (month, token) =>
         {
-            loadCount++;
-            return release.Task.WaitAsync(token);
+            if (month == baseline.AddMonths(3))
+            {
+                loadCount++;
+                release.Task.Wait(token);
+            }
         };
 
         viewModel.NextMonthCommand.Execute(null);
@@ -159,18 +162,11 @@ public sealed class MainViewModelViewModeTests
     {
         var viewModel = await CreateViewModelAsync();
         var baseline = new DateTime(2026, 5, 15);
-        var loadCount = 0;
         viewModel.NavigationRefreshDelay = TimeSpan.FromMilliseconds(200);
-        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         viewModel.CurrentMonth = baseline;
         await Task.Delay(50);
         viewModel.SelectedDay = viewModel.CalendarDays.First(day => day.Date == baseline);
-        viewModel.BeforeLoadCalendarSnapshotAsync = (_, token) =>
-        {
-            loadCount++;
-            return release.Task.WaitAsync(token);
-        };
 
         viewModel.CurrentViewMode = CalendarViewMode.Week;
         viewModel.NextMonthCommand.Execute(null);
@@ -180,10 +176,8 @@ public sealed class MainViewModelViewModeTests
         viewModel.CurrentViewMode = CalendarViewMode.Day;
         viewModel.NextMonthCommand.Execute(null);
         Assert.Equal(baseline.AddDays(15).Date, viewModel.SelectedDay?.Date);
-        Assert.Equal(0, loadCount);
 
-        release.SetResult();
-        await WaitUntilAsync(() => loadCount >= 1);
+        await Task.Delay(viewModel.NavigationRefreshDelay + TimeSpan.FromMilliseconds(100));
         await WaitUntilAsync(() => viewModel.SelectedDay?.Date == baseline.AddDays(15).Date);
     }
 
@@ -199,12 +193,12 @@ public sealed class MainViewModelViewModeTests
         viewModel.NavigationRefreshDelay = TimeSpan.Zero;
         var firstLoadStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseFirstLoad = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        viewModel.BeforeLoadCalendarSnapshotAsync = async (month, token) =>
+        viewModel.BeforeBuildCalendarSnapshot = (month, token) =>
         {
             if (month.Year == firstTarget.Year && month.Month == firstTarget.Month)
             {
                 firstLoadStarted.TrySetResult();
-                await releaseFirstLoad.Task.WaitAsync(token);
+                releaseFirstLoad.Task.Wait(token);
             }
         };
 
@@ -299,6 +293,22 @@ public sealed class MainViewModelViewModeTests
         viewModel.PreviousMonthCommand.Execute(null);
 
         Assert.True(viewModel.CalendarCacheCount >= cachedCount);
+    }
+
+    [Fact]
+    public async Task Navigation_ReusesCalendarDataWindowForNearbyMonths()
+    {
+        var viewModel = await CreateViewModelAsync();
+        var databaseLoads = 0;
+        viewModel.BeforeLoadCalendarSnapshotAsync = (_, _) =>
+        {
+            databaseLoads++;
+            return Task.CompletedTask;
+        };
+
+        await viewModel.NavigateToDateAsync(viewModel.CurrentMonth.AddMonths(6));
+
+        Assert.Equal(0, databaseLoads);
     }
 
     [Fact]
