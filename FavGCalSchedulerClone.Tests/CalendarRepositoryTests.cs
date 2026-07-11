@@ -93,6 +93,80 @@ public sealed class CalendarRepositoryTests
     }
 
     [Fact]
+    public async Task InitializeAsync_MigratesMixedOffsetLegacyRowsAndUsesUtcTicksForDirtyAndSeriesOrdering()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var earlierInstantWithLaterText = new DateTimeOffset(2026, 5, 1, 9, 0, 0, TimeSpan.FromHours(9));
+        var laterInstantWithEarlierText = new DateTimeOffset(2026, 5, 1, 1, 0, 0, TimeSpan.Zero);
+        await CreateOldSchemaAsync(dbPath, "utc-first", earlierInstantWithLaterText, earlierInstantWithLaterText.AddHours(1), earlierInstantWithLaterText);
+        await CreateOldSchemaAsync(dbPath, "utc-second", laterInstantWithEarlierText, laterInstantWithEarlierText.AddHours(1), laterInstantWithEarlierText);
+
+        await using (var connection = OpenTestConnection(dbPath))
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                UPDATE events
+                SET is_dirty = 1,
+                    updated_at = CASE id
+                        WHEN 'utc-first' THEN $earlier_updated_at
+                        ELSE $later_updated_at
+                    END,
+                    recurring_parent_id = 'series-parent',
+                    recurring_event_id = 'series-google'
+                """;
+            command.Parameters.AddWithValue("$earlier_updated_at", earlierInstantWithLaterText.ToString("O"));
+            command.Parameters.AddWithValue("$later_updated_at", laterInstantWithEarlierText.ToString("O"));
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+
+        Assert.Equal(["utc-first", "utc-second"], (await repository.LoadDirtyEventsAsync()).Select(item => item.Id));
+        Assert.Equal(["utc-first", "utc-second"], (await repository.LoadSeriesEventsAsync("series-parent", "series-google")).Select(item => item.Id));
+    }
+
+    [Fact]
+    public async Task MarkSyncedMethods_WriteMatchingLegacyTextAndUtcTicks()
+    {
+        var repository = await CreateRepositoryAsync();
+        await repository.SaveEventAsync(DirtyEvent("mark-one", "Mark one"));
+        await repository.SaveEventAsync(DirtyEvent("mark-two", "Mark two"));
+        await repository.SaveEventAsync(DirtyEvent("mark-three", "Mark three"));
+
+        var markOne = await repository.FindEventByIdAsync("mark-one");
+        Assert.NotNull(markOne);
+        await repository.MarkSyncedAsync(markOne!);
+        await repository.MarkSyncedByIdsAsync(["mark-two", "mark-three"]);
+
+        await using var connection = OpenTestConnection(repository.DatabasePath);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, last_synced_at, last_synced_at_utc_ticks
+            FROM events
+            WHERE id IN ('mark-one', 'mark-two', 'mark-three')
+            ORDER BY id
+            """;
+        await using var reader = await command.ExecuteReaderAsync();
+        var stored = new List<(string Id, string Text, long UtcTicks)>();
+        while (await reader.ReadAsync())
+        {
+            stored.Add((reader.GetString(0), reader.GetString(1), reader.GetInt64(2)));
+        }
+
+        Assert.Equal(3, stored.Count);
+        foreach (var syncTimestamp in stored)
+        {
+            var parsed = DateTimeOffset.Parse(syncTimestamp.Text);
+            Assert.Equal(parsed.ToString("O"), syncTimestamp.Text);
+            Assert.Equal(parsed.UtcTicks, syncTimestamp.UtcTicks);
+        }
+
+        Assert.Equal(stored[1].Text, stored[2].Text);
+        Assert.Equal(stored[1].UtcTicks, stored[2].UtcTicks);
+    }
+
+    [Fact]
     public async Task InitializeAsync_RollsBackUtcTickMigrationWhenLegacyTimestampIsInvalid()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
