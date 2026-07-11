@@ -51,7 +51,7 @@ public sealed class GoogleCalendarApi : IGoogleCalendarApi
         return new GoogleCalendarClient(service);
     }
 
-    private sealed class GoogleCalendarClient : IGoogleCalendarClient
+    private sealed class GoogleCalendarClient : IConditionalGoogleCalendarClient
     {
         private readonly CalendarService _service;
 
@@ -80,6 +80,11 @@ public sealed class GoogleCalendarApi : IGoogleCalendarApi
         public async Task<Event> InsertEventAsync(string calendarId, Event googleEvent, CancellationToken cancellationToken = default)
         {
             return await _service.Events.Insert(googleEvent, calendarId).ExecuteAsync(cancellationToken);
+        }
+
+        public Task<Event> UpdateEventAsync(string calendarId, string eventId, Event googleEvent, CancellationToken cancellationToken = default)
+        {
+            return UpdateEventAsync(calendarId, eventId, googleEvent, cancellationToken, null);
         }
 
         public async Task<Event> UpdateEventAsync(

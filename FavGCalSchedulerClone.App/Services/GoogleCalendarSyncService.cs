@@ -305,11 +305,8 @@ public sealed class GoogleCalendarSyncService
                 var googleEvent = await client.GetEventAsync(localEvent.CalendarId, localEvent.GoogleEventId, cancellationToken);
                 if (string.Equals(googleEvent.Status, "cancelled", StringComparison.OrdinalIgnoreCase))
                 {
-                    await _repository.UpsertSyncedEventAsync(GoogleEventMapper.FromGoogleEvent(
-                        googleEvent,
-                        localEvent.CalendarId,
-                        GetDefaultReminders(reminderDefaults, localEvent.CalendarId),
-                        settings.AdoptGoogleEmailRemindersAsLocalNotifications));
+                    localEvent.IsDeleted = true;
+                    await _repository.UpsertSyncedEventAsync(localEvent);
                     restored++;
                     continue;
                 }
@@ -784,12 +781,12 @@ public sealed class GoogleCalendarSyncService
             return SyncPushOutcome.DeletedEvent;
         }
 
-        var googleEvent = GoogleEventMapper.ToGoogleEvent(localEvent);
-        localEvent.GoogleReminderMetadata = GoogleEventMapper.FromGoogleEvent(googleEvent, calendarId).GoogleReminderMetadata;
+        var localPayload = GoogleEventMapper.ToGoogleEvent(localEvent);
+        localEvent.GoogleReminderMetadata = GoogleEventMapper.FromGoogleEvent(localPayload, calendarId).GoogleReminderMetadata;
         Debug.WriteLine($"Push event Title={localEvent.Title} Description={localEvent.Description} Location={localEvent.Location} Start={localEvent.Start:O} End={localEvent.End:O} GoogleEventId={localEvent.GoogleEventId} CalendarId={calendarId} IsDirty={localEvent.IsDirty} DirtyFields={localEvent.DirtyFields}");
         if (string.IsNullOrWhiteSpace(localEvent.GoogleEventId))
         {
-            var inserted = await client.InsertEventAsync(calendarId, googleEvent, cancellationToken);
+            var inserted = await client.InsertEventAsync(calendarId, localPayload, cancellationToken);
             await _repository.MarkSyncedAsync(localEvent, inserted.Id);
             return SyncPushOutcome.Pushed;
         }
@@ -797,16 +794,15 @@ public sealed class GoogleCalendarSyncService
         try
         {
             var remoteEvent = await client.GetEventAsync(calendarId, localEvent.GoogleEventId, cancellationToken);
-            ApplyAppOwnedFields(remoteEvent, googleEvent, includeOriginalStartTime: false);
-            googleEvent = remoteEvent;
-            await client.UpdateEventAsync(calendarId, localEvent.GoogleEventId, googleEvent, cancellationToken, remoteEvent.ETag);
+            ApplyAppOwnedFields(remoteEvent, localPayload, includeOriginalStartTime: false);
+            await UpdateEventAsync(client, calendarId, localEvent.GoogleEventId, remoteEvent, remoteEvent.ETag, cancellationToken);
             await _repository.MarkSyncedAsync(localEvent);
             Debug.WriteLine($"Push update succeeded and marked synced: {localEvent.Id}");
             return SyncPushOutcome.Pushed;
         }
-        catch (GoogleApiException ex) when (IsNotFound(ex))
+        catch (Exception ex) when (IsNotFound(ex))
         {
-            var inserted = await client.InsertEventAsync(calendarId, googleEvent, cancellationToken);
+            var inserted = await client.InsertEventAsync(calendarId, localPayload, cancellationToken);
             await _repository.MarkSyncedAsync(localEvent, inserted.Id);
             return SyncPushOutcome.RecreatedEvent;
         }
@@ -827,6 +823,19 @@ public sealed class GoogleCalendarSyncService
         {
             destination.OriginalStartTime = source.OriginalStartTime;
         }
+    }
+
+    private static Task<Event> UpdateEventAsync(
+        IGoogleCalendarClient client,
+        string calendarId,
+        string eventId,
+        Event googleEvent,
+        string? etag,
+        CancellationToken cancellationToken)
+    {
+        return client is IConditionalGoogleCalendarClient conditionalClient
+            ? conditionalClient.UpdateEventAsync(calendarId, eventId, googleEvent, cancellationToken, etag)
+            : client.UpdateEventAsync(calendarId, eventId, googleEvent, cancellationToken);
     }
 
     private async Task<SyncPushOutcome> PushRecurrenceExceptionAsync(IGoogleCalendarClient client, string calendarId, CalendarEvent localEvent, CancellationToken cancellationToken)
@@ -869,7 +878,7 @@ public sealed class GoogleCalendarSyncService
             var remoteEvent = await client.GetEventAsync(calendarId, remoteEventId, cancellationToken);
             ApplyAppOwnedFields(remoteEvent, GoogleEventMapper.ToGoogleEvent(localEvent), includeOriginalStartTime: true);
             localEvent.GoogleReminderMetadata = GoogleEventMapper.FromGoogleEvent(remoteEvent, calendarId).GoogleReminderMetadata;
-            await client.UpdateEventAsync(calendarId, remoteEventId, remoteEvent, cancellationToken, remoteEvent.ETag);
+            await UpdateEventAsync(client, calendarId, remoteEventId, remoteEvent, remoteEvent.ETag, cancellationToken);
             await _repository.MarkSyncedAsync(localEvent, remoteEventId);
             return SyncPushOutcome.Pushed;
         }
@@ -883,9 +892,10 @@ public sealed class GoogleCalendarSyncService
         }
     }
 
-    private static bool IsNotFound(GoogleApiException ex)
+    private static bool IsNotFound(Exception ex)
     {
-        return ex.HttpStatusCode == System.Net.HttpStatusCode.NotFound;
+        return ex is GoogleApiException { HttpStatusCode: System.Net.HttpStatusCode.NotFound }
+            || ex is KeyNotFoundException;
     }
 
     private static async Task<Event?> FindExactRemoteMatchAsync(

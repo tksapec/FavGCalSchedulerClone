@@ -14,12 +14,7 @@ public interface IGoogleCalendarClient
 {
     Task<IReadOnlyList<GoogleCalendarInfo>> ListCalendarsAsync(CancellationToken cancellationToken = default);
     Task<Event> InsertEventAsync(string calendarId, Event googleEvent, CancellationToken cancellationToken = default);
-    Task<Event> UpdateEventAsync(
-        string calendarId,
-        string eventId,
-        Event googleEvent,
-        CancellationToken cancellationToken = default,
-        string? ifMatchETag = null);
+    Task<Event> UpdateEventAsync(string calendarId, string eventId, Event googleEvent, CancellationToken cancellationToken = default);
     Task DeleteEventAsync(string calendarId, string eventId, CancellationToken cancellationToken = default);
     Task<Event> GetEventAsync(string calendarId, string eventId, CancellationToken cancellationToken = default);
     Task<GoogleEventPage> ListEventsAsync(GoogleEventListRequest request, CancellationToken cancellationToken = default);
@@ -31,6 +26,16 @@ public interface IGoogleCalendarClient
         bool showDeleted,
         int maxResults,
         CancellationToken cancellationToken = default);
+}
+
+internal interface IConditionalGoogleCalendarClient : IGoogleCalendarClient
+{
+    Task<Event> UpdateEventAsync(
+        string calendarId,
+        string eventId,
+        Event googleEvent,
+        CancellationToken cancellationToken,
+        string? ifMatchETag);
 }
 
 public sealed record GoogleEventListRequest(

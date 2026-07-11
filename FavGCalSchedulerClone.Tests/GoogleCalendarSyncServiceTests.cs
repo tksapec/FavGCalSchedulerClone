@@ -691,6 +691,42 @@ public sealed class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncAsync_UpdateNotFoundAfterSuccessfulGetRecreatesUsingLocalPayload()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi { ThrowOnUpdateNotFound = true };
+        var settings = CreateSettings("work");
+        var local = new CalendarEvent
+        {
+            CalendarId = "work",
+            GoogleEventId = "remote-disappeared",
+            Title = "local replacement",
+            Description = "local description",
+            Start = new DateTimeOffset(2026, 7, 4, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 7, 4, 10, 0, 0, TimeSpan.Zero),
+            IsDirty = true
+        };
+        await repository.SaveEventAsync(local);
+        api.UpsertRemote("work", new Event
+        {
+            Id = "remote-disappeared",
+            Summary = "stale remote title",
+            Description = "stale remote description",
+            Start = DateTimeEvent(2026, 7, 4, 9),
+            End = DateTimeEvent(2026, 7, 4, 10),
+            Status = "confirmed"
+        });
+        var service = new GoogleCalendarSyncService(repository, api);
+
+        var result = await service.SyncAsync(settings);
+
+        Assert.Equal(1, result.Recreated);
+        var recreated = Assert.Single(api.EventsByCalendar["work"].Values, item => item.Id != "remote-disappeared");
+        Assert.Equal("local replacement", recreated.Summary);
+        Assert.Equal("local description", recreated.Description);
+    }
+
+    [Fact]
     public async Task SyncDirtyEventsAsync_PushesOnlySelectedDirtyLocalIds()
     {
         var repository = await CreateRepositoryAsync();
@@ -1442,6 +1478,40 @@ public sealed class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task DiscardLocalChangesAsync_SparseCancelledNormalEventPreservesLocalFields()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        var settings = CreateSettings("work");
+        var start = new DateTimeOffset(2026, 7, 5, 9, 0, 0, TimeSpan.Zero);
+        var local = new CalendarEvent
+        {
+            CalendarId = "work",
+            GoogleEventId = "remote-sparse-cancelled",
+            Title = "keep local title",
+            Description = "keep local description",
+            Location = "keep local location",
+            Start = start,
+            End = start.AddHours(1),
+            IsDirty = true
+        };
+        await repository.SaveEventAsync(local);
+        api.UpsertRemote("work", new Event { Id = "remote-sparse-cancelled", Status = "cancelled" });
+        var service = new GoogleCalendarSyncService(repository, api);
+
+        await service.DiscardLocalChangesAsync(settings, new HashSet<string>(StringComparer.Ordinal) { local.Id });
+
+        var stored = await repository.FindEventByIdAsync(local.Id);
+        Assert.NotNull(stored);
+        Assert.True(stored!.IsDeleted);
+        Assert.False(stored.IsDirty);
+        Assert.Equal("keep local title", stored.Title);
+        Assert.Equal("keep local description", stored.Description);
+        Assert.Equal("keep local location", stored.Location);
+        Assert.Equal(start, stored.Start);
+    }
+
+    [Fact]
     public async Task DiscardLocalChangesAsync_PreservesFailureDiagnosticsForUnselectedDirtyItems()
     {
         var repository = await CreateRepositoryAsync();
@@ -1747,7 +1817,7 @@ public sealed class GoogleCalendarSyncServiceTests
         return new EventDateTime { DateTimeDateTimeOffset = new DateTimeOffset(year, month, day, hour, 0, 0, TimeSpan.Zero) };
     }
 
-    private sealed class FakeGoogleCalendarApi : IGoogleCalendarApi, IGoogleCalendarClient
+    private sealed class FakeGoogleCalendarApi : IGoogleCalendarApi, IConditionalGoogleCalendarClient
     {
         private int _nextId = 1;
 
@@ -1758,6 +1828,7 @@ public sealed class GoogleCalendarSyncServiceTests
         public HashSet<string> FailedInsertTitles { get; } = new(StringComparer.Ordinal);
         public bool ThrowOnInsert { get; set; }
         public bool ThrowOnUpdate { get; set; }
+        public bool ThrowOnUpdateNotFound { get; set; }
         public bool ThrowOnConditionalUpdate { get; set; }
         public bool ThrowOnList { get; set; }
         public TaskCompletionSource? ListStarted { get; set; }
@@ -1807,8 +1878,19 @@ public sealed class GoogleCalendarSyncServiceTests
             return Task.FromResult(Clone(copy));
         }
 
-        public Task<Event> UpdateEventAsync(string calendarId, string eventId, Event googleEvent, CancellationToken cancellationToken = default, string? ifMatchETag = null)
+        public Task<Event> UpdateEventAsync(string calendarId, string eventId, Event googleEvent, CancellationToken cancellationToken = default)
         {
+            return UpdateEventAsync(calendarId, eventId, googleEvent, cancellationToken, null);
+        }
+
+        public Task<Event> UpdateEventAsync(string calendarId, string eventId, Event googleEvent, CancellationToken cancellationToken, string? ifMatchETag)
+        {
+            if (ThrowOnUpdateNotFound)
+            {
+                Calendar(calendarId).Remove(eventId);
+                throw new KeyNotFoundException(eventId);
+            }
+
             if (ThrowOnConditionalUpdate && !string.IsNullOrWhiteSpace(ifMatchETag))
             {
                 throw new InvalidOperationException("conditional update conflict");
