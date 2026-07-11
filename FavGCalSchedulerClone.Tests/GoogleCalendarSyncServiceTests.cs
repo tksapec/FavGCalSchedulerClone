@@ -424,10 +424,10 @@ public sealed class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
-    public async Task PreviewAsync_PreferLocalConflictShowsPushWithoutRemotePull()
+    public async Task PreviewAsync_PreferLocalConflictUsesPlannedRemoteSnapshotForFieldDiffs()
     {
         var repository = await CreateRepositoryAsync();
-        var api = new FakeGoogleCalendarApi();
+        var api = new FakeGoogleCalendarApi { ThrowOnGet = true };
         var settings = CreateSettings("work");
         settings.SyncConflictPolicy = SyncConflictPolicy.PreferLocal;
         var local = new CalendarEvent
@@ -454,7 +454,12 @@ public sealed class GoogleCalendarSyncServiceTests
 
         var preview = await service.PreviewAsync(settings);
 
-        Assert.Contains(preview.PushItems, item => item.LocalId == local.Id);
+        var push = Assert.Single(preview.PushItems, item => item.LocalId == local.Id);
+        Assert.NotNull(push.FieldDiffs);
+        var titleDiff = Assert.Single(push.FieldDiffs!, diff => diff.FieldName == "Title");
+        Assert.True(titleDiff.IsDifferent);
+        Assert.Equal("Local title", titleDiff.LocalValue);
+        Assert.Equal("Google title", titleDiff.GoogleValue);
         Assert.DoesNotContain(preview.PullItems, item => item.GoogleEventId == local.GoogleEventId);
     }
 

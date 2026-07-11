@@ -542,13 +542,19 @@ public sealed class GoogleCalendarSyncService
                 }
 
                 var item = ToPreviewItem(calendarId, localEvent, localEvent.IsDeleted ? "delete" : "push", localEvent.IsDeleted ? "Googleから削除予定" : "Googleへ送信予定");
-                var remoteForDiff = await TryLoadRemoteForPreviewAsync(
-                    client,
-                    calendarId,
-                    localEvent,
-                    reminderDefaults,
-                    settings.AdoptGoogleEmailRemindersAsLocalNotifications,
-                    cancellationToken);
+                var remoteForDiff = planItem.RemoteEvent is { } plannedRemoteEvent
+                    ? GoogleEventMapper.FromGoogleEvent(
+                        plannedRemoteEvent,
+                        calendarId,
+                        GetDefaultReminders(reminderDefaults, calendarId),
+                        settings.AdoptGoogleEmailRemindersAsLocalNotifications)
+                    : await TryLoadRemoteForPreviewAsync(
+                        client,
+                        calendarId,
+                        localEvent,
+                        reminderDefaults,
+                        settings.AdoptGoogleEmailRemindersAsLocalNotifications,
+                        cancellationToken);
                 item = item with { FieldDiffs = remoteForDiff is null ? [] : BuildFieldDiffs(localEvent, remoteForDiff, "LocalToGoogle") };
 
                 if (localEvent.IsDeleted)
