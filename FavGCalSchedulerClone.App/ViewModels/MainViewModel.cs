@@ -23,6 +23,7 @@ public sealed partial class MainViewModel : ObservableObject
     private IReadOnlyList<CalendarEvent> _storedEvents = [];
     private IReadOnlyList<CalendarEvent> _visibleEvents = [];
     private IReadOnlyList<CalendarEvent> _dayDirectiveEvents = [];
+    private int _monthLaneCapacity = CalendarSegmentLayoutService.MaxLanes;
     private AppSettings _settings = new();
     private DateTime _currentMonth = new(DateTime.Today.Year, DateTime.Today.Month, 1);
     private CalendarDay? _selectedDay;
@@ -303,6 +304,11 @@ public sealed partial class MainViewModel : ObservableObject
                 OnPropertyChanged(nameof(NextMonthLabel));
                 OnPropertyChanged(nameof(NextYearLabel));
                 RefreshVisibleCalendarDays();
+                if (value == CalendarViewMode.Month && CalendarDays.Count > 0)
+                {
+                    ApplySegmentLayout(CalendarDays, _monthLaneCapacity);
+                    UpdateSegmentSelection();
+                }
             }
         }
     }

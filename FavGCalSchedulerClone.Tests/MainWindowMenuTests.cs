@@ -154,6 +154,19 @@ public sealed partial class MainWindowMenuTests
     }
 
     [Fact]
+    public async Task MainWindow_DebouncesMeasuredMonthLaneUpdates()
+    {
+        var codeBehindPath = Path.ChangeExtension(MainWindowXamlPath, ".xaml.cs");
+        var codeBehind = await File.ReadAllTextAsync(codeBehindPath);
+
+        Assert.Contains("SizeChanged += MainWindow_SizeChanged", codeBehind);
+        Assert.Contains("LayoutUpdated += MainWindow_LayoutUpdated", codeBehind);
+        Assert.Contains("TimeSpan.FromMilliseconds(150)", codeBehind);
+        Assert.Contains("DayList.ActualHeight", codeBehind);
+        Assert.Contains("_viewModel.UpdateMonthLaneCapacity", codeBehind);
+    }
+
+    [Fact]
     public async Task DayCell_WeekendTriggersOverrideOutsideMonthTrigger()
     {
         var xaml = await File.ReadAllTextAsync(MainWindowXamlPath);

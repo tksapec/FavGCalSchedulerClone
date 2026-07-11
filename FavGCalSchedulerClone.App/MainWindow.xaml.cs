@@ -20,6 +20,8 @@ public partial class MainWindow : Window
     private readonly ReminderNotificationService _reminderService;
     private readonly IAppLogger? _logger;
     private readonly DispatcherTimer _operationalStatusTimer;
+    private readonly DispatcherTimer _monthLaneCapacityTimer;
+    private int? _lastMeasuredMonthLaneCapacity;
     private MediaPlayer? _previewSoundPlayer;
     private bool _exitRequested;
     private Point? _dragStartPoint;
@@ -35,6 +37,10 @@ public partial class MainWindow : Window
         _logger = logger;
         _operationalStatusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         _operationalStatusTimer.Tick += async (_, _) => await RefreshOperationalStatusAsync();
+        _monthLaneCapacityTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
+        _monthLaneCapacityTimer.Tick += MonthLaneCapacityTimer_Tick;
+        SizeChanged += MainWindow_SizeChanged;
+        LayoutUpdated += MainWindow_LayoutUpdated;
         DataContext = _viewModel;
         _viewModel.SetManualSyncPreviewConfirmation(preview => Task.FromResult(SyncDialogs.ShowPreview(this, preview) == true));
         _viewModel.SetWindowCommandHandlers(
@@ -58,6 +64,49 @@ public partial class MainWindow : Window
             ShowMonthJumpDialogAsync);
         CustomizeMainUi();
     }
+
+    private void MainWindow_SizeChanged(object sender, SizeChangedEventArgs e) => ScheduleMonthLaneCapacityUpdate();
+
+    private void MainWindow_LayoutUpdated(object? sender, EventArgs e) => ScheduleMonthLaneCapacityUpdate();
+
+    private void ScheduleMonthLaneCapacityUpdate()
+    {
+        if (!_viewModel.IsMonthView || DayList.ActualHeight <= 0)
+        {
+            return;
+        }
+
+        var capacity = CalculateMeasuredMonthLaneCapacity();
+        if (_lastMeasuredMonthLaneCapacity == capacity)
+        {
+            _monthLaneCapacityTimer.Stop();
+            return;
+        }
+
+        _monthLaneCapacityTimer.Stop();
+        _monthLaneCapacityTimer.Start();
+    }
+
+    private void MonthLaneCapacityTimer_Tick(object? sender, EventArgs e)
+    {
+        _monthLaneCapacityTimer.Stop();
+        if (!_viewModel.IsMonthView || DayList.ActualHeight <= 0)
+        {
+            return;
+        }
+
+        var capacity = CalculateMeasuredMonthLaneCapacity();
+        if (_lastMeasuredMonthLaneCapacity == capacity)
+        {
+            return;
+        }
+
+        _lastMeasuredMonthLaneCapacity = capacity;
+        _viewModel.UpdateMonthLaneCapacity(capacity);
+    }
+
+    private int CalculateMeasuredMonthLaneCapacity() =>
+        MonthLaneCapacityCalculator.Calculate(DayList.ActualHeight / 6, _viewModel.CalendarLabelFontSize);
 
     private void CustomizeMainUi()
     {
@@ -223,6 +272,7 @@ public partial class MainWindow : Window
             _reminderService.Stop();
             _reminderService.Dispose();
             _operationalStatusTimer.Stop();
+            _monthLaneCapacityTimer.Stop();
             StopPreviewSound();
             return;
         }

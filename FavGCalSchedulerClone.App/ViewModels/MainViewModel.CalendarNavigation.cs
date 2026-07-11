@@ -56,6 +56,20 @@ public sealed partial class MainViewModel
         SelectedEvent = segment.Event;
     }
 
+    public bool UpdateMonthLaneCapacity(int capacity)
+    {
+        var normalizedCapacity = Math.Max(CalendarSegmentLayoutService.MinimumLanes, capacity);
+        if (!IsMonthView || normalizedCapacity == _monthLaneCapacity)
+        {
+            return false;
+        }
+
+        _monthLaneCapacity = normalizedCapacity;
+        ApplySegmentLayout(CalendarDays, _monthLaneCapacity);
+        UpdateSegmentSelection();
+        return true;
+    }
+
     public async Task<bool> MoveEventAsync(
         CalendarEvent calendarEvent,
         DateTime sourceSegmentDate,
@@ -322,19 +336,7 @@ public sealed partial class MainViewModel
             day.IsHoliday = TagService.HasHolidayWithoutWorkdayOverride(_dayDirectiveEvents, date);
         }
 
-        var layoutResult = CalendarSegmentLayoutService.PopulateSegments(CalendarDays, _visibleEvents);
-        index = 0;
-        for (var date = snapshot.GridStart; date < snapshot.GridEnd; date = date.AddDays(1), index++)
-        {
-            var day = CalendarDays[index];
-            var layoutDay = layoutResult.GetDay(date);
-            foreach (var calendarEvent in layoutDay.VisibleEvents)
-            {
-                day.Events.Add(calendarEvent);
-            }
-
-            day.HiddenEventCount = layoutDay.HiddenEventCount;
-        }
+        ApplySegmentLayout(CalendarDays, IsMonthView ? _monthLaneCapacity : CalendarSegmentLayoutService.MaxLanes);
 
         CalendarDay? selectedDay;
         DateTime? visibleAnchorDate;
@@ -712,16 +714,25 @@ public sealed partial class MainViewModel
             IsHoliday = TagService.HasHolidayWithoutWorkdayOverride(events, date)
         };
 
-        var layoutResult = CalendarSegmentLayoutService.PopulateSegments([day], _visibleEvents);
-        var layoutDay = layoutResult.GetDay(date);
-        foreach (var calendarEvent in layoutDay.VisibleEvents)
-        {
-            day.Events.Add(calendarEvent);
-        }
-
-        day.HiddenEventCount = layoutDay.HiddenEventCount;
+        ApplySegmentLayout([day], IsMonthView ? _monthLaneCapacity : CalendarSegmentLayoutService.MaxLanes);
 
         return day;
+    }
+
+    private void ApplySegmentLayout(IReadOnlyList<CalendarDay> days, int laneCapacity)
+    {
+        var layoutResult = CalendarSegmentLayoutService.PopulateSegments(days, _visibleEvents, laneCapacity);
+        foreach (var day in days)
+        {
+            day.Events.Clear();
+            var layoutDay = layoutResult.GetDay(day.Date);
+            foreach (var calendarEvent in layoutDay.VisibleEvents)
+            {
+                day.Events.Add(calendarEvent);
+            }
+
+            day.HiddenEventCount = layoutDay.HiddenEventCount;
+        }
     }
 
     private void SetCurrentMonthWithoutRefreshing(DateTime value)

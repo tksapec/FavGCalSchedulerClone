@@ -431,6 +431,23 @@ public sealed class MainViewModelViewModeTests
     }
 
     [Fact]
+    public async Task UpdateMonthLaneCapacity_RelayoutsCachedSnapshotWithoutReloadingEvents()
+    {
+        var date = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1).AddDays(12);
+        var viewModel = await CreateViewModelAsync(Enumerable.Range(0, 8).Select(index => CreateEvent($"lane {index}", date)));
+        var day = viewModel.CalendarDays.Single(item => item.Date == date);
+        var originalSegments = day.Segments.ToArray();
+
+        Assert.True(viewModel.UpdateMonthLaneCapacity(2));
+        Assert.Equal(2, day.Events.Count);
+        Assert.Equal(6, day.HiddenEventCount);
+        Assert.Equal(2, day.Segments.Count(segment => segment.IsVisible));
+        Assert.False(viewModel.UpdateMonthLaneCapacity(2));
+        Assert.Equal(2, day.Segments.Count(segment => segment.IsVisible));
+        Assert.DoesNotContain(day.Segments, segment => originalSegments.Contains(segment));
+    }
+
+    [Fact]
     public async Task MainWindowMonthTemplate_ShowsHiddenEventCount()
     {
         var xamlPath = Path.GetFullPath(Path.Combine(
