@@ -386,6 +386,114 @@ public sealed class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncAsync_PreferLocalUsesPlannedRemoteEventAndPreservesRemoteOwnedFields()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi { ThrowOnGet = true };
+        var settings = CreateSettings("work");
+        settings.SyncConflictPolicy = SyncConflictPolicy.PreferLocal;
+        var local = new CalendarEvent
+        {
+            Id = "prefer-local-planned",
+            CalendarId = "work",
+            GoogleEventId = "prefer-local-remote",
+            Title = "Local title",
+            Start = new DateTimeOffset(2026, 7, 2, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 7, 2, 10, 0, 0, TimeSpan.Zero),
+            IsDirty = true
+        };
+        await repository.SaveEventAsync(local);
+        await repository.SaveSyncTokenAsync("work", "old-token");
+        api.UpsertRemote("work", new Event
+        {
+            Id = local.GoogleEventId,
+            Summary = "Google title",
+            Start = DateTimeEvent(2026, 7, 2, 9),
+            End = DateTimeEvent(2026, 7, 2, 10),
+            Status = "confirmed",
+            Attendees = [new EventAttendee { Email = "guest@example.test" }]
+        });
+        var service = new GoogleCalendarSyncService(repository, api);
+
+        var result = await service.SyncAsync(settings);
+
+        Assert.Equal(0, result.Failed);
+        var remote = api.EventsByCalendar["work"][local.GoogleEventId];
+        Assert.Equal("Local title", remote.Summary);
+        Assert.Contains(remote.Attendees!, attendee => attendee.Email == "guest@example.test");
+    }
+
+    [Fact]
+    public async Task PreviewAsync_PreferLocalConflictShowsPushWithoutRemotePull()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        var settings = CreateSettings("work");
+        settings.SyncConflictPolicy = SyncConflictPolicy.PreferLocal;
+        var local = new CalendarEvent
+        {
+            Id = "prefer-local-preview",
+            CalendarId = "work",
+            GoogleEventId = "prefer-local-preview-remote",
+            Title = "Local title",
+            Start = new DateTimeOffset(2026, 7, 3, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 7, 3, 10, 0, 0, TimeSpan.Zero),
+            IsDirty = true
+        };
+        await repository.SaveEventAsync(local);
+        await repository.SaveSyncTokenAsync("work", "old-token");
+        api.UpsertRemote("work", new Event
+        {
+            Id = local.GoogleEventId,
+            Summary = "Google title",
+            Start = DateTimeEvent(2026, 7, 3, 9),
+            End = DateTimeEvent(2026, 7, 3, 10),
+            Status = "confirmed"
+        });
+        var service = new GoogleCalendarSyncService(repository, api);
+
+        var preview = await service.PreviewAsync(settings);
+
+        Assert.Contains(preview.PushItems, item => item.LocalId == local.Id);
+        Assert.DoesNotContain(preview.PullItems, item => item.GoogleEventId == local.GoogleEventId);
+    }
+
+    [Fact]
+    public async Task SyncAsync_FailedPlannedItemRetainsPriorSyncToken()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi { ThrowOnUpdate = true };
+        var settings = CreateSettings("work");
+        settings.SyncConflictPolicy = SyncConflictPolicy.PreferLocal;
+        var local = new CalendarEvent
+        {
+            Id = "failed-planned-item",
+            CalendarId = "work",
+            GoogleEventId = "failed-planned-remote",
+            Title = "Local title",
+            Start = new DateTimeOffset(2026, 7, 4, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 7, 4, 10, 0, 0, TimeSpan.Zero),
+            IsDirty = true
+        };
+        await repository.SaveEventAsync(local);
+        await repository.SaveSyncTokenAsync("work", "old-token");
+        api.UpsertRemote("work", new Event
+        {
+            Id = local.GoogleEventId,
+            Summary = "Google title",
+            Start = DateTimeEvent(2026, 7, 4, 9),
+            End = DateTimeEvent(2026, 7, 4, 10),
+            Status = "confirmed"
+        });
+        var service = new GoogleCalendarSyncService(repository, api);
+
+        var result = await service.SyncAsync(settings);
+
+        Assert.Equal(1, result.Failed);
+        Assert.Equal("old-token", await repository.GetSyncTokenAsync("work"));
+    }
+
+    [Fact]
     public async Task SyncAsync_KeepsDirtyLocalChangesWhenPushOrPullFails()
     {
         var repository = await CreateRepositoryAsync();
@@ -1885,6 +1993,7 @@ public sealed class GoogleCalendarSyncServiceTests
         public bool ThrowOnUpdate { get; set; }
         public bool ThrowOnUpdateNotFound { get; set; }
         public bool ThrowOnConditionalUpdate { get; set; }
+        public bool ThrowOnGet { get; set; }
         public bool ThrowOnList { get; set; }
         public TaskCompletionSource? ListStarted { get; set; }
         public TaskCompletionSource? ContinueList { get; set; }
@@ -1973,6 +2082,11 @@ public sealed class GoogleCalendarSyncServiceTests
 
         public Task<Event> GetEventAsync(string calendarId, string eventId, CancellationToken cancellationToken = default)
         {
+            if (ThrowOnGet)
+            {
+                throw new InvalidOperationException("get failed");
+            }
+
             if (!Calendar(calendarId).TryGetValue(eventId, out var googleEvent))
             {
                 throw new KeyNotFoundException(eventId);

@@ -586,11 +586,11 @@ public sealed class GoogleCalendarSyncService
                             FieldDiffs = BuildFieldDiffs(local, remoteEvent, "Conflict")
                         };
                     }
-                    else if (remoteEvent.IsDeleted)
+                    else if (planItem?.Action == SyncPlanAction.PullRemote && remoteEvent.IsDeleted)
                     {
                         deleteItems.Add(item with { Kind = "remote-delete", Detail = "Google側削除を反映予定" });
                     }
-                    else
+                    else if (planItem?.Action == SyncPlanAction.PullRemote)
                     {
                         pullItems.Add(item);
                     }
@@ -806,7 +806,12 @@ public sealed class GoogleCalendarSyncService
         }
     }
 
-    private async Task<SyncPushOutcome> PushNormalEventAsync(IGoogleCalendarClient client, string calendarId, CalendarEvent localEvent, CancellationToken cancellationToken)
+    private async Task<SyncPushOutcome> PushNormalEventAsync(
+        IGoogleCalendarClient client,
+        string calendarId,
+        CalendarEvent localEvent,
+        CancellationToken cancellationToken,
+        Event? plannedRemoteEvent = null)
     {
         if (localEvent.IsDeleted)
         {
@@ -839,7 +844,7 @@ public sealed class GoogleCalendarSyncService
 
         try
         {
-            var remoteEvent = await client.GetEventAsync(calendarId, localEvent.GoogleEventId, cancellationToken);
+            var remoteEvent = plannedRemoteEvent ?? await client.GetEventAsync(calendarId, localEvent.GoogleEventId, cancellationToken);
             ApplyAppOwnedFields(remoteEvent, localPayload, includeOriginalStartTime: false);
             await UpdateEventAsync(client, calendarId, localEvent.GoogleEventId, remoteEvent, remoteEvent.ETag, cancellationToken);
             await _repository.MarkSyncedAsync(localEvent);
@@ -884,7 +889,12 @@ public sealed class GoogleCalendarSyncService
             : client.UpdateEventAsync(calendarId, eventId, googleEvent, cancellationToken);
     }
 
-    private async Task<SyncPushOutcome> PushRecurrenceExceptionAsync(IGoogleCalendarClient client, string calendarId, CalendarEvent localEvent, CancellationToken cancellationToken)
+    private async Task<SyncPushOutcome> PushRecurrenceExceptionAsync(
+        IGoogleCalendarClient client,
+        string calendarId,
+        CalendarEvent localEvent,
+        CancellationToken cancellationToken,
+        Event? plannedRemoteEvent = null)
     {
         var recurringEventId = await ResolveRecurringEventIdAsync(localEvent);
         if (string.IsNullOrWhiteSpace(recurringEventId))
@@ -921,7 +931,7 @@ public sealed class GoogleCalendarSyncService
 
         try
         {
-            var remoteEvent = await client.GetEventAsync(calendarId, remoteEventId, cancellationToken);
+            var remoteEvent = plannedRemoteEvent ?? await client.GetEventAsync(calendarId, remoteEventId, cancellationToken);
             ApplyAppOwnedFields(remoteEvent, GoogleEventMapper.ToGoogleEvent(localEvent), includeOriginalStartTime: true);
             localEvent.GoogleReminderMetadata = GoogleEventMapper.FromGoogleEvent(remoteEvent, calendarId).GoogleReminderMetadata;
             await UpdateEventAsync(client, calendarId, remoteEventId, remoteEvent, remoteEvent.ETag, cancellationToken);
@@ -1127,8 +1137,8 @@ public sealed class GoogleCalendarSyncService
                     var localEvent = item.LocalEvent!;
                     var operation = GetPushOperation(localEvent);
                     var outcome = await TryPushEventAsync(localEvent, operation, failures, () => localEvent.IsRecurrenceException
-                        ? PushRecurrenceExceptionAsync(client, calendarId, localEvent, cancellationToken)
-                        : PushNormalEventAsync(client, calendarId, localEvent, cancellationToken), _logger);
+                        ? PushRecurrenceExceptionAsync(client, calendarId, localEvent, cancellationToken, item.RemoteEvent)
+                        : PushNormalEventAsync(client, calendarId, localEvent, cancellationToken, item.RemoteEvent), _logger);
                     if (!outcome.Success)
                     {
                         failed++;

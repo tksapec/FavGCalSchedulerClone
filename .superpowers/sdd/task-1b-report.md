@@ -22,3 +22,19 @@ Result: clean (Git reported only normal LF-to-CRLF working-tree notices).
 ## Note
 
 The existing no-token bootstrap behavior continues to prefer dirty local writes for matching remote events, preserving established create/update behavior. Conflict policy execution applies to incremental remote deltas, where a remote change is known to have occurred after the stored sync token.
+
+## Review follow-up (2026-07-11)
+
+- Prefer-local planned pushes now pass the already fetched `SyncPlanItem.RemoteEvent` into the normal and recurrence-exception push paths. `ApplyAppOwnedFields` mutates that fetched event before the conditional update, retaining Google-owned fields without a second `GetEventAsync` request.
+- Preview now adds remote delete/pull rows only when the planner action is `PullRemote`; a prefer-local conflict therefore appears as a push and not a contradictory pull.
+- Added regressions for planned-event reuse plus remote-owned attendee preservation, prefer-local preview rendering, and preserving the prior sync token after a planned update failure.
+
+## Review follow-up verification
+
+`dotnet test .\FavGCalSchedulerClone.Tests\FavGCalSchedulerClone.Tests.csproj --filter "FullyQualifiedName~GoogleCalendarSyncServiceTests"`
+
+Result: 62 passed, 0 failed.
+
+`git diff --check`
+
+Result: clean (Git reported only normal LF-to-CRLF working-tree notices).
