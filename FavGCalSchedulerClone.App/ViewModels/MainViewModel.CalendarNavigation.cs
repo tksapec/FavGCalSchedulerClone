@@ -620,7 +620,7 @@ public sealed partial class MainViewModel
                 await beforeSaveDisplayMonthAsync(month).ConfigureAwait(false);
             }
 
-            await _repository.SaveSettingsAsync(_settings).ConfigureAwait(false);
+            await PersistSettingsAsync().ConfigureAwait(false);
             _logger?.LogInfo($"DisplayMonth persisted: {month:yyyy-MM}");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

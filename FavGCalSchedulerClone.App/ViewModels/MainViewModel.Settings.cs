@@ -32,11 +32,13 @@ public sealed partial class MainViewModel
 
     public async Task SaveApplicationSettingsAsync(AppSettings settings)
     {
+        var displayMonth = _settings.DisplayMonth;
         _settings = AppSettingsNormalizer.Normalize(settings);
+        _settings.DisplayMonth = displayMonth;
         SelectedTabIndex = _settings.StartupTabIndex;
         SelectedTodoTabIndex = _settings.StartupTodoTabIndex;
         CurrentViewMode = _settings.StartupCalendarViewMode;
-        await _repository.SaveSettingsAsync(_settings);
+        await PersistSettingsAsync();
 
         foreach (var propertyName in new[]
         {
@@ -84,7 +86,7 @@ public sealed partial class MainViewModel
     {
         OAuthClientJsonPath = path;
         _settings.OAuthClientJsonPath = string.IsNullOrWhiteSpace(path) ? null : path.Trim();
-        await _repository.SaveSettingsAsync(_settings);
+        await PersistSettingsAsync();
         await ReloadAvailableCalendarsAsync();
     }
 
@@ -147,7 +149,7 @@ public sealed partial class MainViewModel
         {
             OAuthClientJsonPath = dialog.FileName;
             _settings.OAuthClientJsonPath = dialog.FileName;
-            await _repository.SaveSettingsAsync(_settings);
+            await PersistSettingsAsync();
             await ReloadAvailableCalendarsAsync();
             Status = "OAuth client JSONを保存しました。";
         }
@@ -181,7 +183,21 @@ public sealed partial class MainViewModel
         _settings.OAuthClientJsonPath = string.IsNullOrWhiteSpace(OAuthClientJsonPath) ? null : OAuthClientJsonPath.Trim();
         _settings.VisibleCalendarIds = AvailableCalendars.Where(item => item.IsSelected).Select(item => item.Id).ToList();
         _settings.ActiveCalendarId = ResolveEditorCalendarId();
-        await _repository.SaveSettingsAsync(_settings);
+        await PersistSettingsAsync();
+    }
+
+    private async Task PersistSettingsAsync()
+    {
+        await _settingsPersistenceGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            var snapshot = JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(_settings)) ?? new AppSettings();
+            await _repository.SaveSettingsAsync(snapshot).ConfigureAwait(false);
+        }
+        finally
+        {
+            _settingsPersistenceGate.Release();
+        }
     }
 
     private static IReadOnlyList<string> DeserializeHistory(string? json)

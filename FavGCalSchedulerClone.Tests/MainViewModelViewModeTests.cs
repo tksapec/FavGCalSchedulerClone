@@ -182,6 +182,38 @@ public sealed class MainViewModelViewModeTests
     }
 
     [Fact]
+    public async Task DisplayMonthPersistence_PreservesLatestMonthWhenInteractiveSettingsSaveUsesStaleSnapshot()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        await viewModel.InitializeAsync();
+        var staleSettings = viewModel.CreateSettingsSnapshot();
+        staleSettings.WindowOpacity = 123;
+        var saveStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDisplayMonthSave = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        viewModel.BeforeSaveDisplayMonthAsync = async _ =>
+        {
+            saveStarted.SetResult();
+            await releaseDisplayMonthSave.Task.ConfigureAwait(false);
+        };
+
+        var expectedMonth = viewModel.CurrentMonth.AddMonths(1);
+        viewModel.NextMonthCommand.Execute(null);
+        await saveStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        var interactiveSave = viewModel.SaveApplicationSettingsAsync(staleSettings);
+        releaseDisplayMonthSave.SetResult();
+        await interactiveSave;
+        await Task.Delay(100);
+
+        var persisted = await repository.LoadSettingsAsync();
+        Assert.Equal(expectedMonth, persisted.DisplayMonth);
+        Assert.Equal(123, persisted.WindowOpacity);
+    }
+
+    [Fact]
     public async Task FlushDisplayMonthPersistenceAsync_CompletesWhenInflightSaveStartedOnBlockedSynchronizationContext()
     {
         var viewModel = await CreateViewModelAsync();

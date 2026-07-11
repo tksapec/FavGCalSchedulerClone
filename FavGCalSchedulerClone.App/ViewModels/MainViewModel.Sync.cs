@@ -196,7 +196,7 @@ public sealed partial class MainViewModel
                 _settings.LastAutomaticSyncAt = finishedAt;
             }
 
-            await _repository.SaveSettingsAsync(_settings);
+            await PersistSettingsAsync();
             Status = "カレンダー再読み込み中...";
             var remaining = (await _repository.LoadDirtyEventsAsync()).Count;
             try

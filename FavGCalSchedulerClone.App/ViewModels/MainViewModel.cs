@@ -58,6 +58,7 @@ public sealed partial class MainViewModel : ObservableObject
     private CancellationTokenSource? _calendarRefreshCts;
     private CancellationTokenSource? _deferredCalendarRefreshCts;
     private readonly SemaphoreSlim _displayMonthPersistenceGate = new(1, 1);
+    private readonly SemaphoreSlim _settingsPersistenceGate = new(1, 1);
     private CancellationTokenSource? _displayMonthPersistenceCts;
     private long _displayMonthPersistenceVersion;
     private CalendarCacheKey? _lastAppliedCalendarSnapshotKey;

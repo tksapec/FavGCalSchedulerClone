@@ -109,7 +109,7 @@ public sealed partial class MainViewModel
 
         try
         {
-            await _repository.SaveSettingsAsync(_settings);
+            await PersistSettingsAsync();
         }
         catch (Exception ex)
         {
