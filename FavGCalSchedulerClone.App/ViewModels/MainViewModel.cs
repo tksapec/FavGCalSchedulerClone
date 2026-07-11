@@ -57,6 +57,11 @@ public sealed partial class MainViewModel : ObservableObject
     private int _refreshGeneration;
     private CancellationTokenSource? _calendarRefreshCts;
     private CancellationTokenSource? _deferredCalendarRefreshCts;
+    private readonly SemaphoreSlim _displayMonthPersistenceGate = new(1, 1);
+    private CancellationTokenSource? _displayMonthPersistenceCts;
+    private long _displayMonthPersistenceVersion;
+    private CalendarCacheKey? _lastAppliedCalendarSnapshotKey;
+    private CalendarRefreshSnapshot? _lastAppliedCalendarSnapshot;
     private DateTime? _navigationAnchorDate;
     private readonly object _calendarCacheLock = new();
     private readonly Dictionary<CalendarCacheKey, CalendarRefreshSnapshot> _calendarCache = [];
@@ -225,6 +230,7 @@ public sealed partial class MainViewModel : ObservableObject
     internal Func<DateTime, CancellationToken, Task>? BeforeLoadCalendarSnapshotAsync { get; set; }
     internal Action<DateTime, CancellationToken>? BeforeBuildCalendarSnapshot { get; set; }
     internal Action<DateTime>? BeforeSaveDisplayMonth { get; set; }
+    internal Action<CalendarRefreshSnapshot>? BeforeApplyCalendarSnapshot { get; set; }
     internal Action? BeforeRefreshTodos { get; set; }
     internal TimeSpan NavigationRefreshDelay { get; set; } = TimeSpan.FromMilliseconds(10);
     internal int CalendarCacheCount
@@ -291,6 +297,7 @@ public sealed partial class MainViewModel : ObservableObject
             {
                 OnPropertyChanged(nameof(MonthTitle));
                 OnPropertyChanged(nameof(JapaneseMonthTitle));
+                ScheduleDisplayMonthPersistence(_currentMonth);
                 ShowImmediateCalendarShellForMonth(_currentMonth);
                 ScheduleCalendarRefreshAfterNavigation();
             }

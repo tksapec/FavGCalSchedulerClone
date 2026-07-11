@@ -158,6 +158,64 @@ public sealed class MainViewModelViewModeTests
     }
 
     [Fact]
+    public async Task NavigationCommands_DebounceDisplayMonthPersistenceToLatestMonth()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        await viewModel.InitializeAsync();
+        var baseline = viewModel.CurrentMonth;
+        var saveCount = 0;
+        viewModel.BeforeSaveDisplayMonth = _ => saveCount++;
+
+        viewModel.NextMonthCommand.Execute(null);
+        viewModel.NextMonthCommand.Execute(null);
+        viewModel.NextMonthCommand.Execute(null);
+
+        Assert.Equal(0, saveCount);
+        await viewModel.FlushDisplayMonthPersistenceAsync();
+
+        Assert.Equal(1, saveCount);
+        var reloaded = await repository.LoadSettingsAsync();
+        Assert.Equal(baseline.AddMonths(3), reloaded.DisplayMonth);
+    }
+
+    [Fact]
+    public async Task CachedNavigation_AppliesSnapshotOnlyOnce()
+    {
+        var viewModel = await CreateViewModelAsync();
+        var baseline = viewModel.CurrentMonth;
+        await viewModel.NavigateToDateAsync(baseline.AddMonths(1));
+        await WaitUntilAsync(() => viewModel.IsCalendarMonthCached(baseline.AddMonths(1)));
+        await viewModel.NavigateToDateAsync(baseline);
+        var applyCount = 0;
+        viewModel.BeforeApplyCalendarSnapshot = _ => applyCount++;
+
+        viewModel.CurrentMonth = baseline.AddMonths(1);
+        await Task.Delay(viewModel.NavigationRefreshDelay + TimeSpan.FromMilliseconds(100));
+
+        Assert.Equal(1, applyCount);
+    }
+
+    [Fact]
+    public async Task CachedNavigation_ConsumesPendingSelectionBeforeSubsequentManualSelection()
+    {
+        var viewModel = await CreateViewModelAsync();
+        var baseline = new DateTime(2026, 5, 15);
+        await viewModel.NavigateToDateAsync(baseline);
+
+        await viewModel.NavigateToDateAsync(baseline.AddDays(-7));
+        viewModel.SelectedDay = viewModel.CalendarDays.Single(day => day.Date == baseline);
+        viewModel.CurrentViewMode = CalendarViewMode.Week;
+
+        viewModel.NextMonthCommand.Execute(null);
+        await WaitUntilAsync(() => viewModel.SelectedDay?.Date == baseline.AddDays(7));
+
+        Assert.Equal(baseline.AddDays(7), viewModel.SelectedDay?.Date);
+    }
+
+    [Fact]
     public async Task NavigationCommands_UsePendingDateForRapidWeekAndDayClicks()
     {
         var viewModel = await CreateViewModelAsync();

@@ -48,6 +48,20 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        if (_serviceProvider is not null)
+        {
+            try
+            {
+                Task.Run(() => _serviceProvider.GetRequiredService<MainViewModel>().FlushDisplayMonthPersistenceAsync())
+                    .GetAwaiter()
+                    .GetResult();
+            }
+            catch (Exception ex)
+            {
+                _serviceProvider.GetRequiredService<IAppLogger>().LogError(ex, "Failed to flush DisplayMonth on exit");
+            }
+        }
+
         _trayDateTimer?.Stop();
         if (_trayIcon is not null)
         {

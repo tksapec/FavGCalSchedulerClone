@@ -18,6 +18,7 @@ public sealed partial class MainViewModel
         _pendingSelectedDate = DateTime.Today;
         _navigationAnchorDate = DateTime.Today;
         SetCurrentMonthWithoutRefreshing(DateTime.Today);
+        ScheduleDisplayMonthPersistence(CurrentMonth);
         ShowImmediateCalendarShellForMonth(CurrentMonth);
         await RefreshCalendarAsync(invalidateCache: false, refreshTodos: false);
         Status = "今日を表示しました。";
@@ -28,6 +29,7 @@ public sealed partial class MainViewModel
         _pendingSelectedDate = targetDate.Date;
         _navigationAnchorDate = targetDate.Date;
         SetCurrentMonthWithoutRefreshing(targetDate.Date);
+        ScheduleDisplayMonthPersistence(CurrentMonth);
         ShowImmediateCalendarShellForMonth(CurrentMonth);
         await RefreshCalendarAsync(invalidateCache: false, refreshTodos: false);
     }
@@ -250,10 +252,7 @@ public sealed partial class MainViewModel
         request.CancellationToken.ThrowIfCancellationRequested();
         if (request.SaveDisplayMonth)
         {
-            _settings.DisplayMonth = request.Month;
-            BeforeSaveDisplayMonth?.Invoke(request.Month);
-            await _repository.SaveSettingsAsync(_settings);
-            request.CancellationToken.ThrowIfCancellationRequested();
+            ScheduleDisplayMonthPersistence(request.Month);
         }
 
         var cacheStopwatch = Stopwatch.StartNew();
@@ -269,10 +268,14 @@ public sealed partial class MainViewModel
         }
 
         var applyStopwatch = Stopwatch.StartNew();
-        ApplyCalendarSnapshot(snapshot, request.PendingSelectedDate, clearPendingSelectedDate: true);
+        var appliedSnapshot = ApplyCalendarSnapshotIfNeeded(
+            snapshot,
+            CreateCalendarCacheKey(request.Month),
+            request.PendingSelectedDate,
+            clearPendingSelectedDate: true);
         StoreCalendarCache(snapshot);
         _logger?.LogInfo(
-            $"Calendar navigation {request.Month:yyyy-MM}: cacheHit={cacheHit}, cacheLookup={cacheLookupMilliseconds}ms, snapshot={snapshotMilliseconds}ms, applyUi={applyStopwatch.ElapsedMilliseconds}ms, total={totalStopwatch.ElapsedMilliseconds}ms");
+            $"Calendar navigation {request.Month:yyyy-MM}: cacheHit={cacheHit}, cacheLookup={cacheLookupMilliseconds}ms, snapshot={snapshotMilliseconds}ms, applyUi={applyStopwatch.ElapsedMilliseconds}ms, applied={appliedSnapshot}, total={totalStopwatch.ElapsedMilliseconds}ms");
         if (request.RefreshTodos)
         {
             BeforeRefreshTodos?.Invoke();
@@ -417,6 +420,7 @@ public sealed partial class MainViewModel
         DateTime? pendingSelectedDate,
         bool clearPendingSelectedDate)
     {
+        BeforeApplyCalendarSnapshot?.Invoke(snapshot);
         _storedEvents = snapshot.StoredEvents;
         _dayDirectiveEvents = snapshot.DayDirectiveEvents;
         _visibleEvents = snapshot.VisibleEvents;
@@ -459,6 +463,32 @@ public sealed partial class MainViewModel
         RefreshSevenDayEvents();
     }
 
+    private bool ApplyCalendarSnapshotIfNeeded(
+        CalendarRefreshSnapshot snapshot,
+        CalendarCacheKey key,
+        DateTime? pendingSelectedDate,
+        bool clearPendingSelectedDate)
+    {
+        if (ReferenceEquals(_lastAppliedCalendarSnapshot, snapshot)
+            && EqualityComparer<CalendarCacheKey?>.Default.Equals(_lastAppliedCalendarSnapshotKey, key)
+            && (pendingSelectedDate is null || SelectedDay?.Date == pendingSelectedDate.Value.Date))
+        {
+            if (clearPendingSelectedDate
+                && pendingSelectedDate is not null
+                && SelectedDay?.Date == pendingSelectedDate.Value.Date)
+            {
+                _pendingSelectedDate = null;
+            }
+
+            return false;
+        }
+
+        ApplyCalendarSnapshot(snapshot, pendingSelectedDate, clearPendingSelectedDate);
+        _lastAppliedCalendarSnapshot = snapshot;
+        _lastAppliedCalendarSnapshotKey = key;
+        return true;
+    }
+
     private async Task RefreshCalendarPreservingSelectionAsync(CalendarRefreshRequest request)
     {
         await RefreshCalendarAsync(request);
@@ -478,7 +508,7 @@ public sealed partial class MainViewModel
         {
             await Task.Delay(NavigationRefreshDelay, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
-            await RefreshCalendarSafelyAsync(BeginCalendarRefresh(saveDisplayMonth: true, refreshTodos: false));
+            await RefreshCalendarSafelyAsync(BeginCalendarRefresh(saveDisplayMonth: false, refreshTodos: false));
         }
         catch (OperationCanceledException)
         {
@@ -518,7 +548,11 @@ public sealed partial class MainViewModel
     {
         if (TryGetCalendarCache(month) is { } snapshot)
         {
-            ApplyCalendarSnapshot(snapshot, _pendingSelectedDate, clearPendingSelectedDate: false);
+            ApplyCalendarSnapshotIfNeeded(
+                snapshot,
+                CreateCalendarCacheKey(month),
+                _pendingSelectedDate,
+                clearPendingSelectedDate: false);
             return;
         }
 
@@ -535,6 +569,63 @@ public sealed partial class MainViewModel
         SetSelectedDayForImmediateNavigation(FindOrCreateCalendarDay(anchor));
         SelectedDayEvents.Clear();
         SevenDayEvents.Clear();
+    }
+
+    private void ScheduleDisplayMonthPersistence(DateTime month)
+    {
+        _settings.DisplayMonth = new DateTime(month.Year, month.Month, 1);
+        var version = Interlocked.Increment(ref _displayMonthPersistenceVersion);
+        var replacement = new CancellationTokenSource();
+        var prior = Interlocked.Exchange(ref _displayMonthPersistenceCts, replacement);
+        prior?.Cancel();
+        prior?.Dispose();
+        _ = PersistDisplayMonthAfterDelayAsync(_settings.DisplayMonth, version, replacement.Token);
+    }
+
+    private async Task PersistDisplayMonthAfterDelayAsync(DateTime month, long version, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken);
+            await PersistDisplayMonthAsync(month, version, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    internal async Task FlushDisplayMonthPersistenceAsync()
+    {
+        var cancellation = Interlocked.Exchange(ref _displayMonthPersistenceCts, null);
+        cancellation?.Cancel();
+        cancellation?.Dispose();
+        var version = Volatile.Read(ref _displayMonthPersistenceVersion);
+        await PersistDisplayMonthAsync(_settings.DisplayMonth, version, CancellationToken.None);
+    }
+
+    private async Task PersistDisplayMonthAsync(DateTime month, long version, CancellationToken cancellationToken)
+    {
+        await _displayMonthPersistenceGate.WaitAsync(cancellationToken);
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (version != Volatile.Read(ref _displayMonthPersistenceVersion))
+            {
+                return;
+            }
+
+            BeforeSaveDisplayMonth?.Invoke(month);
+            await _repository.SaveSettingsAsync(_settings);
+            _logger?.LogInfo($"DisplayMonth persisted: {month:yyyy-MM}");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogError(ex, $"Failed to persist DisplayMonth {month:yyyy-MM}");
+        }
+        finally
+        {
+            _displayMonthPersistenceGate.Release();
+        }
     }
 
     private void EnsureCalendarDayCapacity(int count)
@@ -761,6 +852,7 @@ public sealed partial class MainViewModel
         _pendingSelectedDate = targetDate.Date;
         _navigationAnchorDate = targetDate.Date;
         SetCurrentMonthWithoutRefreshing(targetDate.Date);
+        ScheduleDisplayMonthPersistence(CurrentMonth);
         ShowImmediateCalendarShellForMonth(CurrentMonth);
         ScheduleCalendarRefreshAfterNavigation();
     }
