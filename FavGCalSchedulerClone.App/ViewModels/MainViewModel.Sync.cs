@@ -190,7 +190,7 @@ public sealed partial class MainViewModel
                 syncSettings,
                 refreshReminderMetadataAfterSync: invocationKind == SyncInvocationKind.Manual);
             var finishedAt = DateTimeOffset.Now;
-            AppSettings settingsSnapshot;
+            SettingsPersistenceRequest settingsSnapshot;
             lock (_settingsStateLock)
             {
                 if (invocationKind == SyncInvocationKind.Manual)
@@ -202,7 +202,7 @@ public sealed partial class MainViewModel
                     _settings.LastAutomaticSyncAt = finishedAt;
                 }
 
-                settingsSnapshot = CreateSettingsPersistenceSnapshotUnsafe();
+                settingsSnapshot = CreateSettingsPersistenceRequestUnsafe();
             }
 
             await PersistSettingsAsync(settingsSnapshot);

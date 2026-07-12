@@ -62,6 +62,8 @@ public sealed partial class MainViewModel : ObservableObject
     // Settings are edited on the UI thread but may be persisted by the delayed
     // DisplayMonth worker.  Never let that worker serialize the live instance.
     private readonly object _settingsStateLock = new();
+    private long _settingsRevision;
+    private long _persistedSettingsRevision;
     private CancellationTokenSource? _displayMonthPersistenceCts;
     private long _displayMonthPersistenceVersion;
     private CalendarCacheKey? _lastAppliedCalendarSnapshotKey;

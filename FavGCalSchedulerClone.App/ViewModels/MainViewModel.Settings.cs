@@ -18,16 +18,16 @@ public sealed partial class MainViewModel
         bool closeButtonExitsApplication,
         bool defaultNewEventIsAllDay)
     {
-        AppSettings snapshot;
+        SettingsPersistenceRequest snapshot;
         lock (_settingsStateLock)
         {
             _settings.StartupTabIndex = AppSettingsNormalizer.NormalizeTabIndex(startupTabIndex);
             _settings.ConfirmBeforeDelete = confirmBeforeDelete;
             _settings.CloseButtonExitsApplication = closeButtonExitsApplication;
             _settings.DefaultNewEventIsAllDay = defaultNewEventIsAllDay;
-            snapshot = CreateSettingsPersistenceSnapshotUnsafe();
+            snapshot = CreateSettingsPersistenceRequestUnsafe();
         }
-        await SaveApplicationSettingsAsync(snapshot);
+        await SaveApplicationSettingsAsync(snapshot.Settings);
     }
 
     public AppSettings CreateSettingsSnapshot()
@@ -40,7 +40,7 @@ public sealed partial class MainViewModel
 
     public async Task SaveApplicationSettingsAsync(AppSettings settings)
     {
-        AppSettings snapshot;
+        SettingsPersistenceRequest snapshot;
         lock (_settingsStateLock)
         {
             var displayMonth = _settings.DisplayMonth;
@@ -48,7 +48,7 @@ public sealed partial class MainViewModel
             // normalization so later dialog edits cannot mutate the ViewModel state.
             _settings = AppSettingsNormalizer.Normalize(DeepCloneSettings(settings));
             _settings.DisplayMonth = displayMonth;
-            snapshot = CreateSettingsPersistenceSnapshotUnsafe();
+            snapshot = CreateSettingsPersistenceRequestUnsafe();
         }
         SelectedTabIndex = _settings.StartupTabIndex;
         SelectedTodoTabIndex = _settings.StartupTodoTabIndex;
@@ -100,11 +100,11 @@ public sealed partial class MainViewModel
     public async Task SetOAuthClientJsonPathAsync(string path)
     {
         OAuthClientJsonPath = path;
-        AppSettings snapshot;
+        SettingsPersistenceRequest snapshot;
         lock (_settingsStateLock)
         {
             _settings.OAuthClientJsonPath = string.IsNullOrWhiteSpace(path) ? null : path.Trim();
-            snapshot = CreateSettingsPersistenceSnapshotUnsafe();
+            snapshot = CreateSettingsPersistenceRequestUnsafe();
         }
         await PersistSettingsAsync(snapshot);
         await ReloadAvailableCalendarsAsync();
@@ -168,11 +168,11 @@ public sealed partial class MainViewModel
         if (dialog.ShowDialog() == true)
         {
             OAuthClientJsonPath = dialog.FileName;
-            AppSettings snapshot;
+            SettingsPersistenceRequest snapshot;
             lock (_settingsStateLock)
             {
                 _settings.OAuthClientJsonPath = dialog.FileName;
-                snapshot = CreateSettingsPersistenceSnapshotUnsafe();
+                snapshot = CreateSettingsPersistenceRequestUnsafe();
             }
             await PersistSettingsAsync(snapshot);
             await ReloadAvailableCalendarsAsync();
@@ -206,13 +206,13 @@ public sealed partial class MainViewModel
 
     private async Task SaveOAuthPathAsync()
     {
-        AppSettings snapshot;
+        SettingsPersistenceRequest snapshot;
         lock (_settingsStateLock)
         {
             _settings.OAuthClientJsonPath = string.IsNullOrWhiteSpace(OAuthClientJsonPath) ? null : OAuthClientJsonPath.Trim();
             _settings.VisibleCalendarIds = AvailableCalendars.Where(item => item.IsSelected).Select(item => item.Id).ToList();
             _settings.ActiveCalendarId = ResolveEditorCalendarId();
-            snapshot = CreateSettingsPersistenceSnapshotUnsafe();
+            snapshot = CreateSettingsPersistenceRequestUnsafe();
         }
         await PersistSettingsAsync(snapshot);
     }
@@ -228,23 +228,41 @@ public sealed partial class MainViewModel
     private AppSettings CreateSettingsPersistenceSnapshotUnsafe()
         => DeepCloneSettings(_settings);
 
+    // Call only while _settingsStateLock is held and after a state mutation.
+    // The revision makes a queued, older snapshot unable to overwrite a newer
+    // interactive settings save after it obtains the persistence gate.
+    private SettingsPersistenceRequest CreateSettingsPersistenceRequestUnsafe()
+        => new(DeepCloneSettings(_settings), ++_settingsRevision);
+
     private static AppSettings DeepCloneSettings(AppSettings settings)
         => JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(settings)) ?? new AppSettings();
 
-    private Task PersistSettingsAsync() => PersistSettingsAsync(CreateSettingsPersistenceSnapshot());
-
-    private async Task PersistSettingsAsync(AppSettings snapshot)
+    private async Task PersistSettingsAsync(SettingsPersistenceRequest request)
     {
         await _settingsPersistenceGate.WaitAsync().ConfigureAwait(false);
         try
         {
-            await _repository.SaveSettingsAsync(snapshot).ConfigureAwait(false);
+            lock (_settingsStateLock)
+            {
+                if (request.Revision <= _persistedSettingsRevision)
+                {
+                    return;
+                }
+            }
+
+            await _repository.SaveSettingsAsync(request.Settings).ConfigureAwait(false);
+            lock (_settingsStateLock)
+            {
+                _persistedSettingsRevision = Math.Max(_persistedSettingsRevision, request.Revision);
+            }
         }
         finally
         {
             _settingsPersistenceGate.Release();
         }
     }
+
+    private sealed record SettingsPersistenceRequest(AppSettings Settings, long Revision);
 
     private static IReadOnlyList<string> DeserializeHistory(string? json)
     {

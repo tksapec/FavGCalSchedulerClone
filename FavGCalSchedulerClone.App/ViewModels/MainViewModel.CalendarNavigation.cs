@@ -644,13 +644,7 @@ public sealed partial class MainViewModel
                 return;
             }
 
-            BeforeSaveDisplayMonth?.Invoke(month);
-            if (BeforeSaveDisplayMonthAsync is { } beforeSaveDisplayMonthAsync)
-            {
-                await beforeSaveDisplayMonthAsync(month).ConfigureAwait(false);
-            }
-
-            AppSettings snapshot;
+            SettingsPersistenceRequest snapshot;
             lock (_settingsStateLock)
             {
                 // A delayed request must not overwrite a newer month, but its
@@ -660,7 +654,14 @@ public sealed partial class MainViewModel
                     return;
                 }
 
-                snapshot = CreateSettingsPersistenceSnapshotUnsafe();
+                snapshot = CreateSettingsPersistenceRequestUnsafe();
+            }
+            // The hook is intentionally after snapshot capture so tests can
+            // exercise a queued stale snapshot versus a newer settings save.
+            BeforeSaveDisplayMonth?.Invoke(month);
+            if (BeforeSaveDisplayMonthAsync is { } beforeSaveDisplayMonthAsync)
+            {
+                await beforeSaveDisplayMonthAsync(month).ConfigureAwait(false);
             }
             await PersistSettingsAsync(snapshot).ConfigureAwait(false);
             _logger?.LogInfo($"DisplayMonth persisted: {month:yyyy-MM}");

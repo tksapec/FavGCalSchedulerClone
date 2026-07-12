@@ -182,7 +182,7 @@ public sealed class MainViewModelViewModeTests
     }
 
     [Fact]
-    public async Task DisplayMonthPersistence_PreservesLatestMonthWhenInteractiveSettingsSaveUsesStaleSnapshot()
+    public async Task DisplayMonthPersistence_DoesNotLetCapturedDelayedSnapshotOverwriteNewerInteractiveSave()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
         var repository = new CalendarRepository(dbPath);
@@ -204,8 +204,8 @@ public sealed class MainViewModelViewModeTests
         await saveStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
         var interactiveSave = viewModel.SaveApplicationSettingsAsync(staleSettings);
+        await interactiveSave.WaitAsync(TimeSpan.FromSeconds(2));
         releaseDisplayMonthSave.SetResult();
-        await interactiveSave;
         await Task.Delay(100);
 
         var persisted = await repository.LoadSettingsAsync();

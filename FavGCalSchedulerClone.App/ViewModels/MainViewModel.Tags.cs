@@ -100,16 +100,16 @@ public sealed partial class MainViewModel
         }
 
         RefreshCalendarNames();
-        AppSettings settingsSnapshot;
+        SettingsPersistenceRequest settingsSnapshot;
         string activeCalendarId;
         lock (_settingsStateLock)
         {
             _settings.VisibleCalendarIds = AvailableCalendars.Where(item => item.IsSelected).Select(item => item.Id).ToList();
             _settings.ActiveCalendarId = _settings.VisibleCalendarIds.FirstOrDefault() ?? ResolveEditorCalendarId();
             activeCalendarId = _settings.ActiveCalendarId;
-            settingsSnapshot = CreateSettingsPersistenceSnapshotUnsafe();
+            settingsSnapshot = CreateSettingsPersistenceRequestUnsafe();
         }
-        if (!settingsSnapshot.VisibleCalendarIds.Contains(EditorCalendarId, StringComparer.Ordinal))
+        if (!settingsSnapshot.Settings.VisibleCalendarIds.Contains(EditorCalendarId, StringComparer.Ordinal))
         {
             EditorCalendarId = activeCalendarId;
         }
