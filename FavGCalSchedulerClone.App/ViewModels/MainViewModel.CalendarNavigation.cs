@@ -281,7 +281,8 @@ public sealed partial class MainViewModel
             BeforeRefreshTodos?.Invoke();
             await RefreshTodosAsync();
         }
-        if (IsLatestCalendarRefresh(request) && ShouldStartCalendarPrefetch(request, cacheHit))
+        var prefetchRequirement = GetCalendarPrefetchRequirement(request.Month);
+        if (IsLatestCalendarRefresh(request) && prefetchRequirement != CalendarPrefetchRequirement.None)
         {
             StartCalendarPrefetch(request);
         }
@@ -699,24 +700,29 @@ public sealed partial class MainViewModel
         _ = BuildCalendarPrefetchPipelineAsync(request, replacement.Token);
     }
 
-    private bool ShouldStartCalendarPrefetch(CalendarRefreshRequest request, bool cacheHit)
+    internal CalendarPrefetchRequirement GetCalendarPrefetchRequirement(DateTime month)
     {
-        if (cacheHit)
-        {
-            return false;
-        }
-
         var context = CreateCalendarSnapshotBuildContext();
         var dataVersion = Volatile.Read(ref _calendarDataVersion);
-        var (rangeStart, _) = DateRangeHelper.MonthGridRange(request.Month.AddMonths(-12), context.WeekStartsOnMonday);
-        var (_, rangeEnd) = DateRangeHelper.MonthGridRange(request.Month.AddMonths(12), context.WeekStartsOnMonday);
+        var normalizedMonth = new DateTime(month.Year, month.Month, 1);
+        var (rangeStart, _) = DateRangeHelper.MonthGridRange(normalizedMonth.AddMonths(-12), context.WeekStartsOnMonday);
+        var (_, rangeEnd) = DateRangeHelper.MonthGridRange(normalizedMonth.AddMonths(12), context.WeekStartsOnMonday);
         lock (_calendarCacheLock)
         {
-            return _calendarDataWindow is not { } dataWindow
+            if (_calendarDataWindow is not { } dataWindow
                 || dataWindow.DataVersion != dataVersion
                 || dataWindow.WeekStartsOnMonday != context.WeekStartsOnMonday
                 || dataWindow.RangeStart > rangeStart
-                || dataWindow.RangeEnd < rangeEnd;
+                || dataWindow.RangeEnd < rangeEnd)
+            {
+                return CalendarPrefetchRequirement.RebuildDataWindow;
+            }
+
+            return GetPrefetchMonths(normalizedMonth)
+                .Prepend(normalizedMonth)
+                .All(month => _calendarCache.ContainsKey(CreateCalendarCacheKey(month, context)))
+                ? CalendarPrefetchRequirement.None
+                : CalendarPrefetchRequirement.ResumeSnapshots;
         }
     }
 
@@ -734,50 +740,68 @@ public sealed partial class MainViewModel
                 return;
             }
 
+            var requirement = GetCalendarPrefetchRequirement(request.Month);
+            if (requirement == CalendarPrefetchRequirement.None)
+            {
+                return;
+            }
+
             var context = CreateCalendarSnapshotBuildContext();
             var dataVersion = Volatile.Read(ref _calendarDataVersion);
             var (rangeStart, _) = DateRangeHelper.MonthGridRange(request.Month.AddMonths(-12), context.WeekStartsOnMonday);
             var (_, rangeEnd) = DateRangeHelper.MonthGridRange(request.Month.AddMonths(12), context.WeekStartsOnMonday);
-            if (BeforeLoadCalendarPrefetchDataAsync is { } beforeLoadCalendarPrefetchDataAsync)
+            CalendarDataWindow dataWindow;
+            if (requirement == CalendarPrefetchRequirement.RebuildDataWindow)
             {
-                await beforeLoadCalendarPrefetchDataAsync(request.Month, cancellationToken);
+                if (BeforeLoadCalendarPrefetchDataAsync is { } beforeLoadCalendarPrefetchDataAsync)
+                {
+                    await beforeLoadCalendarPrefetchDataAsync(request.Month, cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+
+                var db = Stopwatch.StartNew();
+                var storedEvents = await _repository.LoadEventsAsync(
+                    new DateTimeOffset(rangeStart), new DateTimeOffset(rangeEnd), includeDeleted: true, cancellationToken);
+                BeforeBuildCalendarPrefetchDataWindow?.Invoke(request.Month, cancellationToken);
+                dataWindow = await Task.Run(
+                    () => BuildCalendarDataWindow(rangeStart, rangeEnd, context.WeekStartsOnMonday, dataVersion, storedEvents, cancellationToken),
+                    cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
+
+                var (centerGridStart, centerGridEnd) = DateRangeHelper.MonthGridRange(request.Month, context.WeekStartsOnMonday);
+                var centerSnapshot = await Task.Run(
+                    () => BuildCalendarSnapshot(request.Month, centerGridStart, centerGridEnd, dataWindow, context, cancellationToken),
+                    cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+
+                lock (_calendarCacheLock)
+                {
+                    if (!IsLatestCalendarRefresh(request) || dataVersion != _calendarDataVersion)
+                    {
+                        return;
+                    }
+
+                    BeforeReplaceCalendarDataWindow?.Invoke(request.Month);
+                    _calendarDataWindow = dataWindow;
+                    // Snapshots built from the narrow fallback window must not pin it.
+                    foreach (var key in _calendarCache.Keys.Where(key => key.DataVersion == dataVersion).ToArray())
+                    {
+                        _calendarCache.Remove(key);
+                    }
+                    _lastAppliedCalendarSnapshot = null;
+                    _lastAppliedCalendarSnapshotKey = null;
+                    StoreCalendarCache(centerSnapshot, CreateCalendarCacheKey(request.Month, context));
+                }
+                _logger?.LogInfo($"Calendar window replacement {request.Month:yyyy-MM}: db+expand={db.ElapsedMilliseconds}ms");
             }
-
-            var db = Stopwatch.StartNew();
-            var storedEvents = await _repository.LoadEventsAsync(
-                new DateTimeOffset(rangeStart), new DateTimeOffset(rangeEnd), includeDeleted: true, cancellationToken);
-            BeforeBuildCalendarPrefetchDataWindow?.Invoke(request.Month, cancellationToken);
-            var dataWindow = await Task.Run(
-                () => BuildCalendarDataWindow(rangeStart, rangeEnd, context.WeekStartsOnMonday, dataVersion, storedEvents, cancellationToken),
-                cancellationToken);
-            cancellationToken.ThrowIfCancellationRequested();
-            var (centerGridStart, centerGridEnd) = DateRangeHelper.MonthGridRange(request.Month, context.WeekStartsOnMonday);
-            var centerSnapshot = await Task.Run(
-                () => BuildCalendarSnapshot(request.Month, centerGridStart, centerGridEnd, dataWindow, context, cancellationToken),
-                cancellationToken);
-            cancellationToken.ThrowIfCancellationRequested();
-
-            lock (_calendarCacheLock)
+            else
             {
-                if (!IsLatestCalendarRefresh(request) || dataVersion != _calendarDataVersion)
+                lock (_calendarCacheLock)
                 {
-                    return;
+                    dataWindow = _calendarDataWindow!;
                 }
-
-                BeforeReplaceCalendarDataWindow?.Invoke(request.Month);
-                _calendarDataWindow = dataWindow;
-                // Snapshots built from the narrow fallback window must not pin it.
-                foreach (var key in _calendarCache.Keys.Where(key => key.DataVersion == dataVersion).ToArray())
-                {
-                    _calendarCache.Remove(key);
-                }
-                _lastAppliedCalendarSnapshot = null;
-                _lastAppliedCalendarSnapshotKey = null;
-                StoreCalendarCache(centerSnapshot, CreateCalendarCacheKey(request.Month, context));
+                _logger?.LogInfo($"Calendar prefetch {request.Month:yyyy-MM}: resuming incomplete snapshots");
             }
-
-            _logger?.LogInfo($"Calendar window replacement {request.Month:yyyy-MM}: db+expand={db.ElapsedMilliseconds}ms");
             foreach (var month in GetPrefetchMonths(request.Month))
             {
                 cancellationToken.ThrowIfCancellationRequested();

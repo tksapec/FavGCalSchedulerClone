@@ -637,6 +637,13 @@ internal sealed record CalendarRefreshRequest(
     bool RefreshTodos,
     CancellationToken CancellationToken);
 
+internal enum CalendarPrefetchRequirement
+{
+    None,
+    ResumeSnapshots,
+    RebuildDataWindow
+}
+
 internal sealed record CalendarCacheKey(DateTime Month, bool WeekStartsOnMonday, string VisibleCalendarIds, long DataVersion);
 
 internal sealed record CalendarSnapshotBuildContext(

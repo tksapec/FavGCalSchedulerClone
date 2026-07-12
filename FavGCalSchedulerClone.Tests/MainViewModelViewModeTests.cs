@@ -408,7 +408,7 @@ public sealed class MainViewModelViewModeTests
     }
 
     [Fact]
-    public async Task Navigation_CachedMonthDoesNotRebuildTheWideDataWindow()
+    public async Task Navigation_CachedMonthRebuildsTheWideDataWindowWhenItsRangeNoLongerCoversPrefetch()
     {
         var viewModel = await CreateViewModelAsync();
         await WaitUntilAsync(() => viewModel.CalendarCacheCount == MainViewModel.CalendarSnapshotCacheCapacity);
@@ -424,8 +424,73 @@ public sealed class MainViewModelViewModeTests
         viewModel.NextMonthCommand.Execute(null);
         await Task.Delay(300);
 
-        Assert.Equal(0, prefetchLoads);
-        Assert.Equal(0, prefetchBuilds);
+        Assert.Equal(1, prefetchLoads);
+        Assert.Equal(1, prefetchBuilds);
+    }
+
+    [Fact]
+    public async Task Prefetch_CompletedDataWindowAndSnapshotsRequireNoFurtherWork()
+    {
+        var viewModel = await CreateViewModelAsync();
+        await WaitUntilAsync(() => viewModel.CalendarCacheCount == MainViewModel.CalendarSnapshotCacheCapacity);
+
+        Assert.Equal(CalendarPrefetchRequirement.None, viewModel.GetCalendarPrefetchRequirement(viewModel.CurrentMonth));
+    }
+
+    [Fact]
+    public async Task Navigation_ReturningToCachedMonthResumesInterruptedSnapshotPrefetchWithoutRebuildingWindow()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository))
+        {
+            NavigationRefreshDelay = TimeSpan.Zero
+        };
+        var center = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        var blockedMonth = center.AddMonths(-1);
+        var firstSnapshotStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var resumedSnapshotStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstSnapshot = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var snapshotBuilds = 0;
+        var prefetchLoads = 0;
+        var wideWindowBuilds = 0;
+        viewModel.BeforeLoadCalendarPrefetchDataAsync = (_, _) =>
+        {
+            Interlocked.Increment(ref prefetchLoads);
+            return Task.CompletedTask;
+        };
+        viewModel.BeforeBuildCalendarPrefetchDataWindow = (_, _) => Interlocked.Increment(ref wideWindowBuilds);
+        viewModel.BeforePrefetchCalendarMonth = month =>
+        {
+            if (month.Year != blockedMonth.Year || month.Month != blockedMonth.Month)
+            {
+                return;
+            }
+
+            if (Interlocked.Increment(ref snapshotBuilds) == 1)
+            {
+                firstSnapshotStarted.TrySetResult();
+                releaseFirstSnapshot.Task.Wait();
+            }
+            else
+            {
+                resumedSnapshotStarted.TrySetResult();
+            }
+        };
+
+        await viewModel.InitializeAsync();
+        await firstSnapshotStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        viewModel.CurrentMonth = center.AddMonths(1);
+        releaseFirstSnapshot.SetResult();
+        viewModel.CurrentMonth = center;
+
+        await resumedSnapshotStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await WaitUntilAsync(() => viewModel.CalendarCacheCount == MainViewModel.CalendarSnapshotCacheCapacity);
+
+        Assert.Equal(1, wideWindowBuilds);
+        Assert.Equal(1, prefetchLoads);
     }
 
     [Fact]
