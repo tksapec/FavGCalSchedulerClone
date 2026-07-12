@@ -15,7 +15,7 @@ public sealed partial class MainViewModel
     public async Task<SyncPreview> CreateSyncPreviewAsync()
     {
         await SaveOAuthPathAsync();
-        return await _syncService.PreviewAsync(_settings);
+        return await _syncService.PreviewAsync(CreateSettingsSnapshot());
     }
 
     public async Task<SyncResult?> SynchronizeManuallyAsync()
@@ -65,7 +65,7 @@ public sealed partial class MainViewModel
     public async Task<SyncDiagnosticsSnapshot> LoadSyncDiagnosticsAsync()
     {
         await SaveOAuthPathAsync();
-        return await _syncService.LoadDiagnosticsAsync(_settings);
+        return await _syncService.LoadDiagnosticsAsync(CreateSettingsSnapshot());
     }
 
     public async Task<int> RefreshGoogleReminderMetadataAsync()
@@ -73,7 +73,7 @@ public sealed partial class MainViewModel
         await SaveOAuthPathAsync();
         var now = DateTimeOffset.Now;
         var updated = await _syncService.RefreshReminderMetadataAsync(
-            _settings,
+            CreateSettingsSnapshot(),
             now.AddDays(-1),
             now.AddDays(30));
         Status = $"Google通知設定を再取得しました: {updated} 件";
@@ -85,7 +85,7 @@ public sealed partial class MainViewModel
     public async Task<SyncResult> ResyncDirtyItemsAsync(IReadOnlyCollection<string> localIds)
     {
         await SaveOAuthPathAsync();
-        var result = await _syncService.SyncDirtyEventsAsync(_settings, localIds.ToHashSet(StringComparer.Ordinal));
+        var result = await _syncService.SyncDirtyEventsAsync(CreateSettingsSnapshot(), localIds.ToHashSet(StringComparer.Ordinal));
         await RefreshCalendarAsync();
         Status = $"{result.Message} / 未同期残数 {(await _repository.LoadDirtyEventsAsync()).Count}";
         return result;
@@ -122,7 +122,7 @@ public sealed partial class MainViewModel
     {
         await CreateDiagnosticsBulkBackupAsync();
         await SaveOAuthPathAsync();
-        var result = await _syncService.DiscardLocalChangesAsync(_settings, localIds.ToHashSet(StringComparer.Ordinal));
+        var result = await _syncService.DiscardLocalChangesAsync(CreateSettingsSnapshot(), localIds.ToHashSet(StringComparer.Ordinal));
         await RefreshCalendarAsync();
         Status = result.Message;
         return result;
@@ -135,9 +135,10 @@ public sealed partial class MainViewModel
 
     public async Task RunAutomaticSyncIfDueAsync()
     {
-        if (_settings.AutomaticSyncIntervalMinutes is not int interval
-            || !CanSynchronize()
-            || _settings.LastAutomaticSyncAt is { } lastSync
+        var settings = CreateSettingsSnapshot();
+        if (settings.AutomaticSyncIntervalMinutes is not int interval
+            || !CanSynchronize(settings)
+            || settings.LastAutomaticSyncAt is { } lastSync
                && DateTimeOffset.Now - lastSync < TimeSpan.FromMinutes(interval))
         {
             return;
@@ -148,16 +149,17 @@ public sealed partial class MainViewModel
 
     private async Task SyncAfterLocalChangeAsync()
     {
-        if (_settings.SyncAfterLocalChange && CanSynchronize())
+        var settings = CreateSettingsSnapshot();
+        if (settings.SyncAfterLocalChange && CanSynchronize(settings))
         {
             await SynchronizeAsync(reportErrors: false, SyncInvocationKind.LocalChange);
         }
     }
 
-    private bool CanSynchronize()
+    private static bool CanSynchronize(AppSettings settings)
     {
-        return !string.IsNullOrWhiteSpace(_settings.OAuthClientJsonPath)
-            && File.Exists(_settings.OAuthClientJsonPath);
+        return !string.IsNullOrWhiteSpace(settings.OAuthClientJsonPath)
+            && File.Exists(settings.OAuthClientJsonPath);
     }
 
     private async Task<SyncResult?> SynchronizeAsync(bool reportErrors, SyncInvocationKind invocationKind)
@@ -171,7 +173,8 @@ public sealed partial class MainViewModel
         try
         {
             await SaveOAuthPathAsync();
-            if (!CanSynchronize())
+            var syncSettings = CreateSettingsSnapshot();
+            if (!CanSynchronize(syncSettings))
             {
                 if (reportErrors)
                 {
@@ -184,7 +187,7 @@ public sealed partial class MainViewModel
             Status = "Googleカレンダーと同期中...";
             IsSynchronizing = true;
             var result = await _syncService.SyncAsync(
-                _settings,
+                syncSettings,
                 refreshReminderMetadataAfterSync: invocationKind == SyncInvocationKind.Manual);
             var finishedAt = DateTimeOffset.Now;
             AppSettings settingsSnapshot;
@@ -228,14 +231,14 @@ public sealed partial class MainViewModel
         catch (Exception ex) when (reportErrors)
         {
             Debug.WriteLine(ex);
-            await _syncService.RecordFailedSyncAsync(ex.Message, _settings.EnableSyncDiagnostics);
+            await _syncService.RecordFailedSyncAsync(ex.Message, CreateSettingsSnapshot().EnableSyncDiagnostics);
             Status = "同期に失敗しました。Google同期診断を確認してください。";
             throw;
         }
         catch (Exception ex) when (!reportErrors)
         {
             Debug.WriteLine(ex);
-            await _syncService.RecordFailedSyncAsync(ex.Message, _settings.EnableSyncDiagnostics);
+            await _syncService.RecordFailedSyncAsync(ex.Message, CreateSettingsSnapshot().EnableSyncDiagnostics);
             Status = $"同期に失敗しました。Google同期診断を確認してください。未同期の変更は保持されています: {ex.Message}";
             return null;
         }

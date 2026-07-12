@@ -2253,6 +2253,52 @@ public sealed class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task MainViewModel_SyncUsesSettingsSnapshotWhenCalendarSelectionChangesDuringRemoteCall()
+    {
+        var repository = await CreateRepositoryAsync();
+        var listStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var continueList = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var api = new FakeGoogleCalendarApi
+        {
+            ListStarted = listStarted,
+            ContinueList = continueList
+        };
+        api.UpsertRemote("primary", new Event
+        {
+            Id = "remote-primary",
+            Summary = "primary calendar event",
+            Start = DateTimeEvent(2026, 1, 9, 9),
+            End = DateTimeEvent(2026, 1, 9, 10),
+            Status = "confirmed"
+        });
+        api.UpsertRemote("other", new Event
+        {
+            Id = "remote-other",
+            Summary = "other calendar event",
+            Start = DateTimeEvent(2026, 1, 9, 9),
+            End = DateTimeEvent(2026, 1, 9, 10),
+            Status = "confirmed"
+        });
+        await repository.SaveSettingsAsync(CreateSettings("primary"));
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository, api));
+        await viewModel.InitializeAsync();
+        api.ListRequests.Clear();
+
+        var sync = viewModel.SynchronizeManuallyAsync();
+        await listStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        foreach (var calendar in viewModel.AvailableCalendars)
+        {
+            calendar.IsSelected = calendar.Id == "other";
+        }
+        await viewModel.ApplyCalendarSelectionAsync();
+        continueList.SetResult();
+        await sync.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Contains(api.ListRequests, request => request.CalendarId == "primary");
+        Assert.DoesNotContain(api.ListRequests, request => request.CalendarId == "other");
+    }
+
+    [Fact]
     public async Task MainViewModel_ShowsCalendarReloadingStatusAfterSyncBeforeRefresh()
     {
         var repository = await CreateRepositoryAsync();

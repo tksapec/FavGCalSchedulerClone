@@ -44,7 +44,9 @@ public sealed partial class MainViewModel
         lock (_settingsStateLock)
         {
             var displayMonth = _settings.DisplayMonth;
-            _settings = AppSettingsNormalizer.Normalize(settings);
+            // The settings dialog retains its own mutable instance. Clone it before
+            // normalization so later dialog edits cannot mutate the ViewModel state.
+            _settings = AppSettingsNormalizer.Normalize(DeepCloneSettings(settings));
             _settings.DisplayMonth = displayMonth;
             snapshot = CreateSettingsPersistenceSnapshotUnsafe();
         }
@@ -181,14 +183,15 @@ public sealed partial class MainViewModel
     private async Task AuthorizeAsync()
     {
         await SaveOAuthPathAsync();
-        if (string.IsNullOrWhiteSpace(_settings.OAuthClientJsonPath))
+        var settings = CreateSettingsSnapshot();
+        if (string.IsNullOrWhiteSpace(settings.OAuthClientJsonPath))
         {
             Status = "先にOAuth client JSONを設定してください。";
             return;
         }
 
         Status = "ブラウザーでGoogle認証を続行してください。";
-        await _syncService.AuthorizeAsync(_settings.OAuthClientJsonPath);
+        await _syncService.AuthorizeAsync(settings.OAuthClientJsonPath);
         _eventColorPalette = await _syncService.RefreshEventColorPaletteAsync();
         await ReloadAvailableCalendarsAsync();
         await RefreshCalendarAsync();
@@ -223,7 +226,10 @@ public sealed partial class MainViewModel
     }
 
     private AppSettings CreateSettingsPersistenceSnapshotUnsafe()
-        => JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(_settings)) ?? new AppSettings();
+        => DeepCloneSettings(_settings);
+
+    private static AppSettings DeepCloneSettings(AppSettings settings)
+        => JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(settings)) ?? new AppSettings();
 
     private Task PersistSettingsAsync() => PersistSettingsAsync(CreateSettingsPersistenceSnapshot());
 

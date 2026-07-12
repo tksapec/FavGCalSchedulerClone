@@ -197,12 +197,13 @@ public sealed partial class MainViewModel
 
     private async Task<IReadOnlyList<GoogleCalendarSelectionItem>> LoadAvailableCalendarsCoreAsync()
     {
+        var settings = CreateSettingsSnapshot();
         IReadOnlyList<GoogleCalendarInfo> calendars;
-        if (!string.IsNullOrWhiteSpace(_settings.OAuthClientJsonPath) && File.Exists(_settings.OAuthClientJsonPath))
+        if (!string.IsNullOrWhiteSpace(settings.OAuthClientJsonPath) && File.Exists(settings.OAuthClientJsonPath))
         {
             try
             {
-                calendars = await _syncService.ListCalendarsAsync(_settings.OAuthClientJsonPath);
+                calendars = await _syncService.ListCalendarsAsync(settings.OAuthClientJsonPath);
             }
             catch (Exception ex)
             {
@@ -216,9 +217,9 @@ public sealed partial class MainViewModel
             calendars = [];
         }
 
-        var selectedIds = _settings.VisibleCalendarIds.Count == 0
-            ? [string.IsNullOrWhiteSpace(_settings.ActiveCalendarId) ? GoogleCalendarDefaults.PrimaryCalendarId : _settings.ActiveCalendarId]
-            : _settings.VisibleCalendarIds;
+        var selectedIds = settings.VisibleCalendarIds.Count == 0
+            ? [string.IsNullOrWhiteSpace(settings.ActiveCalendarId) ? GoogleCalendarDefaults.PrimaryCalendarId : settings.ActiveCalendarId]
+            : settings.VisibleCalendarIds;
 
         if (calendars.Count == 0)
         {

@@ -74,19 +74,20 @@ public sealed partial class MainViewModel
         }
 
         await SaveOAuthPathAsync();
+        var syncSettings = CreateSettingsSnapshot();
         if (options.VerifyGoogleEventsBeforeImport
             && mappedCalendarIds.Length > 0
-            && !string.IsNullOrWhiteSpace(_settings.OAuthClientJsonPath)
-            && File.Exists(_settings.OAuthClientJsonPath))
+            && !string.IsNullOrWhiteSpace(syncSettings.OAuthClientJsonPath)
+            && File.Exists(syncSettings.OAuthClientJsonPath))
         {
             Status = "Googleカレンダーから既存予定を確認しています...";
-            await _syncService.PullAsync(_settings, mappedCalendarIds);
+            await _syncService.PullAsync(syncSettings, mappedCalendarIds);
         }
 
         var result = await _favGCalImportService.ImportAsync(options);
         if (options.ImportSettings)
         {
-            await SaveApplicationSettingsAsync(_settings);
+            await SaveApplicationSettingsAsync(CreateSettingsSnapshot());
         }
 
         await ReloadAvailableCalendarsAsync();

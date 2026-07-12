@@ -14,7 +14,7 @@ public sealed partial class MainViewModel
 
     public async Task RefreshOperationalStatusAsync(ReminderMonitoringSnapshot? reminderDiagnostics)
     {
-        var diagnostics = await _syncService.LoadDiagnosticsAsync(_settings);
+        var diagnostics = await _syncService.LoadDiagnosticsAsync(CreateSettingsSnapshot());
         SyncStatusText = diagnostics.LastResult is null
             ? $"同期: 未同期 {diagnostics.DirtyCount} 件 / 最終同期なし"
             : $"同期: 未同期 {diagnostics.DirtyCount} 件 / 最終 {diagnostics.LastResult.FinishedAt:MM/dd HH:mm}";
