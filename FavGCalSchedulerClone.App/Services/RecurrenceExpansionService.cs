@@ -48,6 +48,7 @@ public static class RecurrenceExpansionService
                 var generated = Clone(master);
                 generated.Id = $"{master.Id}@{occurrenceStart.UtcTicks}";
                 generated.GoogleEventId = null;
+                generated.LastSyncedGoogleEtag = null;
                 generated.Start = occurrenceStart;
                 generated.End = occurrenceStart + duration;
                 generated.OriginalStart = occurrenceStart;
@@ -95,6 +96,7 @@ public static class RecurrenceExpansionService
         {
             Id = source.Id,
             GoogleEventId = source.GoogleEventId,
+            LastSyncedGoogleEtag = source.LastSyncedGoogleEtag,
             RecurringEventId = source.RecurringEventId,
             RecurringParentId = source.RecurringParentId,
             OriginalStart = source.OriginalStart,

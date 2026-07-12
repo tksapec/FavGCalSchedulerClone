@@ -32,6 +32,7 @@ public static class GoogleEventMapper
         {
             Id = string.IsNullOrWhiteSpace(googleEvent.Id) ? Guid.NewGuid().ToString("N") : $"g:{calendarId}:{googleEvent.Id}",
             GoogleEventId = googleEvent.Id,
+            LastSyncedGoogleEtag = googleEvent.ETag,
             RecurringEventId = googleEvent.RecurringEventId,
             RecurringParentId = null,
             OriginalStart = string.IsNullOrWhiteSpace(googleEvent.RecurringEventId)

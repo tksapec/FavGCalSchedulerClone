@@ -41,6 +41,7 @@ public sealed class UndoService
         {
             Id = source.Id,
             GoogleEventId = source.GoogleEventId,
+            LastSyncedGoogleEtag = source.LastSyncedGoogleEtag,
             RecurringEventId = source.RecurringEventId,
             RecurringParentId = source.RecurringParentId,
             OriginalStart = source.OriginalStart,

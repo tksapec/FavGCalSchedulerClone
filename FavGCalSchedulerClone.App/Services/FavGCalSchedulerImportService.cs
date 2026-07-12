@@ -496,6 +496,7 @@ public sealed class FavGCalSchedulerImportService
         {
             Id = calendarEvent.Id,
             GoogleEventId = calendarEvent.GoogleEventId,
+            LastSyncedGoogleEtag = calendarEvent.LastSyncedGoogleEtag,
             CalendarId = calendarEvent.CalendarId,
             Title = calendarEvent.Title,
             Description = calendarEvent.Description,

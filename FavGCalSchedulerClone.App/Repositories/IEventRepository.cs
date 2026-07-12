@@ -18,6 +18,6 @@ public interface IEventRepository
     Task<IReadOnlyList<CalendarEvent>> LoadSeriesEventsAsync(string? recurringParentId, string? recurringEventId);
     Task SaveEventAsync(CalendarEvent calendarEvent);
     Task UpsertSyncedEventAsync(CalendarEvent calendarEvent);
-    Task MarkSyncedAsync(CalendarEvent calendarEvent, string? googleEventId = null);
+    Task MarkSyncedAsync(CalendarEvent calendarEvent, string? googleEventId = null, string? lastSyncedGoogleEtag = null);
     Task DeleteEventAsync(CalendarEvent calendarEvent);
 }

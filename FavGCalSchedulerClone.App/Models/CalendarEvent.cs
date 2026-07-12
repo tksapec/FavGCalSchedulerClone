@@ -4,6 +4,7 @@ public sealed class CalendarEvent
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string? GoogleEventId { get; set; }
+    public string? LastSyncedGoogleEtag { get; set; }
     public string? RecurringEventId { get; set; }
     public string? RecurringParentId { get; set; }
     public DateTimeOffset? OriginalStart { get; set; }

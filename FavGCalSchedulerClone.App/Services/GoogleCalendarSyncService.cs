@@ -866,7 +866,7 @@ public sealed class GoogleCalendarSyncService
         if (string.IsNullOrWhiteSpace(localEvent.GoogleEventId))
         {
             var inserted = await client.InsertEventAsync(calendarId, localPayload, cancellationToken);
-            await _repository.MarkSyncedAsync(localEvent, inserted.Id);
+            await _repository.MarkSyncedAsync(localEvent, inserted.Id, inserted.ETag);
             return SyncPushOutcome.Pushed;
         }
 
@@ -874,15 +874,15 @@ public sealed class GoogleCalendarSyncService
         {
             var remoteEvent = plannedRemoteEvent ?? await client.GetEventAsync(calendarId, localEvent.GoogleEventId, cancellationToken);
             ApplyAppOwnedFields(remoteEvent, localPayload, includeOriginalStartTime: false, includeRecurrence: true);
-            await UpdateEventAsync(client, calendarId, localEvent.GoogleEventId, remoteEvent, remoteEvent.ETag, cancellationToken);
-            await _repository.MarkSyncedAsync(localEvent);
+            var updated = await UpdateEventAsync(client, calendarId, localEvent.GoogleEventId, remoteEvent, remoteEvent.ETag, cancellationToken);
+            await _repository.MarkSyncedAsync(localEvent, lastSyncedGoogleEtag: updated.ETag);
             Debug.WriteLine($"Push update succeeded and marked synced: {localEvent.Id}");
             return SyncPushOutcome.Pushed;
         }
         catch (Exception ex) when (IsNotFound(ex))
         {
             var inserted = await client.InsertEventAsync(calendarId, localPayload, cancellationToken);
-            await _repository.MarkSyncedAsync(localEvent, inserted.Id);
+            await _repository.MarkSyncedAsync(localEvent, inserted.Id, inserted.ETag);
             return SyncPushOutcome.RecreatedEvent;
         }
     }
@@ -966,8 +966,8 @@ public sealed class GoogleCalendarSyncService
             var remoteEvent = plannedRemoteEvent ?? await client.GetEventAsync(calendarId, remoteEventId, cancellationToken);
             ApplyAppOwnedFields(remoteEvent, GoogleEventMapper.ToGoogleEvent(localEvent), includeOriginalStartTime: true, includeRecurrence: false);
             localEvent.GoogleReminderMetadata = GoogleEventMapper.FromGoogleEvent(remoteEvent, calendarId).GoogleReminderMetadata;
-            await UpdateEventAsync(client, calendarId, remoteEventId, remoteEvent, remoteEvent.ETag, cancellationToken);
-            await _repository.MarkSyncedAsync(localEvent, remoteEventId);
+            var updated = await UpdateEventAsync(client, calendarId, remoteEventId, remoteEvent, remoteEvent.ETag, cancellationToken);
+            await _repository.MarkSyncedAsync(localEvent, remoteEventId, updated.ETag);
             return SyncPushOutcome.Pushed;
         }
         catch (GoogleApiException ex) when (IsNotFound(ex))
@@ -975,7 +975,7 @@ public sealed class GoogleCalendarSyncService
             var googleEvent = GoogleEventMapper.ToGoogleEvent(localEvent);
             localEvent.GoogleReminderMetadata = GoogleEventMapper.FromGoogleEvent(googleEvent, calendarId).GoogleReminderMetadata;
             var inserted = await client.InsertEventAsync(calendarId, googleEvent, cancellationToken);
-            await _repository.MarkSyncedAsync(localEvent, inserted.Id);
+            await _repository.MarkSyncedAsync(localEvent, inserted.Id, inserted.ETag);
             return SyncPushOutcome.RecreatedEvent;
         }
     }
@@ -1091,8 +1091,12 @@ public sealed class GoogleCalendarSyncService
             if (dirtyByGoogleId.TryGetValue(remoteEvent.Id, out var dirtyLocal))
             {
                 plannedLocalIds.Add(dirtyLocal.Id);
+                var remoteIsUnchanged = !string.IsNullOrWhiteSpace(dirtyLocal.LastSyncedGoogleEtag)
+                    && string.Equals(dirtyLocal.LastSyncedGoogleEtag, remoteEvent.ETag, StringComparison.Ordinal);
                 plan.Add(new SyncPlanItem(
-                    conflictPolicy switch
+                    remoteIsUnchanged
+                        ? SyncPlanAction.PushLocal
+                        : conflictPolicy switch
                     {
                         SyncConflictPolicy.SkipLocalDirty => SyncPlanAction.SkipConflict,
                         SyncConflictPolicy.PreferLocal => SyncPlanAction.PushLocal,
@@ -1101,7 +1105,7 @@ public sealed class GoogleCalendarSyncService
                     },
                     dirtyLocal,
                     remoteEvent,
-                    IsConflict: true));
+                    IsConflict: !remoteIsUnchanged));
                 continue;
             }
 

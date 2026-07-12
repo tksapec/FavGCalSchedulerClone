@@ -142,6 +142,7 @@ public sealed partial class MainViewModel
             await _repository.SaveEventAsync(tombstone);
 
             candidate.GoogleEventId = null;
+            candidate.LastSyncedGoogleEtag = null;
             candidate.LastSyncedAt = null;
             if (candidate.IsRecurrenceException)
             {
@@ -224,6 +225,7 @@ public sealed partial class MainViewModel
         {
             Id = source.Id,
             GoogleEventId = source.GoogleEventId,
+            LastSyncedGoogleEtag = source.LastSyncedGoogleEtag,
             RecurringEventId = source.RecurringEventId,
             RecurringParentId = source.RecurringParentId,
             OriginalStart = source.OriginalStart,
@@ -290,6 +292,7 @@ public sealed partial class MainViewModel
         var clone = CloneEventForEditing(source);
         clone.Id = Guid.NewGuid().ToString("N");
         clone.GoogleEventId = null;
+        clone.LastSyncedGoogleEtag = null;
         clone.RecurringEventId = null;
         clone.RecurringParentId = null;
         clone.OriginalStart = null;

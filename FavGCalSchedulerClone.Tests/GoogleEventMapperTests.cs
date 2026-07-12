@@ -7,6 +7,17 @@ namespace FavGCalSchedulerClone.Tests;
 public sealed class GoogleEventMapperTests
 {
     [Fact]
+    public void FromGoogleEvent_PreservesRemoteEtagAsSyncBaseline()
+    {
+        var googleEvent = CreateTimedGoogleEvent();
+        googleEvent.ETag = "etag-1";
+
+        var local = GoogleEventMapper.FromGoogleEvent(googleEvent, "primary");
+
+        Assert.Equal("etag-1", local.LastSyncedGoogleEtag);
+    }
+
+    [Fact]
     public void FromGoogleEvent_MapsAllDayEventAsExclusiveEnd()
     {
         var googleEvent = new Event

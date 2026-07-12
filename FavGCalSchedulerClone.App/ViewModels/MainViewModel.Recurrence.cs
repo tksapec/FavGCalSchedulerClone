@@ -184,6 +184,7 @@ public sealed partial class MainViewModel
         var future = CloneEventForEditing(master);
         future.Id = Guid.NewGuid().ToString("N");
         future.GoogleEventId = null;
+        future.LastSyncedGoogleEtag = null;
         future.RecurringEventId = null;
         future.RecurringParentId = null;
         future.OriginalStart = null;
@@ -203,6 +204,7 @@ public sealed partial class MainViewModel
             var moved = CloneEventForEditing(child);
             moved.Id = Guid.NewGuid().ToString("N");
             moved.GoogleEventId = null;
+            moved.LastSyncedGoogleEtag = null;
             moved.RecurringParentId = future.Id;
             moved.RecurringEventId = future.GoogleEventId;
             moved.IsDirty = true;

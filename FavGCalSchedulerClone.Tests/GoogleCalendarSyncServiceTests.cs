@@ -1195,6 +1195,30 @@ public sealed class GoogleCalendarSyncServiceTests
         Assert.Equal(expectedTitle, (await repository.FindEventByIdAsync(local.Id))!.Title);
     }
 
+    [Fact]
+    public async Task SyncDirtyEventsAsync_PushesDirtyLinkedEventWhenRemoteEtagIsUnchanged()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        var settings = CreateSettings("work");
+        settings.SyncConflictPolicy = SyncConflictPolicy.SkipLocalDirty;
+        var local = new CalendarEvent
+        {
+            CalendarId = "work", GoogleEventId = "remote-unchanged-etag", LastSyncedGoogleEtag = "etag-1",
+            Title = "local title", Start = new DateTimeOffset(2026, 8, 2, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 8, 2, 10, 0, 0, TimeSpan.Zero), IsDirty = true
+        };
+        await repository.SaveEventAsync(local);
+        api.UpsertRemote("work", new Event { Id = local.GoogleEventId, ETag = "etag-1", Summary = "remote title", Start = DateTimeEvent(2026, 8, 2, 9), End = DateTimeEvent(2026, 8, 2, 10), Status = "confirmed" });
+
+        var result = await new GoogleCalendarSyncService(repository, api).SyncDirtyEventsAsync(settings, new HashSet<string>(StringComparer.Ordinal) { local.Id });
+
+        Assert.Equal(1, result.Pushed);
+        var stored = (await repository.FindEventByIdAsync(local.Id))!;
+        Assert.False(stored.IsDirty);
+        Assert.Equal("fake-etag-1", stored.LastSyncedGoogleEtag);
+    }
+
     [Theory]
     [InlineData(SyncConflictPolicy.SkipLocalDirty)]
     [InlineData(SyncConflictPolicy.PreferLocal)]
@@ -2302,6 +2326,7 @@ public sealed class GoogleCalendarSyncServiceTests
     private sealed class FakeGoogleCalendarApi : IGoogleCalendarApi, IConditionalGoogleCalendarClient
     {
         private int _nextId = 1;
+        private int _nextEtag = 1;
 
         public Dictionary<string, Dictionary<string, Event>> EventsByCalendar { get; } = new(StringComparer.Ordinal);
         public HashSet<string> ChangedRemoteKeys { get; } = new(StringComparer.Ordinal);
@@ -2359,6 +2384,7 @@ public sealed class GoogleCalendarSyncServiceTests
 
             var copy = Clone(googleEvent);
             copy.Id = $"fake-{_nextId++}";
+            copy.ETag = $"fake-etag-{_nextEtag++}";
             copy.Status ??= "confirmed";
             Calendar(calendarId)[copy.Id] = copy;
             Operations.Add($"insert:{calendarId}:{copy.Id}");
@@ -2390,6 +2416,7 @@ public sealed class GoogleCalendarSyncServiceTests
 
             var copy = Clone(googleEvent);
             copy.Id = eventId;
+            copy.ETag = $"fake-etag-{_nextEtag++}";
             copy.Status ??= "confirmed";
             Calendar(calendarId)[eventId] = copy;
             Operations.Add($"update:{calendarId}:{eventId}");
