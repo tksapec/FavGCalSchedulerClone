@@ -102,12 +102,13 @@ public sealed class CalendarRepositoryTests
             Start = start,
             End = start.AddHours(1),
             OriginalStart = originalStart,
-            LastSyncedAt = syncedAt
+            LastSyncedAt = syncedAt,
+            LastSyncedGoogleEtag = "etag-persisted"
         });
 
         await using var connection = OpenTestConnection(repository.DatabasePath);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT start, start_utc_ticks, end, end_utc_ticks, original_start, original_start_utc_ticks, last_synced_at, last_synced_at_utc_ticks FROM events WHERE id = 'ticks-written'";
+        command.CommandText = "SELECT start, start_utc_ticks, end, end_utc_ticks, original_start, original_start_utc_ticks, last_synced_at, last_synced_at_utc_ticks, last_synced_google_etag FROM events WHERE id = 'ticks-written'";
         await using var reader = await command.ExecuteReaderAsync();
         Assert.True(await reader.ReadAsync());
         Assert.Equal(start.ToString("O"), reader.GetString(0));
@@ -118,6 +119,29 @@ public sealed class CalendarRepositoryTests
         Assert.Equal(originalStart.UtcTicks, reader.GetInt64(5));
         Assert.Equal(syncedAt.ToString("O"), reader.GetString(6));
         Assert.Equal(syncedAt.UtcTicks, reader.GetInt64(7));
+        Assert.Equal("etag-persisted", reader.GetString(8));
+
+        var reloaded = (await repository.FindEventByIdAsync("ticks-written"))!;
+        Assert.Equal("etag-persisted", reloaded.LastSyncedGoogleEtag);
+    }
+
+    [Fact]
+    public async Task InitializeAsync_AddsGoogleEtagColumnToOldSchemaAndKeepsLegacyRowsReadable()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var start = new DateTimeOffset(2026, 7, 5, 9, 0, 0, TimeSpan.Zero);
+        await CreateOldSchemaAsync(dbPath, "legacy-etag", start, start.AddHours(1));
+
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+
+        var legacy = (await repository.FindEventByIdAsync("legacy-etag"))!;
+        Assert.Null(legacy.LastSyncedGoogleEtag);
+
+        await using var connection = OpenTestConnection(dbPath);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT last_synced_google_etag FROM events WHERE id = 'legacy-etag'";
+        Assert.True(await command.ExecuteScalarAsync() is DBNull);
     }
 
     [Fact]

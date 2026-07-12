@@ -112,6 +112,7 @@ public sealed class GoogleCalendarSyncServiceTests
         var created = (await repository.LoadEventsAsync(local.Start.AddDays(-1), local.End.AddDays(1))).Single();
         Assert.False(created.IsDirty);
         Assert.NotNull(created.GoogleEventId);
+        Assert.Equal("fake-etag-1", created.LastSyncedGoogleEtag);
         Assert.True(api.EventsByCalendar["work"].ContainsKey(created.GoogleEventId!));
         var inserted = api.EventsByCalendar["work"][created.GoogleEventId!];
         Assert.Equal(GoogleCalendarTimeZone.TokyoIanaId, inserted.Start.TimeZone);
@@ -122,6 +123,8 @@ public sealed class GoogleCalendarSyncServiceTests
         await repository.SaveEventAsync(created);
         await service.SyncAsync(settings);
         Assert.Contains(api.Operations, item => item == $"update:work:{created.GoogleEventId}");
+        var updatedLocal = (await repository.FindEventByIdAsync(created.Id))!;
+        Assert.Equal("fake-etag-2", updatedLocal.LastSyncedGoogleEtag);
         var updated = api.EventsByCalendar["work"][created.GoogleEventId!];
         Assert.Equal(GoogleCalendarTimeZone.TokyoIanaId, updated.Start.TimeZone);
         Assert.Equal(GoogleCalendarTimeZone.TokyoIanaId, updated.End.TimeZone);
@@ -1217,6 +1220,89 @@ public sealed class GoogleCalendarSyncServiceTests
         var stored = (await repository.FindEventByIdAsync(local.Id))!;
         Assert.False(stored.IsDirty);
         Assert.Equal("fake-etag-1", stored.LastSyncedGoogleEtag);
+    }
+
+    public static IEnumerable<object[]> LinkedDirtyEtagCases()
+    {
+        foreach (var syncPath in new[] { "InitialFull", "RecoveryFull", "DirtyOnly" })
+        {
+            foreach (var etagState in new[] { "Unchanged", "Changed", "Missing" })
+            {
+                foreach (var policy in Enum.GetValues<SyncConflictPolicy>())
+                {
+                    yield return [syncPath, etagState, policy];
+                }
+            }
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(LinkedDirtyEtagCases))]
+    public async Task LinkedDirtyEvent_UsesEtagBaselineAcrossAllRemoteSyncPaths(
+        string syncPath,
+        string etagState,
+        SyncConflictPolicy policy)
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        var settings = CreateSettings("work");
+        settings.SyncConflictPolicy = policy;
+        var local = new CalendarEvent
+        {
+            CalendarId = "work",
+            GoogleEventId = $"etag-{syncPath}-{etagState}-{policy}",
+            LastSyncedGoogleEtag = etagState switch
+            {
+                "Unchanged" => "etag-baseline",
+                "Changed" => "etag-old",
+                _ => null
+            },
+            Title = "local title",
+            Start = new DateTimeOffset(2026, 8, 4, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 8, 4, 10, 0, 0, TimeSpan.Zero),
+            IsDirty = true
+        };
+        await repository.SaveEventAsync(local);
+        api.UpsertRemote("work", new Event
+        {
+            Id = local.GoogleEventId,
+            ETag = etagState == "Unchanged" ? "etag-baseline" : "etag-remote",
+            Summary = "remote title",
+            Start = DateTimeEvent(2026, 8, 4, 9),
+            End = DateTimeEvent(2026, 8, 4, 10),
+            Status = "confirmed"
+        });
+
+        if (syncPath == "RecoveryFull")
+        {
+            await repository.SaveSyncTokenAsync("work", "stale-etag-token");
+            api.StaleSyncTokens.Add("stale-etag-token");
+        }
+
+        var service = new GoogleCalendarSyncService(repository, api);
+        var result = syncPath == "DirtyOnly"
+            ? await service.SyncDirtyEventsAsync(settings, new HashSet<string>(StringComparer.Ordinal) { local.Id })
+            : await service.SyncAsync(settings);
+
+        var isTrueConflict = etagState != "Unchanged";
+        var shouldPull = isTrueConflict && policy == SyncConflictPolicy.PreferGoogle;
+        var shouldSkip = isTrueConflict && policy == SyncConflictPolicy.SkipLocalDirty;
+        var shouldPush = !shouldPull && !shouldSkip;
+        var stored = (await repository.FindEventByIdAsync(local.Id))!;
+
+        Assert.Equal(shouldPush ? 1 : 0, result.Pushed);
+        Assert.Equal(shouldPull ? 1 : 0, result.Pulled);
+        Assert.Equal(shouldSkip ? 1 : 0, result.Skipped);
+        Assert.Equal(shouldSkip, stored.IsDirty);
+        Assert.Equal(shouldPull ? "remote title" : "local title", stored.Title);
+        if (shouldPush)
+        {
+            Assert.StartsWith("fake-etag-", stored.LastSyncedGoogleEtag);
+        }
+        else if (shouldPull)
+        {
+            Assert.Equal("etag-remote", stored.LastSyncedGoogleEtag);
+        }
     }
 
     [Theory]
