@@ -214,6 +214,40 @@ public sealed class MainViewModelViewModeTests
     }
 
     [Fact]
+    public async Task DisplayMonthPersistence_SnapshotsMutableSettingListsBeforeBackgroundSave()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        await viewModel.InitializeAsync();
+        var settings = viewModel.CreateSettingsSnapshot();
+        settings.VisibleCalendarIds = ["primary", "team"];
+        settings.EventColorSettings = [new EventColorSetting { ColorId = "11", Label = "Blue" }];
+
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        viewModel.BeforeSaveDisplayMonthAsync = async _ =>
+        {
+            started.SetResult();
+            await release.Task.ConfigureAwait(false);
+        };
+
+        viewModel.NextMonthCommand.Execute(null);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var save = viewModel.SaveApplicationSettingsAsync(settings);
+        release.SetResult();
+        await save;
+        await viewModel.FlushDisplayMonthPersistenceAsync();
+
+        var persisted = await repository.LoadSettingsAsync();
+        Assert.Equal(["primary", "team"], persisted.VisibleCalendarIds);
+        Assert.Single(persisted.EventColorSettings);
+        Assert.Equal("11", persisted.EventColorSettings[0].ColorId);
+        Assert.Equal(viewModel.CurrentMonth, persisted.DisplayMonth);
+    }
+
+    [Fact]
     public async Task FlushDisplayMonthPersistenceAsync_CompletesWhenInflightSaveStartedOnBlockedSynchronizationContext()
     {
         var viewModel = await CreateViewModelAsync();

@@ -59,6 +59,9 @@ public sealed partial class MainViewModel : ObservableObject
     private CancellationTokenSource? _deferredCalendarRefreshCts;
     private readonly SemaphoreSlim _displayMonthPersistenceGate = new(1, 1);
     private readonly SemaphoreSlim _settingsPersistenceGate = new(1, 1);
+    // Settings are edited on the UI thread but may be persisted by the delayed
+    // DisplayMonth worker.  Never let that worker serialize the live instance.
+    private readonly object _settingsStateLock = new();
     private CancellationTokenSource? _displayMonthPersistenceCts;
     private long _displayMonthPersistenceVersion;
     private CalendarCacheKey? _lastAppliedCalendarSnapshotKey;
@@ -590,7 +593,11 @@ public sealed partial class MainViewModel : ObservableObject
     public async Task InitializeAsync()
     {
         await _repository.InitializeAsync();
-        _settings = AppSettingsNormalizer.Normalize(await _repository.LoadSettingsAsync());
+        var loadedSettings = AppSettingsNormalizer.Normalize(await _repository.LoadSettingsAsync());
+        lock (_settingsStateLock)
+        {
+            _settings = loadedSettings;
+        }
         OAuthClientJsonPath = _settings.OAuthClientJsonPath ?? "";
         OnPropertyChanged(nameof(CalendarLabelFontSize));
         OnPropertyChanged(nameof(SideListFontSize));

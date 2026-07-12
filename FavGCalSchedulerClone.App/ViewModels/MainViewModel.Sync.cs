@@ -187,16 +187,22 @@ public sealed partial class MainViewModel
                 _settings,
                 refreshReminderMetadataAfterSync: invocationKind == SyncInvocationKind.Manual);
             var finishedAt = DateTimeOffset.Now;
-            if (invocationKind == SyncInvocationKind.Manual)
+            AppSettings settingsSnapshot;
+            lock (_settingsStateLock)
             {
-                _settings.LastManualSyncAt = finishedAt;
-            }
-            else if (invocationKind == SyncInvocationKind.Automatic)
-            {
-                _settings.LastAutomaticSyncAt = finishedAt;
+                if (invocationKind == SyncInvocationKind.Manual)
+                {
+                    _settings.LastManualSyncAt = finishedAt;
+                }
+                else if (invocationKind == SyncInvocationKind.Automatic)
+                {
+                    _settings.LastAutomaticSyncAt = finishedAt;
+                }
+
+                settingsSnapshot = CreateSettingsPersistenceSnapshotUnsafe();
             }
 
-            await PersistSettingsAsync();
+            await PersistSettingsAsync(settingsSnapshot);
             Status = "カレンダー再読み込み中...";
             var remaining = (await _repository.LoadDirtyEventsAsync()).Count;
             try

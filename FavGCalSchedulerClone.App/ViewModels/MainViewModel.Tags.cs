@@ -100,16 +100,23 @@ public sealed partial class MainViewModel
         }
 
         RefreshCalendarNames();
-        _settings.VisibleCalendarIds = AvailableCalendars.Where(item => item.IsSelected).Select(item => item.Id).ToList();
-        _settings.ActiveCalendarId = _settings.VisibleCalendarIds.FirstOrDefault() ?? ResolveEditorCalendarId();
-        if (!_settings.VisibleCalendarIds.Contains(EditorCalendarId, StringComparer.Ordinal))
+        AppSettings settingsSnapshot;
+        string activeCalendarId;
+        lock (_settingsStateLock)
         {
-            EditorCalendarId = _settings.ActiveCalendarId;
+            _settings.VisibleCalendarIds = AvailableCalendars.Where(item => item.IsSelected).Select(item => item.Id).ToList();
+            _settings.ActiveCalendarId = _settings.VisibleCalendarIds.FirstOrDefault() ?? ResolveEditorCalendarId();
+            activeCalendarId = _settings.ActiveCalendarId;
+            settingsSnapshot = CreateSettingsPersistenceSnapshotUnsafe();
+        }
+        if (!settingsSnapshot.VisibleCalendarIds.Contains(EditorCalendarId, StringComparer.Ordinal))
+        {
+            EditorCalendarId = activeCalendarId;
         }
 
         try
         {
-            await PersistSettingsAsync();
+            await PersistSettingsAsync(settingsSnapshot);
         }
         catch (Exception ex)
         {

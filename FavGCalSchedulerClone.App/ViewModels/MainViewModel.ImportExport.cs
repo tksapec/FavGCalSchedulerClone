@@ -141,6 +141,8 @@ public sealed partial class MainViewModel
             }
         }
 
+        lock (_settingsStateLock)
+        {
         if (values.TryGetValue("DeletePopup", out var deletePopup))
         {
             _settings.ConfirmBeforeDelete = deletePopup != "0";
@@ -224,6 +226,7 @@ public sealed partial class MainViewModel
         if (values.TryGetValue("SyncIntervalMin", out var syncMinutes) && int.TryParse(syncMinutes, out var interval))
         {
             _settings.AutomaticSyncIntervalMinutes = new[] { 30, 60, 120, 360 }.Contains(interval) ? interval : null;
+        }
         }
     }
 }

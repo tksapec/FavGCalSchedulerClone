@@ -593,13 +593,18 @@ public sealed partial class MainViewModel
 
     private void ScheduleDisplayMonthPersistence(DateTime month)
     {
-        _settings.DisplayMonth = new DateTime(month.Year, month.Month, 1);
+        DateTime persistedMonth;
+        lock (_settingsStateLock)
+        {
+            _settings.DisplayMonth = new DateTime(month.Year, month.Month, 1);
+            persistedMonth = _settings.DisplayMonth;
+        }
         var version = Interlocked.Increment(ref _displayMonthPersistenceVersion);
         var replacement = new CancellationTokenSource();
         var prior = Interlocked.Exchange(ref _displayMonthPersistenceCts, replacement);
         prior?.Cancel();
         prior?.Dispose();
-        _ = PersistDisplayMonthAfterDelayAsync(_settings.DisplayMonth, version, replacement.Token);
+        _ = PersistDisplayMonthAfterDelayAsync(persistedMonth, version, replacement.Token);
     }
 
     private async Task PersistDisplayMonthAfterDelayAsync(DateTime month, long version, CancellationToken cancellationToken)
@@ -620,7 +625,12 @@ public sealed partial class MainViewModel
         cancellation?.Cancel();
         cancellation?.Dispose();
         var version = Volatile.Read(ref _displayMonthPersistenceVersion);
-        await PersistDisplayMonthAsync(_settings.DisplayMonth, version, CancellationToken.None).ConfigureAwait(false);
+        DateTime month;
+        lock (_settingsStateLock)
+        {
+            month = _settings.DisplayMonth;
+        }
+        await PersistDisplayMonthAsync(month, version, CancellationToken.None).ConfigureAwait(false);
     }
 
     private async Task PersistDisplayMonthAsync(DateTime month, long version, CancellationToken cancellationToken)
@@ -640,7 +650,19 @@ public sealed partial class MainViewModel
                 await beforeSaveDisplayMonthAsync(month).ConfigureAwait(false);
             }
 
-            await PersistSettingsAsync().ConfigureAwait(false);
+            AppSettings snapshot;
+            lock (_settingsStateLock)
+            {
+                // A delayed request must not overwrite a newer month, but its
+                // persisted settings must include every newer interactive edit.
+                if (_settings.DisplayMonth != month)
+                {
+                    return;
+                }
+
+                snapshot = CreateSettingsPersistenceSnapshotUnsafe();
+            }
+            await PersistSettingsAsync(snapshot).ConfigureAwait(false);
             _logger?.LogInfo($"DisplayMonth persisted: {month:yyyy-MM}");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
