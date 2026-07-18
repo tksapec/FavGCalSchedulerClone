@@ -8,6 +8,20 @@ namespace FavGCalSchedulerClone.Tests;
 public sealed class JapaneseHolidayServiceTests
 {
     [Fact]
+    public async Task Project_PublishesTheBundledHolidayCsv()
+    {
+        var projectPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..",
+            "FavGCalSchedulerClone.App",
+            "FavGCalSchedulerClone.App.csproj"));
+
+        var project = await File.ReadAllTextAsync(projectPath);
+
+        Assert.Contains("CopyToPublishDirectory=\"PreserveNewest\"", project);
+    }
+
+    [Fact]
     public async Task UpdateFromOfficialSourceAsync_DecodesShiftJisAndWritesTheLocalOverride()
     {
         var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

@@ -11,7 +11,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Content Include="Data\JapaneseHolidays.csv" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Data\JapaneseHolidays.csv" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" />
     <PackageReference Include="Google.Apis.Calendar.v3" Version="1.74.0.4073" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.8" />
