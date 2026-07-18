@@ -4,7 +4,9 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
-        Title="FavGCalSchedulerClone" Height="760" Width="1180" MinHeight="720" MinWidth="1040"
+        Title="FavGCalSchedulerClone" Height="720" Width="1180" MinHeight="600" MinWidth="960"
+        MaxHeight="{Binding Source={x:Static SystemParameters.WorkArea}, Path=Height}"
+        WindowStartupLocation="CenterScreen"
         FontFamily="Meiryo UI" FontSize="12"
         Background="#EDF1F5" Opacity="{Binding WindowOpacity}"
         Closing="Window_Closing">
@@ -85,11 +87,42 @@
             </Setter>
         </Style>
 
-        <Style x:Key="MonthNavRepeatButton" TargetType="RepeatButton">
-            <Setter Property="MinWidth" Value="76" />
-            <Setter Property="Height" Value="30" />
+        <Style x:Key="MonthPeriodButton" TargetType="Button">
+            <Setter Property="MinWidth" Value="190" />
+            <Setter Property="Height" Value="26" />
             <Setter Property="Padding" Value="8,0" />
-            <Setter Property="Margin" Value="3,0" />
+            <Setter Property="Foreground" Value="#FFFFFF" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="ToolTip" Value="今日へ戻る" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1" CornerRadius="3">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#31465C" />
+                                <Setter Property="BorderBrush" Value="#6B7F93" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter Property="Background" Value="#1D2A38" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="MonthNavRepeatButton" TargetType="RepeatButton">
+            <Setter Property="MinWidth" Value="64" />
+            <Setter Property="Height" Value="26" />
+            <Setter Property="Padding" Value="6,0" />
+            <Setter Property="Margin" Value="2,0" />
             <Setter Property="Foreground" Value="#FFFFFF" />
             <Setter Property="Background" Value="#34495E" />
             <Setter Property="BorderBrush" Value="#50657A" />
@@ -331,28 +364,20 @@
             </MenuItem>
         </Menu>
 
-        <Grid DockPanel.Dock="Top" Height="46" Background="{StaticResource ChromeBrush}">
+        <Grid DockPanel.Dock="Top" Height="32" Background="{StaticResource ChromeBrush}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="92" />
-                <ColumnDefinition Width="92" />
-                <ColumnDefinition Width="300" />
-                <ColumnDefinition Width="92" />
-                <ColumnDefinition Width="92" />
+                <ColumnDefinition Width="72" />
+                <ColumnDefinition Width="72" />
+                <ColumnDefinition Width="220" />
+                <ColumnDefinition Width="72" />
+                <ColumnDefinition Width="72" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
             <RepeatButton Grid.Column="1" Style="{StaticResource MonthNavRepeatButton}" Content="{Binding PreviousYearLabel}" Command="{Binding PreviousYearCommand}" />
             <RepeatButton Grid.Column="2" Style="{StaticResource MonthNavRepeatButton}" Content="{Binding PreviousMonthLabel}" Command="{Binding PreviousMonthCommand}" />
-            <StackPanel Grid.Column="3" HorizontalAlignment="Center" VerticalAlignment="Center">
-                <TextBlock Text="{Binding CurrentPeriodTitle}" Foreground="#FFFFFF" FontSize="15" FontWeight="SemiBold"
-                           HorizontalAlignment="Center" />
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,2,0,0">
-                    <Button Style="{StaticResource MonthNavButton}" Content="今日" Command="{Binding TodayCommand}"
-                            MinWidth="64" Height="20" FontSize="11" Padding="8,0" Margin="0,0,3,0" />
-                    <Button Style="{StaticResource MonthNavButton}" Content="移動" Command="{Binding ShowMonthJumpCommand}"
-                            MinWidth="54" Height="20" FontSize="11" Padding="8,0" Margin="3,0,0,0" />
-                </StackPanel>
-            </StackPanel>
+            <Button Grid.Column="3" Style="{StaticResource MonthPeriodButton}"
+                    Content="{Binding CurrentPeriodTitle}" Command="{Binding TodayCommand}" />
             <RepeatButton Grid.Column="4" Style="{StaticResource MonthNavRepeatButton}" Content="{Binding NextMonthLabel}" Command="{Binding NextMonthCommand}" />
             <RepeatButton Grid.Column="5" Style="{StaticResource MonthNavRepeatButton}" Content="{Binding NextYearLabel}" Command="{Binding NextYearCommand}" />
         </Grid>
@@ -374,6 +399,7 @@
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="6" />
                     <ColumnDefinition Width="330" />
                 </Grid.ColumnDefinitions>
 
@@ -381,11 +407,28 @@
                     <Border BorderBrush="{StaticResource GridLineBrush}" BorderThickness="1" Background="White"
                             Visibility="{Binding IsMonthView, Converter={StaticResource BoolToVisibilityConverter}}">
                         <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="30" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
-                                <RowDefinition Height="28" />
+                                <RowDefinition Height="22" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
-                            <ItemsControl ItemsSource="{Binding WeekdayHeaders}" Background="#E2E8F0">
+                            <Border Grid.Row="0" Grid.Column="0" Background="#E2E8F0">
+                                <TextBlock Text="週" Foreground="#334155" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10" FontWeight="SemiBold" />
+                            </Border>
+                            <ItemsControl Grid.Row="1" Grid.Column="0" ItemsSource="{Binding MonthWeekNumbers}" Background="#F1F5F9" IsHitTestVisible="False">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><UniformGrid Rows="6" /></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding DisplayText}" ToolTip="{Binding ToolTipText}" Foreground="#475569" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <ItemsControl Grid.Row="0" Grid.Column="1" ItemsSource="{Binding WeekdayHeaders}" Background="#E2E8F0">
                                 <ItemsControl.ItemsPanel>
                                     <ItemsPanelTemplate><UniformGrid Columns="7" /></ItemsPanelTemplate>
                                 </ItemsControl.ItemsPanel>
@@ -396,7 +439,7 @@
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
 
-                            <ListBox x:Name="DayList" Grid.Row="1" ItemsSource="{Binding VisibleCalendarDays}" SelectedItem="{Binding SelectedDay, Mode=TwoWay}"
+                            <ListBox x:Name="DayList" Grid.Row="1" Grid.Column="1" ItemsSource="{Binding VisibleCalendarDays}" SelectedItem="{Binding SelectedDay, Mode=TwoWay}"
                                      BorderThickness="0" Background="Transparent" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled"
                                      MouseDoubleClick="DayList_MouseDoubleClick">
                                 <ListBox.ItemsPanel>
@@ -433,7 +476,7 @@
                                                     <RowDefinition Height="*" />
                                                     <RowDefinition Height="Auto" />
                                                 </Grid.RowDefinitions>
-                                                <TextBlock Grid.Row="0" Text="{Binding Date.Day}" Foreground="#334155"
+                                                <TextBlock Grid.Row="0" Text="{Binding Date.Day}" ToolTip="{Binding DayToolTipText}" Foreground="#334155"
                                                            FontSize="15" FontWeight="SemiBold" Margin="5,5,5,0" />
                                                 <ItemsControl Grid.Row="1" ItemsSource="{Binding Segments}" Margin="0,3,0,0" HorizontalAlignment="Stretch" ClipToBounds="True">
                                                     <ItemsControl.ItemTemplate>
@@ -568,7 +611,11 @@
                     </Border>
                 </Grid>
 
-                <Border Grid.Column="1" Margin="8,0,0,0" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="1"
+                <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                              Background="Transparent" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
+                              ShowsPreview="True" />
+
+                <Border Grid.Column="2" Margin="8,0,0,0" BorderBrush="{StaticResource GridLineBrush}" BorderThickness="1"
                         Background="{StaticResource PanelBrush}"
                         Visibility="{Binding IsMonthView, Converter={StaticResource BoolToVisibilityConverter}}">
                     <Grid>
@@ -584,7 +631,11 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="*" />
                                 </Grid.RowDefinitions>
-                                <TextBlock Text="選択日の予定" FontSize="13" FontWeight="SemiBold" Foreground="#1E293B" Margin="0,0,0,8" />
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                    <TextBlock Text="選択日の予定" FontSize="13" FontWeight="SemiBold" Foreground="#1E293B" />
+                                    <TextBlock Text="{Binding SelectedDay.Date, StringFormat={}{0:yyyy/MM/dd}}"
+                                               FontSize="12" Foreground="#475569" Margin="8,1,0,0" />
+                                </StackPanel>
                                 <DataGrid Grid.Row="1" ItemsSource="{Binding SelectedDayEvents}" SelectedItem="{Binding SelectedEvent}"
                                           PreviewMouseRightButtonDown="SidePanelEventsGrid_PreviewMouseRightButtonDown"
                                           MouseDoubleClick="SelectedDayEventsGrid_MouseDoubleClick">

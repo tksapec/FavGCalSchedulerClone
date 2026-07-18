@@ -65,4 +65,36 @@ public sealed class EditorTimeParserTests
         Assert.False(ScheduleEditorDialog.TryCreateEndTimeFromDuration(startTime, TimeSpan.FromMinutes(30), out var endTime));
         Assert.Equal(startTime, endTime);
     }
+
+    [Theory]
+    [InlineData("09:00", "10:30", "10:00", "11:30")]
+    [InlineData("23:30", "00:00", "00:30", "01:00")]
+    public void TryShiftEndTimeForStartChange_PreservesTheExistingOffset(
+        string previousStart,
+        string updatedStart,
+        string currentEnd,
+        string expectedEnd)
+    {
+        var shifted = ScheduleEditorDialog.TryShiftEndTimeForStartChange(
+            previousStart,
+            updatedStart,
+            currentEnd,
+            out var endTime);
+
+        Assert.True(shifted);
+        Assert.Equal(expectedEnd, endTime);
+    }
+
+    [Fact]
+    public void TryShiftEndTimeForStartChange_LeavesTheEndTimeUntouchedWhenAValueIsInvalid()
+    {
+        var shifted = ScheduleEditorDialog.TryShiftEndTimeForStartChange(
+            "09:00",
+            "invalid",
+            "10:00",
+            out var endTime);
+
+        Assert.False(shifted);
+        Assert.Equal("10:00", endTime);
+    }
 }

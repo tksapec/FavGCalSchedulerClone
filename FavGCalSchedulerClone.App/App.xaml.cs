@@ -35,6 +35,9 @@ public partial class App : System.Windows.Application
         base.OnStartup(e);
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
         _serviceProvider = CreateServiceProvider();
+        JapaneseHolidayService.LoadFromFile(
+            AppPaths.JapaneseHolidayDataPath,
+            _serviceProvider.GetRequiredService<IAppLogger>());
         CreateTrayIcon();
 
         var mainWindow = _serviceProvider.GetRequiredService<MainWindow>();

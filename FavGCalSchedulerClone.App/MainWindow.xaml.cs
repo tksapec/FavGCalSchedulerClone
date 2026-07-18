@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Net.Http;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -1335,6 +1336,7 @@ public partial class MainWindow : Window
                 _viewModel.ClearTokensAsync,
                 _viewModel.ReloadAvailableCalendarsAsync,
                 _viewModel.RefreshGoogleReminderMetadataAsync,
+                UpdateJapaneseHolidaysAsync,
                 settings => _reminderService.ShowTestNotificationDetailedAsync(CreateReminderNotifier(settings))));
         if (result is null)
         {
@@ -1344,6 +1346,15 @@ public partial class MainWindow : Window
         await _viewModel.SetOAuthClientJsonPathAsync(result.OAuthClientJsonPath);
         await _viewModel.SaveApplicationSettingsAsync(result.Settings);
         _reminderService.SetNotifier(CreateReminderNotifier());
+    }
+
+    private async Task<bool> UpdateJapaneseHolidaysAsync()
+    {
+        using var client = new HttpClient();
+        return await JapaneseHolidayService.UpdateFromOfficialSourceAsync(
+            client,
+            AppPaths.JapaneseHolidayDataPath,
+            _logger);
     }
 
     private async Task ShowMonthJumpDialogAsync()

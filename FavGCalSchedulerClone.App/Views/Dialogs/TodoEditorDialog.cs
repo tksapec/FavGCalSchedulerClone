@@ -8,17 +8,17 @@ internal static class TodoEditorDialog
 {
     internal const double DueDateColumnPhysicalWidth = 230;
     internal const double UpperDueColumnWeight = 2.4;
-    private const double TodoMinWidthPhysical = 640;
-    private const double TodoMinHeightPhysical = 450;
-    private const double TodoDescriptionMinHeightPhysical = 90;
+    private const double TodoMinWidthPhysical = 560;
+    private const double TodoMinHeightPhysical = 400;
+    private const double TodoDescriptionMinHeightPhysical = 72;
     private static readonly string[] PriorityItems = ["A", "B", "C", "D", "E", "F"];
 
     public static TodoEditorResult? Show(DialogUiFactory ui, TodoEditorRequest request)
     {
         var window = ui.CreateOwnedDialog(
             request.IsNew ? "ＴＯＤＯの追加" : "ＴＯＤＯの編集",
-            824,
-            610,
+            760,
+            520,
             usePhysicalPixelSize: true,
             resizeMode: ResizeMode.CanResize,
             minWidth: TodoMinWidthPhysical,
@@ -147,10 +147,13 @@ internal static class TodoEditorDialog
         var dueGroup = new GroupBox { Header = "期限／進捗", Padding = ui.Thickness(16, 16, 16, 8), Margin = new Thickness(0, 0, ui.X(10), ui.Y(10)) };
         var dueGrid = new Grid();
         dueGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ui.X(DueDateColumnPhysicalWidth)) });
+        dueGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ui.X(16)) });
+        dueGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ui.X(110)) });
         dueGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         dueGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         dueGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         ui.AddLabeledField(dueGrid, 0, 0, "期限", dueDate);
+        ui.AddLabeledField(dueGrid, 0, 2, "優先度", priority, rightMarginPhysicalPixels: 0);
         var progressPanel = new StackPanel { Orientation = Orientation.Horizontal };
         progressPanel.Children.Add(progressInput);
         if (!ReferenceEquals(progressInput, complete))
@@ -163,29 +166,12 @@ internal static class TodoEditorDialog
         }
         progressPanel.Margin = new Thickness(0, 0, 0, ui.Y(12));
         Grid.SetRow(progressPanel, 1);
-        Grid.SetColumnSpan(progressPanel, 2);
+        Grid.SetColumnSpan(progressPanel, 4);
         dueGrid.Children.Add(progressPanel);
         dueGroup.Content = dueGrid;
 
-        var priorityGroup = new GroupBox { Header = "優先度", Padding = ui.Thickness(16, 16, 16, 16), Margin = new Thickness(0, 0, 0, ui.Y(10)) };
-        var priorityGrid = new Grid();
-        priorityGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ui.X(110)) });
-        ui.AddLabeledField(priorityGrid, 0, 0, "優先度", priority);
-        priorityGroup.Content = priorityGrid;
-
-        var upper = new Grid();
-        upper.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(UpperDueColumnWeight, GridUnitType.Star) });
-        upper.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        Grid.SetColumn(dueGroup, 0);
-        Grid.SetColumn(priorityGroup, 1);
-        upper.Children.Add(dueGroup);
-        upper.Children.Add(priorityGroup);
-        Grid.SetRow(upper, 0);
-        root.Children.Add(upper);
-
         var detailsGroup = new GroupBox { Header = "ToDo詳細", Padding = ui.Thickness(18, 14, 18, 10), Margin = new Thickness(0, 0, 0, ui.Y(10)) };
         var details = new Grid();
-        details.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         details.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         details.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         details.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -195,14 +181,35 @@ internal static class TodoEditorDialog
         ui.AddLabeledField(details, 0, 0, "件名", title, columnSpan: 3);
         ui.AddLabeledField(details, 1, 0, "予定の色", color, rightMarginPhysicalPixels: 0);
         ui.AddLabeledField(details, 1, 2, "カレンダー", calendar);
-        ui.AddLabeledField(details, 3, 0, "内容", description, columnSpan: 3, stretchVertically: true);
+        ui.AddLabeledField(details, 2, 0, "内容", description, columnSpan: 3, stretchVertically: true);
         detailsGroup.Content = details;
+        var form = new Grid();
+        form.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        form.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        Grid.SetRow(dueGroup, 0);
+        form.Children.Add(dueGroup);
         Grid.SetRow(detailsGroup, 1);
-        root.Children.Add(detailsGroup);
+        form.Children.Add(detailsGroup);
+
+        var formScrollViewer = new ScrollViewer
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Content = form
+        };
+        Grid.SetRow(formScrollViewer, 0);
+        Grid.SetRowSpan(formScrollViewer, 2);
+        root.Children.Add(formScrollViewer);
 
         var buttons = ui.DialogButtons(window, isNew ? "登録" : "保存", "キャンセル");
         Grid.SetRow(buttons, 2);
         root.Children.Add(buttons);
+
+        window.Loaded += (_, _) =>
+        {
+            title.Focus();
+            title.SelectAll();
+        };
     }
 }
 

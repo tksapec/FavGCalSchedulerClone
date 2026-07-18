@@ -168,6 +168,38 @@ public sealed partial class MainWindowMenuTests
     }
 
     [Fact]
+    public async Task MainWindow_KeepsTheUsableAreaVisibleAndMakesTheSidePanelAdjustable()
+    {
+        var xaml = await File.ReadAllTextAsync(MainWindowXamlPath);
+
+        Assert.Contains("Height=\"720\" Width=\"1180\" MinHeight=\"600\" MinWidth=\"960\"", xaml);
+        Assert.Contains("WindowStartupLocation=\"CenterScreen\"", xaml);
+        Assert.Contains("MaxHeight=\"{Binding Source={x:Static SystemParameters.WorkArea}, Path=Height}\"", xaml);
+        Assert.Contains("<ColumnDefinition Width=\"6\" />", xaml);
+        Assert.Contains("<GridSplitter Grid.Column=\"1\"", xaml);
+    }
+
+    [Fact]
+    public async Task MainWindow_ShowsTheSelectedDateInTheSidePanelHeader()
+    {
+        var xaml = await File.ReadAllTextAsync(MainWindowXamlPath);
+
+        Assert.Contains("Text=\"{Binding SelectedDay.Date, StringFormat={}{0:yyyy/MM/dd}}\"", xaml);
+    }
+
+    [Fact]
+    public async Task MainWindow_UsesACompactMonthHeaderAndReturnsToTodayFromThePeriodTitle()
+    {
+        var xaml = await File.ReadAllTextAsync(MainWindowXamlPath);
+
+        Assert.Contains("<Grid DockPanel.Dock=\"Top\" Height=\"32\"", xaml);
+        Assert.Contains("<RowDefinition Height=\"22\" />", xaml);
+        Assert.Contains("Content=\"{Binding CurrentPeriodTitle}\" Command=\"{Binding TodayCommand}\"", xaml);
+        Assert.DoesNotContain("Content=\"今日\" Command=\"{Binding TodayCommand}\"", xaml);
+        Assert.DoesNotContain("Content=\"移動\" Command=\"{Binding ShowMonthJumpCommand}\"", xaml);
+    }
+
+    [Fact]
     public async Task DayCell_WeekendTriggersOverrideOutsideMonthTrigger()
     {
         var xaml = await File.ReadAllTextAsync(MainWindowXamlPath);
@@ -178,6 +210,27 @@ public sealed partial class MainWindowMenuTests
         Assert.True(
             xaml.IndexOf("Binding=\"{Binding IsSaturday}\"", StringComparison.Ordinal) <
             xaml.IndexOf("Binding=\"{Binding IsWorkdayOverride}\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task MonthView_ShowsAWeekNumberColumnWithoutChangingTheSevenDayGrid()
+    {
+        var xaml = await File.ReadAllTextAsync(MainWindowXamlPath);
+
+        Assert.Contains("<ColumnDefinition Width=\"30\" />", xaml);
+        Assert.Contains("ItemsSource=\"{Binding MonthWeekNumbers}\"", xaml);
+        Assert.Contains("Grid.Column=\"1\" ItemsSource=\"{Binding WeekdayHeaders}\"", xaml);
+        Assert.Contains("Grid.Row=\"1\" Grid.Column=\"1\" ItemsSource=\"{Binding VisibleCalendarDays}\"", xaml);
+    }
+
+    [Fact]
+    public async Task SettingsDialog_OffersAnExplicitJapaneseHolidayRefresh()
+    {
+        var settingsPath = Path.Combine(Path.GetDirectoryName(MainWindowXamlPath)!, "Views", "Dialogs", "SettingsDialog.cs");
+        var settings = await File.ReadAllTextAsync(settingsPath);
+
+        Assert.Contains("Content = \"祝日を更新\"", settings);
+        Assert.Contains("UpdateJapaneseHolidaysAsync", settings);
     }
 
 }

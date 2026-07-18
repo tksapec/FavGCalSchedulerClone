@@ -8,6 +8,7 @@ public static class AppPaths
 
     public static string DatabasePath => Path.Combine(AppDataDirectory, "calendar.db");
     public static string TokenDirectory => Path.Combine(AppDataDirectory, "tokens");
+    public static string JapaneseHolidayDataPath => Path.Combine(AppDataDirectory, "JapaneseHolidays.csv");
 
     public static void Ensure()
     {

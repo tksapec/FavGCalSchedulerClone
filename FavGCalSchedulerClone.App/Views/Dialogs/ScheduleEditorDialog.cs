@@ -7,9 +7,9 @@ namespace FavGCalSchedulerClone.App.Views.Dialogs;
 
 internal static class ScheduleEditorDialog
 {
-    private const double ScheduleMinWidthPhysical = 980;
-    private const double ScheduleMinHeightPhysical = 620;
-    private const double ScheduleDescriptionMinHeightPhysical = 120;
+    private const double ScheduleMinWidthPhysical = 860;
+    private const double ScheduleMinHeightPhysical = 560;
+    private const double ScheduleDescriptionMinHeightPhysical = 96;
 
     public static ScheduleEditorResult? Show(
         DialogUiFactory ui,
@@ -19,8 +19,8 @@ internal static class ScheduleEditorDialog
     {
         var window = ui.CreateOwnedDialog(
             request.IsNew ? "スケジュールの追加" : "スケジュールの編集",
-            1320,
-            830,
+            1180,
+            720,
             usePhysicalPixelSize: true,
             resizeMode: ResizeMode.CanResize,
             minWidth: ScheduleMinWidthPhysical,
@@ -110,6 +110,30 @@ internal static class ScheduleEditorDialog
         endDate.SelectedDateChanged += (_, _) => UpdateDayCount();
         dayCount.LostFocus += (_, _) => UpdateEndDateFromCount();
         UpdateDayCount();
+
+        var previousStartTime = NormalizeTimeText(startTime.Text);
+        var shiftingEndTime = false;
+        void ShiftEndTimeForStartTimeChange()
+        {
+            if (shiftingEndTime || isAllDay.IsChecked == true)
+            {
+                return;
+            }
+
+            var updatedStartTime = NormalizeTimeText(startTime.Text);
+            if (TryShiftEndTimeForStartChange(previousStartTime, updatedStartTime, endTime.Text, out var shiftedEndTime))
+            {
+                shiftingEndTime = true;
+                startTime.Text = updatedStartTime;
+                endTime.Text = shiftedEndTime;
+                shiftingEndTime = false;
+            }
+
+            previousStartTime = updatedStartTime;
+        }
+
+        startTime.SelectionChanged += (_, _) => ShiftEndTimeForStartTimeChange();
+        startTime.LostKeyboardFocus += (_, _) => ShiftEndTimeForStartTimeChange();
 
         void ApplyDurationShortcut(TimeSpan duration)
         {
@@ -205,7 +229,7 @@ internal static class ScheduleEditorDialog
 
         var form = new Grid();
         form.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        form.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        form.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         Grid.SetRow(upper, 0);
         form.Children.Add(upper);
         Grid.SetRow(detailsGroup, 1);
@@ -224,6 +248,8 @@ internal static class ScheduleEditorDialog
         var buttons = ui.DialogButtons(window, request.IsNew ? "登録" : "保存", "キャンセル");
         Grid.SetRow(buttons, 2);
         root.Children.Add(buttons);
+
+        window.Loaded += (_, _) => title.Focus();
 
         var accepted = false;
         var shouldRestoreOwner = hideOwner();
@@ -467,6 +493,44 @@ internal static class ScheduleEditorDialog
         var end = start.Add(duration);
         endTime = $"{end.Hours:00}:{end.Minutes:00}";
         return true;
+    }
+
+    internal static bool TryShiftEndTimeForStartChange(
+        string? previousStartTime,
+        string? updatedStartTime,
+        string? currentEndTime,
+        out string endTime)
+    {
+        endTime = currentEndTime ?? "";
+        if (!TryParseTimeOfDay(previousStartTime, out var previousStart)
+            || !TryParseTimeOfDay(updatedStartTime, out var updatedStart)
+            || !TryParseTimeOfDay(currentEndTime, out var currentEnd))
+        {
+            return false;
+        }
+
+        var minutesInDay = (int)TimeSpan.FromDays(1).TotalMinutes;
+        var shiftedMinutes = ((int)currentEnd.TotalMinutes + (int)(updatedStart - previousStart).TotalMinutes) % minutesInDay;
+        if (shiftedMinutes < 0)
+        {
+            shiftedMinutes += minutesInDay;
+        }
+
+        endTime = $"{shiftedMinutes / 60:00}:{shiftedMinutes % 60:00}";
+        return true;
+    }
+
+    private static bool TryParseTimeOfDay(string? value, out TimeSpan time)
+    {
+        return TimeSpan.TryParseExact(
+            NormalizeTimeText(value),
+            "hh\\:mm",
+            CultureInfo.InvariantCulture,
+            out time)
+            && time.Days == 0
+            && time.Hours is >= 0 and <= 23
+            && time.Minutes is >= 0 and <= 59
+            && time.Seconds == 0;
     }
 
     private static IEnumerable<string> TimeChoices()

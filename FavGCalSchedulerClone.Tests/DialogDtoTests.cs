@@ -139,6 +139,28 @@ public sealed class DialogDtoTests
     }
 
     [Fact]
+    public async Task ScheduleAndTodoEditors_KeepTheButtonsVisibleWhenTheFormNeedsToScroll()
+    {
+        var scheduleCode = await File.ReadAllTextAsync(DialogSourcePath("ScheduleEditorDialog.cs"));
+        var todoCode = await File.ReadAllTextAsync(DialogSourcePath("TodoEditorDialog.cs"));
+
+        Assert.Contains("form.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });", scheduleCode);
+        Assert.Contains("form.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });", scheduleCode);
+        Assert.Contains("var formScrollViewer = new ScrollViewer", todoCode);
+        Assert.Contains("Grid.SetRowSpan(formScrollViewer, 2)", todoCode);
+        Assert.Contains("Grid.SetRow(buttons, 2)", todoCode);
+    }
+
+    [Fact]
+    public async Task TodoEditor_UsesItsFlexibleDetailsRowForTheDescription()
+    {
+        var todoCode = await File.ReadAllTextAsync(DialogSourcePath("TodoEditorDialog.cs"));
+
+        Assert.Contains("ui.AddLabeledField(details, 2, 0,", todoCode);
+        Assert.DoesNotContain("ui.AddLabeledField(details, 3, 0,", todoCode);
+    }
+
+    [Fact]
     public async Task ScheduleEditor_UsesTheSharedEditableHistoryComboBoxForLocationAndTitle()
     {
         var scheduleCode = await File.ReadAllTextAsync(DialogSourcePath("ScheduleEditorDialog.cs"));
