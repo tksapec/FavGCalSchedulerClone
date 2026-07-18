@@ -20,8 +20,8 @@ public sealed class ReadmeTests
     {
         var readme = await File.ReadAllTextAsync(ReadmePath);
 
-        Assert.Contains("ISO 週番号", readme);
-        Assert.Contains("祝日を更新", readme);
+        Assert.Contains("ISO週番号", readme);
+        Assert.Contains("オンライン更新", readme);
         Assert.Contains("内閣府", readme);
     }
 }

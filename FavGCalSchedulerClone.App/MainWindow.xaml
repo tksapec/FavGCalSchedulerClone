@@ -196,9 +196,9 @@
             <Setter Property="BorderBrush" Value="#64748B" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="2" />
-            <Setter Property="Height" Value="16" />
+            <Setter Property="Height" Value="15" />
             <Setter Property="Margin" Value="0,1,0,0" />
-            <Setter Property="Padding" Value="3,0" />
+            <Setter Property="Padding" Value="2,0" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="ClipToBounds" Value="True" />
         </Style>
@@ -207,6 +207,9 @@
             <Setter Property="Background" Value="{Binding DisplayColor}" />
             <Setter Property="ToolTip" Value="{Binding ToolTipText}" />
             <Style.Triggers>
+                <DataTrigger Binding="{Binding Lane}" Value="0">
+                    <Setter Property="Padding" Value="26,0,2,0" />
+                </DataTrigger>
                 <DataTrigger Binding="{Binding IsVisible}" Value="False">
                     <Setter Property="Background" Value="Transparent" />
                     <Setter Property="BorderBrush" Value="Transparent" />
@@ -476,9 +479,8 @@
                                                     <RowDefinition Height="*" />
                                                     <RowDefinition Height="Auto" />
                                                 </Grid.RowDefinitions>
-                                                <TextBlock Grid.Row="0" Text="{Binding Date.Day}" ToolTip="{Binding DayToolTipText}" Foreground="#334155"
-                                                           FontSize="15" FontWeight="SemiBold" Margin="5,5,5,0" />
-                                                <ItemsControl Grid.Row="1" ItemsSource="{Binding Segments}" Margin="0,3,0,0" HorizontalAlignment="Stretch" ClipToBounds="True">
+                                                <TextBlock Grid.Row="0" Visibility="Collapsed" />
+                                                <ItemsControl Grid.Row="1" Grid.RowSpan="2" ItemsSource="{Binding Segments}" Margin="0" HorizontalAlignment="Stretch" ClipToBounds="True">
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate>
                                                             <Border Style="{StaticResource EventSegmentBar}"
@@ -499,9 +501,15 @@
                                                         </DataTemplate>
                                                     </ItemsControl.ItemTemplate>
                                                 </ItemsControl>
-                                                <TextBlock Grid.Row="2" Text="{Binding HiddenEventText}" Foreground="#B45309"
-                                                           FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Right"
-                                                           Margin="0,1,5,2" Visibility="{Binding HasHiddenEvents, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                                <Border Panel.ZIndex="10" HorizontalAlignment="Left" VerticalAlignment="Top" MinWidth="24" Height="16"
+                                                        Background="#CCFFFFFF" IsHitTestVisible="False" Margin="2,1,0,0">
+                                                    <TextBlock Text="{Binding Date.Day}" ToolTip="{Binding DayToolTipText}" Foreground="#334155"
+                                                               FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                </Border>
+                                                <Border Panel.ZIndex="20" HorizontalAlignment="Right" VerticalAlignment="Bottom" Background="#CCFFFFFF"
+                                                        IsHitTestVisible="False" Margin="0,0,2,1" Visibility="{Binding HasHiddenEvents, Converter={StaticResource BoolToVisibilityConverter}}">
+                                                    <TextBlock Text="{Binding HiddenEventText}" Foreground="#B45309" FontSize="11" FontWeight="SemiBold" Margin="2,0" />
+                                                </Border>
                                             </Grid>
                                         </Border>
                                     </DataTemplate>

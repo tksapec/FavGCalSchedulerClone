@@ -229,7 +229,7 @@ public sealed partial class MainWindowMenuTests
         var settingsPath = Path.Combine(Path.GetDirectoryName(MainWindowXamlPath)!, "Views", "Dialogs", "SettingsDialog.cs");
         var settings = await File.ReadAllTextAsync(settingsPath);
 
-        Assert.Contains("Content = \"祝日を更新\"", settings);
+        Assert.Contains("Content = \"祝日データをオンライン更新\"", settings);
         Assert.Contains("UpdateJapaneseHolidaysAsync", settings);
     }
 
