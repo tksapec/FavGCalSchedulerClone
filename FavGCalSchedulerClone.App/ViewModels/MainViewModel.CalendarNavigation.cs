@@ -448,8 +448,13 @@ public sealed partial class MainViewModel
             // issue an intermediate empty collection Reset for every cell.
             UpdateCalendarDayShell(day, date);
             day.IsWorkdayOverride = TagService.HasWorkdayOverride(_dayDirectiveEvents, date);
-            day.IsHoliday = TagService.HasHolidayWithoutWorkdayOverride(_dayDirectiveEvents, date);
+            var officialHoliday = JapaneseHolidayService.GetHolidayName(DateOnly.FromDateTime(date));
+            day.HolidayName = officialHoliday ?? (TagService.HasHolidayWithoutWorkdayOverride(_dayDirectiveEvents, date) ? "ユーザー指定休日" : null);
+            day.IsHoliday = !day.IsWorkdayOverride && (officialHoliday is not null || day.HolidayName is not null);
         }
+
+        RefreshHolidayShells();
+        _monthWeekNumbers.ReplaceAll(CalendarWeekNumber.CreateRows(snapshot.GridStart, _settings.WeekStartsOnMonday));
 
         ApplySegmentLayout(CalendarDays, IsMonthView ? _monthLaneCapacity : CalendarSegmentLayoutService.MaxLanes);
 
@@ -1052,9 +1057,31 @@ public sealed partial class MainViewModel
             IsHoliday = TagService.HasHolidayWithoutWorkdayOverride(events, date)
         };
 
+        ApplyHolidayState(day, date, events);
         ApplySegmentLayout([day], IsMonthView ? _monthLaneCapacity : CalendarSegmentLayoutService.MaxLanes);
 
         return day;
+    }
+
+    private void RefreshHolidayShells()
+    {
+        foreach (var day in CalendarDays)
+        {
+            ApplyHolidayState(day, day.Date, _dayDirectiveEvents);
+        }
+    }
+
+    private static void ApplyHolidayState(CalendarDay day, DateTime date, IEnumerable<CalendarEvent> events)
+    {
+        var isWorkdayOverride = TagService.HasWorkdayOverride(events, date);
+        var officialHoliday = JapaneseHolidayService.GetHolidayName(DateOnly.FromDateTime(date));
+        var hasUserHoliday = TagService.HasHolidayWithoutWorkdayOverride(events, date);
+
+        day.IsWorkdayOverride = isWorkdayOverride;
+        day.HolidayName = officialHoliday is not null
+            ? isWorkdayOverride ? $"{officialHoliday}（平日指定）" : officialHoliday
+            : hasUserHoliday ? "ユーザー指定休日" : null;
+        day.IsHoliday = !isWorkdayOverride && (officialHoliday is not null || hasUserHoliday);
     }
 
     private void ApplySegmentLayout(IReadOnlyList<CalendarDay> days, int laneCapacity)
@@ -1071,6 +1098,8 @@ public sealed partial class MainViewModel
     private void SetCurrentMonthWithoutRefreshing(DateTime value)
     {
         _currentMonth = new DateTime(value.Year, value.Month, 1);
+        var (gridStart, _) = DateRangeHelper.MonthGridRange(_currentMonth, _settings.WeekStartsOnMonday);
+        _monthWeekNumbers.ReplaceAll(CalendarWeekNumber.CreateRows(gridStart, _settings.WeekStartsOnMonday));
         OnPropertyChanged(nameof(CurrentMonth));
         OnPropertyChanged(nameof(MonthTitle));
         OnPropertyChanged(nameof(JapaneseMonthTitle));

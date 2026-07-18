@@ -25,6 +25,7 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly UndoService _undoService = new();
     private readonly BulkObservableCollection<CalendarDay> _calendarDays = [];
     private readonly BulkObservableCollection<CalendarDay> _visibleCalendarDays = [];
+    private readonly BulkObservableCollection<CalendarWeekNumber> _monthWeekNumbers = [];
     private IReadOnlyList<CalendarEvent> _storedEvents = [];
     private IReadOnlyList<CalendarEvent> _visibleEvents = [];
     private IReadOnlyList<CalendarEvent> _dayDirectiveEvents = [];
@@ -123,6 +124,7 @@ public sealed partial class MainViewModel : ObservableObject
         _csvService = csvService;
         _favGCalImportService = favGCalImportService;
         _logger = logger;
+        JapaneseHolidayService.HolidaysChanged += JapaneseHolidayService_HolidaysChanged;
 
         PreviousMonthCommand = new RelayCommand(() => NavigatePrimary(-1));
         NextMonthCommand = new RelayCommand(() => NavigatePrimary(1));
@@ -170,6 +172,8 @@ public sealed partial class MainViewModel : ObservableObject
         UndoLastChangeCommand = CreateAsyncCommand(UndoLastChangeAsync, () => CanUndoLastChange);
     }
 
+    private void JapaneseHolidayService_HolidaysChanged(object? sender, EventArgs e) => RefreshHolidayShells();
+
     private AsyncRelayCommand CreateAsyncCommand(Func<Task> execute, Func<bool>? canExecute = null) =>
         new(execute, canExecute, HandleCommandExceptionAsync);
 
@@ -182,6 +186,7 @@ public sealed partial class MainViewModel : ObservableObject
 
     public ObservableCollection<CalendarDay> CalendarDays => _calendarDays;
     public ObservableCollection<CalendarDay> VisibleCalendarDays => _visibleCalendarDays;
+    public ObservableCollection<CalendarWeekNumber> MonthWeekNumbers => _monthWeekNumbers;
     public ObservableCollection<CalendarEvent> SelectedDayEvents { get; } = [];
     public ObservableCollection<CalendarEvent> SevenDayEvents { get; } = [];
     public ObservableCollection<CalendarEvent> TodoEvents { get; } = [];

@@ -11,6 +11,7 @@ public sealed class CalendarDay : INotifyPropertyChanged
     private bool _isDropTarget;
     private bool _isHoliday;
     private bool _isWorkdayOverride;
+    private string? _holidayName;
     private int _hiddenEventCount;
     private readonly BulkObservableCollection<CalendarEvent> _events = [];
     private readonly BulkObservableCollection<CalendarEventSegment> _segments = [];
@@ -81,6 +82,26 @@ public sealed class CalendarDay : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsWorkdayOverride)));
         }
     }
+
+    public string? HolidayName
+    {
+        get => _holidayName;
+        set
+        {
+            if (_holidayName == value)
+            {
+                return;
+            }
+
+            _holidayName = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HolidayName)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DayToolTipText)));
+        }
+    }
+
+    public string DayToolTipText => string.IsNullOrWhiteSpace(HolidayName)
+        ? Date.ToString("M月d日")
+        : $"{Date:M月d日}\n{HolidayName}";
     public ObservableCollection<CalendarEvent> Events => _events;
     public ObservableCollection<CalendarEventSegment> Segments => _segments;
 

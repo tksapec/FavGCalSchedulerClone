@@ -8,12 +8,12 @@ public sealed class CalendarSegmentLayoutServiceTests
     [Theory]
     [InlineData(0, 12, 5)]
     [InlineData(double.NaN, 12, 5)]
-    [InlineData(89, 12, 2)]
-    [InlineData(90, 12, 2)]
-    [InlineData(127, 12, 5)]
-    [InlineData(144, 12, 6)]
-    [InlineData(140, 16, 5)]
-    public void MonthLaneCapacityCalculator_ReservesCellChromeAndUsesFontBasedPitch(
+    [InlineData(89, 12, 5)]
+    [InlineData(90, 12, 5)]
+    [InlineData(127, 12, 7)]
+    [InlineData(144, 12, 8)]
+    [InlineData(140, 16, 7)]
+    public void MonthLaneCapacityCalculator_UsesCompactOverlayChromeAndFontBasedPitch(
         double cellHeight,
         double labelFontSize,
         int expectedCapacity)
