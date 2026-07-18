@@ -53,12 +53,7 @@ internal static class ScheduleEditorDialog
             Text = request.GoogleEmailReminderDisplayText,
             Margin = new Thickness(0, ui.Y(4), 0, ui.Y(8))
         };
-        var location = new ComboBox
-        {
-            IsEditable = true,
-            ItemsSource = request.LocationHistory,
-            Text = request.Location
-        };
+        var location = CreateEditableHistoryComboBox(request.Location, request.LocationHistory);
         var calendar = new ComboBox
         {
             ItemsSource = request.AvailableCalendars,
@@ -67,12 +62,7 @@ internal static class ScheduleEditorDialog
             SelectedValue = request.CalendarId
         };
         var color = ui.CreateColorComboBox(request.ColorId);
-        var title = new ComboBox
-        {
-            IsEditable = true,
-            ItemsSource = request.TitleHistory,
-            Text = request.Title
-        };
+        var title = CreateEditableHistoryComboBox(request.Title, request.TitleHistory);
         var description = new TextBox
         {
             Text = request.Description,
@@ -287,6 +277,17 @@ internal static class ScheduleEditorDialog
     }
 
     private static int? FirstOrDefaultOrNull(IReadOnlyList<int> values) => values.Count == 0 ? null : values[0];
+
+    private static ComboBox CreateEditableHistoryComboBox(string text, IReadOnlyList<string> history)
+    {
+        var comboBox = new ComboBox
+        {
+            ItemsSource = history,
+            Text = text
+        };
+        EditableHistoryComboBoxBehavior.Attach(comboBox);
+        return comboBox;
+    }
 
     private sealed class ReminderListEditor
     {

@@ -139,6 +139,33 @@ public sealed class DialogDtoTests
     }
 
     [Fact]
+    public async Task ScheduleEditor_UsesTheSharedEditableHistoryComboBoxForLocationAndTitle()
+    {
+        var scheduleCode = await File.ReadAllTextAsync(DialogSourcePath("ScheduleEditorDialog.cs"));
+
+        Assert.Contains("CreateEditableHistoryComboBox(request.Location, request.LocationHistory)", scheduleCode);
+        Assert.Contains("CreateEditableHistoryComboBox(request.Title, request.TitleHistory)", scheduleCode);
+    }
+
+    [Fact]
+    public async Task EditableHistoryComboBoxBehavior_UsesWpfStandardTextEditingOnly()
+    {
+        var behaviorPath = Path.Combine(
+            Path.GetDirectoryName(DialogSourcePath("ScheduleEditorDialog.cs"))!,
+            "EditableHistoryComboBoxBehavior.cs");
+        var behaviorCode = await File.ReadAllTextAsync(behaviorPath);
+
+        Assert.Contains("PART_EditableTextBox", behaviorCode);
+        Assert.Contains("IsEditable = true", behaviorCode);
+        Assert.Contains("IsTextSearchEnabled = true", behaviorCode);
+        Assert.DoesNotContain("PreviewKeyDown", behaviorCode);
+        Assert.DoesNotContain("KeyBinding", behaviorCode);
+        Assert.DoesNotContain("CommandBinding", behaviorCode);
+        Assert.DoesNotContain("Clipboard", behaviorCode);
+        Assert.DoesNotContain("ContextMenu", behaviorCode);
+    }
+
+    [Fact]
     public async Task SyncDiagnosticsDialog_ShowsDirtyItemsTab()
     {
         var dialogPath = Path.GetFullPath(Path.Combine(
