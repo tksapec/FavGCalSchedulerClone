@@ -19,7 +19,7 @@ public sealed class CalendarDayTests
     }
 
     [Fact]
-    public async Task MonthCalendar_KeepsHiddenEventFooterInItsOwnBottomRow()
+    public async Task MonthCalendar_UsesOverlayChromeWithoutReducingSegmentArea()
     {
         var sourcePath = Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory,
@@ -29,7 +29,9 @@ public sealed class CalendarDayTests
         var source = await File.ReadAllTextAsync(sourcePath);
 
         Assert.Contains("x:Name=\"MonthDayCellLayout\"", source);
-        Assert.Contains("<ItemsControl Grid.Row=\"1\" ItemsSource=\"{Binding Segments}\"", source);
-        Assert.Contains("Grid.Row=\"2\" Text=\"{Binding HiddenEventText}\"", source);
+        Assert.Contains("<ItemsControl Grid.Row=\"1\" Grid.RowSpan=\"2\" ItemsSource=\"{Binding Segments}\"", source);
+        Assert.Contains("Panel.ZIndex=\"10\"", source);
+        Assert.Contains("Panel.ZIndex=\"20\"", source);
+        Assert.Contains("Padding\" Value=\"26,0,2,0\"", source);
     }
 }

@@ -12,6 +12,7 @@ using FavGCalSchedulerClone.App.Services;
 using FavGCalSchedulerClone.App.ViewModels;
 using FavGCalSchedulerClone.App.Views.Dialogs;
 using Microsoft.Win32;
+using Forms = System.Windows.Forms;
 
 namespace FavGCalSchedulerClone.App;
 
@@ -22,7 +23,9 @@ public partial class MainWindow : Window
     private readonly IAppLogger? _logger;
     private readonly DispatcherTimer _operationalStatusTimer;
     private readonly DispatcherTimer _monthLaneCapacityTimer;
+    private readonly DispatcherTimer _windowPlacementTimer;
     private int? _lastMeasuredMonthLaneCapacity;
+    private bool _restoringWindowPlacement;
     private MediaPlayer? _previewSoundPlayer;
     private bool _exitRequested;
     private Point? _dragStartPoint;
@@ -40,6 +43,11 @@ public partial class MainWindow : Window
         _operationalStatusTimer.Tick += async (_, _) => await RefreshOperationalStatusAsync();
         _monthLaneCapacityTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
         _monthLaneCapacityTimer.Tick += MonthLaneCapacityTimer_Tick;
+        _windowPlacementTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _windowPlacementTimer.Tick += WindowPlacementTimer_Tick;
+        SourceInitialized += MainWindow_SourceInitialized;
+        LocationChanged += (_, _) => ScheduleWindowPlacementSave();
+        StateChanged += (_, _) => ScheduleWindowPlacementSave();
         SizeChanged += MainWindow_SizeChanged;
         LayoutUpdated += MainWindow_LayoutUpdated;
         DataContext = _viewModel;
@@ -66,7 +74,75 @@ public partial class MainWindow : Window
         CustomizeMainUi();
     }
 
-    private void MainWindow_SizeChanged(object sender, SizeChangedEventArgs e) => ScheduleMonthLaneCapacityUpdate();
+    private void MainWindow_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        ScheduleMonthLaneCapacityUpdate();
+        ScheduleWindowPlacementSave();
+    }
+
+    private void MainWindow_SourceInitialized(object? sender, EventArgs e)
+    {
+        var placement = WindowPlacementService.TryLoad(AppPaths.WindowPlacementPath, _logger);
+        if (placement is null)
+        {
+            return;
+        }
+
+        var normalized = WindowPlacementService.Normalize(
+            placement,
+            MinWidth,
+            MinHeight,
+            Forms.Screen.AllScreens
+                .Select(screen => new Rect(screen.WorkingArea.Left, screen.WorkingArea.Top, screen.WorkingArea.Width, screen.WorkingArea.Height))
+                .ToArray());
+        _restoringWindowPlacement = true;
+        try
+        {
+            Width = normalized.Width;
+            Height = normalized.Height;
+            Left = normalized.Left;
+            Top = normalized.Top;
+            if (normalized.IsMaximized)
+            {
+                WindowState = WindowState.Maximized;
+            }
+        }
+        finally
+        {
+            _restoringWindowPlacement = false;
+        }
+    }
+
+    private void ScheduleWindowPlacementSave()
+    {
+        if (_restoringWindowPlacement || WindowState == WindowState.Minimized)
+        {
+            return;
+        }
+
+        _windowPlacementTimer.Stop();
+        _windowPlacementTimer.Start();
+    }
+
+    private void WindowPlacementTimer_Tick(object? sender, EventArgs e)
+    {
+        _windowPlacementTimer.Stop();
+        SaveWindowPlacement();
+    }
+
+    private void SaveWindowPlacement()
+    {
+        if (WindowState == WindowState.Minimized)
+        {
+            return;
+        }
+
+        var bounds = WindowState == WindowState.Maximized ? RestoreBounds : new Rect(Left, Top, Width, Height);
+        WindowPlacementService.Save(
+            AppPaths.WindowPlacementPath,
+            new WindowPlacement(bounds.Left, bounds.Top, bounds.Width, bounds.Height, WindowState == WindowState.Maximized),
+            _logger);
+    }
 
     private void MainWindow_LayoutUpdated(object? sender, EventArgs e) => ScheduleMonthLaneCapacityUpdate();
 
@@ -274,10 +350,12 @@ public partial class MainWindow : Window
     {
         if (_exitRequested)
         {
+            SaveWindowPlacement();
             _reminderService.Stop();
             _reminderService.Dispose();
             _operationalStatusTimer.Stop();
             _monthLaneCapacityTimer.Stop();
+            _windowPlacementTimer.Stop();
             StopPreviewSound();
             return;
         }

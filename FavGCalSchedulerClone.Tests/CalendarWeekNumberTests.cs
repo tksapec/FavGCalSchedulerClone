@@ -5,25 +5,27 @@ namespace FavGCalSchedulerClone.Tests;
 public sealed class CalendarWeekNumberTests
 {
     [Fact]
-    public void CreateRows_UsesTheIsoYearAtTheNewYearBoundary()
+    public void CreateRows_UsesIsoYearAtNewYearBoundary()
     {
         var rows = CalendarWeekNumber.CreateRows(new DateTime(2025, 12, 29), weekStartsOnMonday: true);
 
-        Assert.Equal("01", rows[0].DisplayText);
-        Assert.Equal("2026年第1週", rows[0].ToolTipText);
+        var first = rows[0];
+        Assert.Equal("01", first.DisplayText);
+        Assert.Equal("2026年第1週", first.ToolTipText);
     }
 
     [Fact]
-    public void CreateRows_UsesMondayForAnSundayStartGrid()
+    public void CreateRows_UsesMondayWhenGridStartsOnSunday()
     {
         var rows = CalendarWeekNumber.CreateRows(new DateTime(2025, 12, 28), weekStartsOnMonday: false);
 
-        Assert.Equal(new DateTime(2025, 12, 29), rows[0].IsoReferenceDate);
-        Assert.Equal("01", rows[0].DisplayText);
+        var first = rows[0];
+        Assert.Equal(new DateTime(2025, 12, 29), first.IsoReferenceDate);
+        Assert.Equal("01", first.DisplayText);
     }
 
     [Fact]
-    public void CreateRows_AlwaysCreatesTheSixMonthGridRows()
+    public void CreateRows_CreatesOneRowForEachMonthGridWeek()
     {
         var rows = CalendarWeekNumber.CreateRows(new DateTime(2026, 1, 4), weekStartsOnMonday: false);
 

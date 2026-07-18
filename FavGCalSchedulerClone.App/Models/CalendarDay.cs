@@ -82,6 +82,7 @@ public sealed class CalendarDay : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsWorkdayOverride)));
         }
     }
+
     public string? HolidayName
     {
         get => _holidayName;
@@ -97,9 +98,10 @@ public sealed class CalendarDay : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DayToolTipText)));
         }
     }
+
     public string DayToolTipText => string.IsNullOrWhiteSpace(HolidayName)
-        ? Date.ToString("yyyy/MM/dd")
-        : $"{Date:yyyy/MM/dd} {HolidayName}";
+        ? Date.ToString("M月d日")
+        : $"{Date:M月d日}\n{HolidayName}";
     public ObservableCollection<CalendarEvent> Events => _events;
     public ObservableCollection<CalendarEventSegment> Segments => _segments;
 

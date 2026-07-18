@@ -172,6 +172,8 @@ public sealed partial class MainViewModel : ObservableObject
         UndoLastChangeCommand = CreateAsyncCommand(UndoLastChangeAsync, () => CanUndoLastChange);
     }
 
+    private void JapaneseHolidayService_HolidaysChanged(object? sender, EventArgs e) => RefreshHolidayShells();
+
     private AsyncRelayCommand CreateAsyncCommand(Func<Task> execute, Func<bool>? canExecute = null) =>
         new(execute, canExecute, HandleCommandExceptionAsync);
 

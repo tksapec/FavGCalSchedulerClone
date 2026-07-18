@@ -47,7 +47,7 @@ internal static class SettingsDialog
         appPage.Children.Add(defaultAllDay);
         appPage.Children.Add(new TextBlock { Text = "新規スケジュールの通知時間の既定値", Margin = new Thickness(0, 10, 0, 4) });
         appPage.Children.Add(defaultReminder);
-        var updateHolidays = new Button { Content = "祝日を更新", Width = 150, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 12, 0, 0) };
+        var updateHolidays = new Button { Content = "祝日データをオンライン更新", Width = 210, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 12, 0, 0) };
         updateHolidays.Click += async (_, _) =>
         {
             updateHolidays.IsEnabled = false;
@@ -56,7 +56,7 @@ internal static class SettingsDialog
                 var updated = await request.UpdateJapaneseHolidaysAsync();
                 MessageBox.Show(
                     window,
-                    updated ? "祝日データを更新しました。現在の月表示にも反映されています。" : "祝日データの更新に失敗しました。既存のデータを引き続き使用します。",
+                    updated ? "祝日データを更新しました。現在表示中の月にも反映されています。" : "祝日データの更新に失敗しました。既存のデータをそのまま使用します。",
                     "祝日データ",
                     MessageBoxButton.OK,
                     updated ? MessageBoxImage.Information : MessageBoxImage.Warning);

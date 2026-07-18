@@ -3,9 +3,8 @@ namespace FavGCalSchedulerClone.App.Services;
 public static class MonthLaneCapacityCalculator
 {
     public const int DefaultCapacity = CalendarSegmentLayoutService.MaxLanes;
-    public const double DateHeaderHeight = 23;
-    public const double EventAreaTopMargin = 3;
-    public const double OverflowFooterHeight = 16;
+    public const double CellTopInset = 1;
+    public const double CellBottomInset = 1;
 
     public static int Calculate(double cellHeight, double calendarLabelFontSize)
     {
@@ -14,8 +13,8 @@ public static class MonthLaneCapacityCalculator
             return DefaultCapacity;
         }
 
-        var eventBarPitch = Math.Max(17, calendarLabelFontSize + 2);
-        var availableEventHeight = cellHeight - DateHeaderHeight - EventAreaTopMargin - OverflowFooterHeight;
+        var eventBarPitch = Math.Max(16, calendarLabelFontSize + 3);
+        var availableEventHeight = cellHeight - CellTopInset - CellBottomInset;
         return Math.Max(CalendarSegmentLayoutService.MinimumLanes, (int)Math.Floor(availableEventHeight / eventBarPitch));
     }
 }

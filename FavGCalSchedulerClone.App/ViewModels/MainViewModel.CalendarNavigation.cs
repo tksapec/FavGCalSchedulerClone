@@ -447,9 +447,13 @@ public sealed partial class MainViewModel
             // Render the shell and the finished event/segment state below; do not
             // issue an intermediate empty collection Reset for every cell.
             UpdateCalendarDayShell(day, date);
-            ApplyHolidayState(day, date, _dayDirectiveEvents);
+            day.IsWorkdayOverride = TagService.HasWorkdayOverride(_dayDirectiveEvents, date);
+            var officialHoliday = JapaneseHolidayService.GetHolidayName(DateOnly.FromDateTime(date));
+            day.HolidayName = officialHoliday ?? (TagService.HasHolidayWithoutWorkdayOverride(_dayDirectiveEvents, date) ? "ユーザー指定休日" : null);
+            day.IsHoliday = !day.IsWorkdayOverride && (officialHoliday is not null || day.HolidayName is not null);
         }
 
+        RefreshHolidayShells();
         _monthWeekNumbers.ReplaceAll(CalendarWeekNumber.CreateRows(snapshot.GridStart, _settings.WeekStartsOnMonday));
 
         ApplySegmentLayout(CalendarDays, IsMonthView ? _monthLaneCapacity : CalendarSegmentLayoutService.MaxLanes);
@@ -693,7 +697,6 @@ public sealed partial class MainViewModel
         day.IsCurrentMonth = date.Month == CurrentMonth.Month;
         day.IsWorkdayOverride = false;
         day.IsHoliday = false;
-        day.HolidayName = null;
     }
 
     private void SetSelectedDayForImmediateNavigation(CalendarDay? day)
@@ -1050,17 +1053,17 @@ public sealed partial class MainViewModel
         {
             Date = date,
             IsCurrentMonth = date.Month == CurrentMonth.Month,
-            IsWorkdayOverride = TagService.HasWorkdayOverride(events, date)
+            IsWorkdayOverride = TagService.HasWorkdayOverride(events, date),
+            IsHoliday = TagService.HasHolidayWithoutWorkdayOverride(events, date)
         };
 
         ApplyHolidayState(day, date, events);
-
         ApplySegmentLayout([day], IsMonthView ? _monthLaneCapacity : CalendarSegmentLayoutService.MaxLanes);
 
         return day;
     }
 
-    private void JapaneseHolidayService_HolidaysChanged(object? sender, EventArgs e)
+    private void RefreshHolidayShells()
     {
         foreach (var day in CalendarDays)
         {
