@@ -29,9 +29,16 @@ public sealed class CalendarDayTests
         var source = await File.ReadAllTextAsync(sourcePath);
 
         Assert.Contains("x:Name=\"MonthDayCellLayout\"", source);
-        Assert.Contains("<ItemsControl Grid.Row=\"1\" Grid.RowSpan=\"2\" ItemsSource=\"{Binding Segments}\"", source);
+        Assert.Contains("<ItemsControl ItemsSource=\"{Binding Segments}\"", source);
+        Assert.DoesNotContain("<Grid x:Name=\"MonthDayCellLayout\">\r\n                                                <Grid.RowDefinitions>", source);
         Assert.Contains("Panel.ZIndex=\"10\"", source);
         Assert.Contains("Panel.ZIndex=\"20\"", source);
+        Assert.Contains("Panel.ZIndex=\"30\"", source);
         Assert.Contains("Padding\" Value=\"26,0,2,0\"", source);
+
+        var dayCellStyleStart = source.IndexOf("<Style x:Key=\"DayCell\"", StringComparison.Ordinal);
+        var dayCellStyleEnd = source.IndexOf("</Style>", dayCellStyleStart, StringComparison.Ordinal);
+        Assert.True(dayCellStyleStart >= 0 && dayCellStyleEnd > dayCellStyleStart);
+        Assert.DoesNotContain("BorderThickness\" Value=\"3\"", source[dayCellStyleStart..dayCellStyleEnd]);
     }
 }

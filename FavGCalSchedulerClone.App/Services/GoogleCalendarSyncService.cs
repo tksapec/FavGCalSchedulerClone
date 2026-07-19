@@ -155,7 +155,18 @@ public sealed class GoogleCalendarSyncService
             var dirtyEvents = (await _repository.LoadDirtyEventsAsync())
                 .Where(item => string.Equals(item.CalendarId, calendarId, StringComparison.Ordinal))
                 .ToArray();
-            var plan = BuildSyncPlan(dirtyEvents, delta.Events, settings.SyncConflictPolicy, delta.Mode);
+            var fullSyncLookup = await LoadRemoteEventsOutsideFullSyncWindowAsync(
+                client,
+                calendarId,
+                dirtyEvents,
+                delta,
+                failures,
+                cancellationToken);
+            var executableDirty = dirtyEvents
+                .Where(item => !fullSyncLookup.FailedLocalIds.Contains(item.Id))
+                .ToArray();
+            var remoteEvents = delta.Events.Concat(fullSyncLookup.Events).ToArray();
+            var plan = BuildSyncPlan(executableDirty, remoteEvents, settings.SyncConflictPolicy, delta.Mode);
             var execution = await ExecuteSyncPlanAsync(
                 client,
                 calendarId,
@@ -168,11 +179,11 @@ public sealed class GoogleCalendarSyncService
             pulled += execution.Pulled;
             skipped += execution.Skipped;
             conflicts += execution.Conflicts;
-            failed += execution.Failed;
+            failed += fullSyncLookup.FailedLocalIds.Count + execution.Failed;
             deleted += execution.Deleted;
             recreated += execution.Recreated;
 
-            if (execution.Failed == 0 && execution.Skipped == 0)
+            if (fullSyncLookup.FailedLocalIds.Count == 0 && execution.Failed == 0 && execution.Skipped == 0)
             {
                 await _repository.SaveSyncTokenAsync(calendarId, delta.NextSyncToken);
             }
@@ -1199,6 +1210,7 @@ public sealed class GoogleCalendarSyncService
         var events = new List<Event>();
         string? pageToken = null;
         string? nextSyncToken = null;
+        var fullSyncStart = string.IsNullOrWhiteSpace(syncToken) ? DateTimeOffset.Now.AddYears(-5) : (DateTimeOffset?)null;
         try
         {
             do
@@ -1207,7 +1219,7 @@ public sealed class GoogleCalendarSyncService
                     calendarId,
                     syncToken,
                     pageToken,
-                    string.IsNullOrWhiteSpace(syncToken) ? DateTimeOffset.Now.AddYears(-5) : null,
+                    fullSyncStart,
                     ShowDeleted: true,
                     SingleEvents: false,
                     MaxResults: 2500), cancellationToken);
@@ -1224,7 +1236,8 @@ public sealed class GoogleCalendarSyncService
                 events,
                 nextSyncToken,
                 true,
-                string.IsNullOrWhiteSpace(syncToken) ? RemoteSyncMode.InitialFull : RemoteSyncMode.Incremental);
+                string.IsNullOrWhiteSpace(syncToken) ? RemoteSyncMode.InitialFull : RemoteSyncMode.Incremental,
+                fullSyncStart);
         }
         catch (GoogleApiException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.Gone)
         {
@@ -1236,8 +1249,33 @@ public sealed class GoogleCalendarSyncService
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             failures.Add(CreatePullFailureDiagnostic(calendarId, syncToken, pageToken, ex, "Pull", ex.Message));
-            return new RemoteDelta([], null, false, RemoteSyncMode.Incremental);
+            return new RemoteDelta([], null, false, RemoteSyncMode.Incremental, null);
         }
+    }
+
+    private static async Task<RemoteDirtyLookupResult> LoadRemoteEventsOutsideFullSyncWindowAsync(
+        IGoogleCalendarClient client,
+        string calendarId,
+        IReadOnlyList<CalendarEvent> dirtyEvents,
+        RemoteDelta delta,
+        ICollection<SyncFailureDiagnostic> failures,
+        CancellationToken cancellationToken)
+    {
+        if (delta.Mode is not (RemoteSyncMode.InitialFull or RemoteSyncMode.RecoveryFull)
+            || delta.FullSyncStart is not { } fullSyncStart)
+        {
+            return new RemoteDirtyLookupResult([], new HashSet<string>(StringComparer.Ordinal));
+        }
+
+        var listedGoogleEventIds = delta.Events
+            .Where(item => !string.IsNullOrWhiteSpace(item.Id))
+            .Select(item => item.Id!)
+            .ToHashSet(StringComparer.Ordinal);
+        var outsideWindow = dirtyEvents.Where(item =>
+            !string.IsNullOrWhiteSpace(item.GoogleEventId)
+            && item.Start < fullSyncStart
+            && !listedGoogleEventIds.Contains(item.GoogleEventId!));
+        return await LoadRemoteEventsForDirtyAsync(client, calendarId, outsideWindow.ToArray(), failures, cancellationToken);
     }
 
     private static async Task<RemoteDirtyLookupResult> LoadRemoteEventsForDirtyAsync(
@@ -1578,7 +1616,8 @@ public sealed class GoogleCalendarSyncService
                 events,
                 null,
                 true,
-                string.IsNullOrWhiteSpace(syncToken) ? RemoteSyncMode.InitialFull : RemoteSyncMode.Incremental);
+                string.IsNullOrWhiteSpace(syncToken) ? RemoteSyncMode.InitialFull : RemoteSyncMode.Incremental,
+                string.IsNullOrWhiteSpace(syncToken) ? DateTimeOffset.Now.AddYears(-5) : null);
         }
         catch (GoogleApiException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.Gone && !string.IsNullOrWhiteSpace(syncToken))
         {
@@ -1775,7 +1814,12 @@ internal sealed record SyncPlanExecution(
 
 internal sealed record RemoteDirtyLookupResult(IReadOnlyList<Event> Events, IReadOnlySet<string> FailedLocalIds);
 
-internal sealed record RemoteDelta(IReadOnlyList<Event> Events, string? NextSyncToken, bool Success, RemoteSyncMode Mode);
+internal sealed record RemoteDelta(
+    IReadOnlyList<Event> Events,
+    string? NextSyncToken,
+    bool Success,
+    RemoteSyncMode Mode,
+    DateTimeOffset? FullSyncStart);
 public sealed record GoogleReminderRefreshResult(int UpdatedExisting, int UpsertedMissing, int Skipped)
 {
     public int TotalAffected => UpdatedExisting + UpsertedMissing;

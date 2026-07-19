@@ -168,6 +168,16 @@ public sealed partial class MainWindowMenuTests
     }
 
     [Fact]
+    public async Task MainWindow_MonthDayCellUsesOneOverlayRegionForEventsAndBadges()
+    {
+        var xaml = await File.ReadAllTextAsync(MainWindowXamlPath);
+
+        Assert.Contains("<Grid x:Name=\"MonthDayCellLayout\">", xaml);
+        Assert.DoesNotContain("<Grid x:Name=\"MonthDayCellLayout\">\r\n                                                <Grid.RowDefinitions>", xaml);
+        Assert.DoesNotContain("<ItemsControl Grid.Row=\"1\" Grid.RowSpan=\"2\" ItemsSource=\"{Binding Segments}\"", xaml);
+    }
+
+    [Fact]
     public async Task MainWindow_KeepsTheUsableAreaVisibleAndMakesTheSidePanelAdjustable()
     {
         var xaml = await File.ReadAllTextAsync(MainWindowXamlPath);

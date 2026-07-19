@@ -6,6 +6,8 @@ obj/
 *.zip
 publish/
 TestResults/
+/.codex/
+/.worktrees/
 
 # Personal Google OAuth client secrets must stay outside the repo.
 client_secret*.json

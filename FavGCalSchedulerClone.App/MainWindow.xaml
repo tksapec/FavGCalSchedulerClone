@@ -173,22 +173,6 @@
                 <DataTrigger Binding="{Binding IsWorkdayOverride}" Value="True">
                     <Setter Property="Background" Value="{StaticResource WeekdayBrush}" />
                 </DataTrigger>
-                <DataTrigger Binding="{Binding IsToday}" Value="True">
-                    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
-                    <Setter Property="BorderThickness" Value="2" />
-                </DataTrigger>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="BorderBrush" Value="#3B82F6" />
-                    <Setter Property="BorderThickness" Value="2" />
-                </Trigger>
-                <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
-                    <Setter Property="BorderBrush" Value="#0F766E" />
-                    <Setter Property="BorderThickness" Value="3" />
-                </DataTrigger>
-                <DataTrigger Binding="{Binding IsDropTarget}" Value="True">
-                    <Setter Property="BorderBrush" Value="#F59E0B" />
-                    <Setter Property="BorderThickness" Value="3" />
-                </DataTrigger>
             </Style.Triggers>
         </Style>
 
@@ -474,13 +458,7 @@
                                                 MouseLeftButtonDown="DayCell_MouseLeftButtonDown" MouseRightButtonDown="DayCell_MouseRightButtonDown"
                                                 DragEnter="DayCell_DragOver" DragOver="DayCell_DragOver" DragLeave="DayCell_DragLeave" Drop="DayCell_Drop">
                                             <Grid x:Name="MonthDayCellLayout">
-                                                <Grid.RowDefinitions>
-                                                    <RowDefinition Height="Auto" />
-                                                    <RowDefinition Height="*" />
-                                                    <RowDefinition Height="Auto" />
-                                                </Grid.RowDefinitions>
-                                                <TextBlock Grid.Row="0" Visibility="Collapsed" />
-                                                <ItemsControl Grid.Row="1" Grid.RowSpan="2" ItemsSource="{Binding Segments}" Margin="0" HorizontalAlignment="Stretch" ClipToBounds="True">
+                                                <ItemsControl ItemsSource="{Binding Segments}" Margin="0" HorizontalAlignment="Stretch" ClipToBounds="True">
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate>
                                                             <Border Style="{StaticResource EventSegmentBar}"
@@ -509,6 +487,32 @@
                                                 <Border Panel.ZIndex="20" HorizontalAlignment="Right" VerticalAlignment="Bottom" Background="#CCFFFFFF"
                                                         IsHitTestVisible="False" Margin="0,0,2,1" Visibility="{Binding HasHiddenEvents, Converter={StaticResource BoolToVisibilityConverter}}">
                                                     <TextBlock Text="{Binding HiddenEventText}" Foreground="#B45309" FontSize="11" FontWeight="SemiBold" Margin="2,0" />
+                                                </Border>
+                                                <Border Panel.ZIndex="30" IsHitTestVisible="False">
+                                                    <Border.Style>
+                                                        <Style TargetType="Border">
+                                                            <Setter Property="BorderBrush" Value="Transparent" />
+                                                            <Setter Property="BorderThickness" Value="0" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsToday}" Value="True">
+                                                                    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                                                                    <Setter Property="BorderThickness" Value="2" />
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Border}}" Value="True">
+                                                                    <Setter Property="BorderBrush" Value="#3B82F6" />
+                                                                    <Setter Property="BorderThickness" Value="2" />
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                                                                    <Setter Property="BorderBrush" Value="#0F766E" />
+                                                                    <Setter Property="BorderThickness" Value="3" />
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding IsDropTarget}" Value="True">
+                                                                    <Setter Property="BorderBrush" Value="#F59E0B" />
+                                                                    <Setter Property="BorderThickness" Value="3" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Border.Style>
                                                 </Border>
                                             </Grid>
                                         </Border>

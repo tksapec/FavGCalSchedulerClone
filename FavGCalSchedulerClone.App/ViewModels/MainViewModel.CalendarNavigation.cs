@@ -776,8 +776,8 @@ public sealed partial class MainViewModel
 
             var context = CreateCalendarSnapshotBuildContext();
             var dataVersion = Volatile.Read(ref _calendarDataVersion);
-            var (rangeStart, _) = DateRangeHelper.MonthGridRange(request.Month.AddMonths(-12), context.WeekStartsOnMonday);
-            var (_, rangeEnd) = DateRangeHelper.MonthGridRange(request.Month.AddMonths(12), context.WeekStartsOnMonday);
+            var (rangeStart, _) = DateRangeHelper.MonthGridRange(request.Month.AddMonths(-18), context.WeekStartsOnMonday);
+            var (_, rangeEnd) = DateRangeHelper.MonthGridRange(request.Month.AddMonths(18), context.WeekStartsOnMonday);
             CalendarDataWindow dataWindow;
             if (requirement == CalendarPrefetchRequirement.RebuildDataWindow)
             {

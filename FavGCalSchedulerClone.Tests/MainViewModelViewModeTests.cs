@@ -467,7 +467,7 @@ public sealed class MainViewModelViewModeTests
     }
 
     [Fact]
-    public async Task Navigation_CachedMonthRebuildsTheWideDataWindowWhenItsRangeNoLongerCoversPrefetch()
+    public async Task Navigation_NearbyCachedMonthResumesSnapshotsWithoutRebuildingTheWideDataWindow()
     {
         var viewModel = await CreateViewModelAsync();
         await WaitUntilAsync(() => viewModel.CalendarCacheCount == MainViewModel.CalendarSnapshotCacheCapacity);
@@ -483,8 +483,8 @@ public sealed class MainViewModelViewModeTests
         viewModel.NextMonthCommand.Execute(null);
         await Task.Delay(300);
 
-        Assert.Equal(1, prefetchLoads);
-        Assert.Equal(1, prefetchBuilds);
+        Assert.Equal(0, prefetchLoads);
+        Assert.Equal(0, prefetchBuilds);
     }
 
     [Fact]
@@ -621,6 +621,16 @@ public sealed class MainViewModelViewModeTests
         await viewModel.NavigateToDateAsync(viewModel.CurrentMonth.AddMonths(6));
 
         Assert.Equal(0, databaseLoads);
+    }
+
+    [Fact]
+    public async Task Prefetch_RebuildsDataWindowOnlyAfterMovingBeyondSixMonthsFromItsCenter()
+    {
+        var viewModel = await CreateViewModelAsync();
+        await WaitUntilAsync(() => viewModel.CalendarCacheCount == MainViewModel.CalendarSnapshotCacheCapacity);
+
+        Assert.Equal(CalendarPrefetchRequirement.ResumeSnapshots, viewModel.GetCalendarPrefetchRequirement(viewModel.CurrentMonth.AddMonths(6)));
+        Assert.Equal(CalendarPrefetchRequirement.RebuildDataWindow, viewModel.GetCalendarPrefetchRequirement(viewModel.CurrentMonth.AddMonths(7)));
     }
 
     [Fact]
