@@ -196,8 +196,18 @@ public sealed partial class MainViewModel
                 return null;
             }
 
-            calendarEvent.Start = new DateTimeOffset(StartDate.Date);
-            calendarEvent.End = new DateTimeOffset(EndDate.Date.AddDays(1));
+            if (SelectedEvent is { IsAllDay: true } originalAllDay
+                && StartDate.Date == originalAllDay.Start.Date
+                && EndDate.Date == originalAllDay.End.Date.AddDays(-1))
+            {
+                calendarEvent.Start = originalAllDay.Start;
+                calendarEvent.End = originalAllDay.End;
+            }
+            else
+            {
+                calendarEvent.Start = new DateTimeOffset(StartDate.Date);
+                calendarEvent.End = new DateTimeOffset(EndDate.Date.AddDays(1));
+            }
         }
         else
         {
@@ -207,8 +217,22 @@ public sealed partial class MainViewModel
                 return null;
             }
 
-            calendarEvent.Start = new DateTimeOffset(StartDate.Date.Add(startTime));
-            calendarEvent.End = new DateTimeOffset(EndDate.Date.Add(endTime));
+            if (SelectedEvent is { IsAllDay: false } originalTimed
+                && StartDate.Date == originalTimed.Start.Date
+                && EndDate.Date == originalTimed.End.Date
+                && startTime == originalTimed.Start.TimeOfDay
+                && endTime == originalTimed.End.TimeOfDay)
+            {
+                // Editor fields contain wall-clock values only. Preserve the original offsets
+                // when those fields were not edited so a UTC CI host cannot shift the instant.
+                calendarEvent.Start = originalTimed.Start;
+                calendarEvent.End = originalTimed.End;
+            }
+            else
+            {
+                calendarEvent.Start = new DateTimeOffset(StartDate.Date.Add(startTime));
+                calendarEvent.End = new DateTimeOffset(EndDate.Date.Add(endTime));
+            }
             if (calendarEvent.End <= calendarEvent.Start)
             {
                 Status = "終了日時は開始日時より後にしてください。";

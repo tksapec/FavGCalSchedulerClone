@@ -59,19 +59,19 @@ public static class WindowPlacementService
         var left = Finite(placement.Left) ? placement.Left : workingAreas[0].Left;
         var top = Finite(placement.Top) ? placement.Top : workingAreas[0].Top;
         var bounds = new Rect(left, top, width, height);
-        var target = workingAreas.FirstOrDefault(area =>
+        Rect? target = workingAreas.Cast<Rect?>().FirstOrDefault(area =>
         {
-            var intersection = Rect.Intersect(area, bounds);
+            var intersection = Rect.Intersect(area!.Value, bounds);
             return !intersection.IsEmpty && intersection.Width >= 100 && intersection.Height >= 32;
         });
-        if (target != Rect.Empty)
+        if (target is { } visibleWorkArea)
         {
-            width = Math.Min(width, target.Width);
-            height = Math.Min(height, target.Height);
+            width = Math.Min(width, visibleWorkArea.Width);
+            height = Math.Min(height, visibleWorkArea.Height);
             return placement with
             {
-                Left = Math.Clamp(left, target.Left, target.Right - Math.Min(100, width)),
-                Top = Math.Clamp(top, target.Top, target.Bottom - Math.Min(32, height)),
+                Left = Math.Clamp(left, visibleWorkArea.Left, visibleWorkArea.Right - Math.Min(100, width)),
+                Top = Math.Clamp(top, visibleWorkArea.Top, visibleWorkArea.Bottom - Math.Min(32, height)),
                 Width = width,
                 Height = height
             };

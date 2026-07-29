@@ -140,7 +140,12 @@ public partial class MainWindow : Window
         var bounds = WindowState == WindowState.Maximized ? RestoreBounds : new Rect(Left, Top, Width, Height);
         WindowPlacementService.Save(
             AppPaths.WindowPlacementPath,
-            new WindowPlacement(bounds.Left, bounds.Top, bounds.Width, bounds.Height, WindowState == WindowState.Maximized),
+            new WindowPlacement(
+                Left: bounds.Left,
+                Top: bounds.Top,
+                Width: bounds.Width,
+                Height: bounds.Height,
+                IsMaximized: WindowState == WindowState.Maximized),
             _logger);
     }
 
