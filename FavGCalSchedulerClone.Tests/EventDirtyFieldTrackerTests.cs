@@ -49,6 +49,7 @@ public sealed class EventDirtyFieldTrackerTests
         Title = "event",
         Description = "before",
         Start = new DateTimeOffset(2026, 6, 10, 9, 0, 0, offset),
-        End = new DateTimeOffset(2026, 6, 10, 10, 0, 0, offset)
+        End = new DateTimeOffset(2026, 6, 10, 10, 0, 0, offset),
+        IsDirty = false
     };
 }
