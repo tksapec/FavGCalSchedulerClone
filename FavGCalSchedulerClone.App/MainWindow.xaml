@@ -5,7 +5,6 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="FavGCalSchedulerClone" Height="720" Width="1180" MinHeight="600" MinWidth="960"
-        MaxHeight="{Binding Source={x:Static SystemParameters.WorkArea}, Path=Height}"
         WindowStartupLocation="CenterScreen"
         FontFamily="Meiryo UI" FontSize="12"
         Background="#EDF1F5" Opacity="{Binding WindowOpacity}"
@@ -382,7 +381,7 @@
             </StatusBarItem>
         </StatusBar>
 
-        <Grid Margin="8">
+        <Grid Margin="8,4,8,4">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
@@ -405,13 +404,13 @@
                             <Border Grid.Row="0" Grid.Column="0" Background="#E2E8F0">
                                 <TextBlock Text="週" Foreground="#334155" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10" FontWeight="SemiBold" />
                             </Border>
-                            <ItemsControl Grid.Row="1" Grid.Column="0" ItemsSource="{Binding MonthWeekNumbers}" Background="#F1F5F9" IsHitTestVisible="False">
+                            <ItemsControl Grid.Row="1" Grid.Column="0" ItemsSource="{Binding MonthWeekNumbers}" Background="#F1F5F9" Focusable="False">
                                 <ItemsControl.ItemsPanel>
                                     <ItemsPanelTemplate><UniformGrid Rows="6" /></ItemsPanelTemplate>
                                 </ItemsControl.ItemsPanel>
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <TextBlock Text="{Binding DisplayText}" ToolTip="{Binding ToolTipText}" Foreground="#475569" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10" />
+                                        <TextBlock Text="{Binding DisplayText}" ToolTip="{Binding ToolTipText}" Focusable="False" Foreground="#475569" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10" />
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
@@ -454,7 +453,7 @@
                                 </ListBox.ItemContainerStyle>
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
-                                        <Border Style="{StaticResource DayCell}" AllowDrop="True"
+                                        <Border Style="{StaticResource DayCell}" AllowDrop="True" ToolTip="{Binding DayToolTipText}"
                                                 MouseLeftButtonDown="DayCell_MouseLeftButtonDown" MouseRightButtonDown="DayCell_MouseRightButtonDown"
                                                 DragEnter="DayCell_DragOver" DragOver="DayCell_DragOver" DragLeave="DayCell_DragLeave" Drop="DayCell_Drop">
                                             <Grid x:Name="MonthDayCellLayout">

@@ -353,14 +353,13 @@ public sealed class GoogleCalendarSyncServiceTests
         var preview = await service.PreviewAsync(settings);
 
         Assert.Equal(2, preview.PullItems.Count);
-        Assert.Null(await repository.GetSyncTokenAsync("work"));
+        Assert.Equal("stale-token", await repository.GetSyncTokenAsync("work"));
         Assert.Collection(api.ListRequests,
             request => Assert.Equal("stale-token", request.SyncToken),
             request => { Assert.Null(request.SyncToken); Assert.Null(request.PageToken); },
             request => { Assert.Null(request.SyncToken); Assert.Equal("1", request.PageToken); });
 
         api.ListRequests.Clear();
-        await repository.SaveSyncTokenAsync("work", "stale-token");
         api.StaleSyncTokens.Add("stale-token");
         var result = await service.SyncAsync(settings);
 

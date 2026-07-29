@@ -184,7 +184,8 @@ public sealed partial class MainWindowMenuTests
 
         Assert.Contains("Height=\"720\" Width=\"1180\" MinHeight=\"600\" MinWidth=\"960\"", xaml);
         Assert.Contains("WindowStartupLocation=\"CenterScreen\"", xaml);
-        Assert.Contains("MaxHeight=\"{Binding Source={x:Static SystemParameters.WorkArea}, Path=Height}\"", xaml);
+        Assert.DoesNotContain("MaxHeight=\"{Binding Source={x:Static SystemParameters.WorkArea}, Path=Height}\"", xaml);
+        Assert.DoesNotContain("SystemParameters.WorkArea", xaml);
         Assert.Contains("<ColumnDefinition Width=\"6\" />", xaml);
         Assert.Contains("<GridSplitter Grid.Column=\"1\"", xaml);
     }

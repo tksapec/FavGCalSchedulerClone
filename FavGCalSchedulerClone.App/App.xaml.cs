@@ -20,6 +20,7 @@ public partial class App : System.Windows.Application
     private DateTime _trayIconDate;
     private bool _isExiting;
     private ServiceProvider? _serviceProvider;
+    private CancellationTokenSource? _deactivationCancellation;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -35,16 +36,16 @@ public partial class App : System.Windows.Application
         base.OnStartup(e);
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
         _serviceProvider = CreateServiceProvider();
-        JapaneseHolidayService.LoadFromFile(
-            File.Exists(AppPaths.JapaneseHolidayDataPath)
-                ? AppPaths.JapaneseHolidayDataPath
-                : Path.Combine(AppContext.BaseDirectory, "Data", "JapaneseHolidays.csv"),
+        JapaneseHolidayService.LoadWithFallback(
+            AppPaths.JapaneseHolidayDataPath,
+            Path.Combine(AppContext.BaseDirectory, "Data", "JapaneseHolidays.csv"),
             _serviceProvider.GetRequiredService<IAppLogger>());
         CreateTrayIcon();
 
         var mainWindow = _serviceProvider.GetRequiredService<MainWindow>();
         MainWindow = mainWindow;
         MainWindow.Show();
+        Deactivated += App_Deactivated;
         _ = RunStartupInitializationAsync(
             () => _serviceProvider.GetRequiredService<IApplicationStartupService>()
                 .InitializeAsync(mainWindow, mainWindow.CreateReminderNotifier),
@@ -53,6 +54,8 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _isExiting = true;
+        _deactivationCancellation?.Cancel();
         if (_serviceProvider is not null)
         {
             try
@@ -82,6 +85,23 @@ public partial class App : System.Windows.Application
         }
         _instanceMutex?.Dispose();
         base.OnExit(e);
+    }
+
+    private async void App_Deactivated(object? sender, EventArgs e)
+    {
+        _deactivationCancellation?.Cancel();
+        var cancellation = _deactivationCancellation = new CancellationTokenSource();
+        try
+        {
+            await Task.Delay(100, cancellation.Token);
+            if (_isExiting || Windows.OfType<Window>().Any(window => window.IsActive)
+                || MainWindow?.DataContext is not MainViewModel viewModel)
+            {
+                return;
+            }
+            await viewModel.ReturnSelectionToTodayAsync(cancellation.Token);
+        }
+        catch (OperationCanceledException) { }
     }
 
     private static ServiceProvider CreateServiceProvider()

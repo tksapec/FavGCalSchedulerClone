@@ -140,7 +140,12 @@ public partial class MainWindow : Window
         var bounds = WindowState == WindowState.Maximized ? RestoreBounds : new Rect(Left, Top, Width, Height);
         WindowPlacementService.Save(
             AppPaths.WindowPlacementPath,
-            new WindowPlacement(bounds.Left, bounds.Top, bounds.Width, bounds.Height, WindowState == WindowState.Maximized),
+            new WindowPlacement(
+                Left: bounds.Left,
+                Top: bounds.Top,
+                Width: bounds.Width,
+                Height: bounds.Height,
+                IsMaximized: WindowState == WindowState.Maximized),
             _logger);
     }
 
@@ -216,7 +221,6 @@ public partial class MainWindow : Window
             return;
         }
 
-        statusBar.Height = 30;
         statusBar.Items.Add(new Separator());
         statusBar.Items.Add(CreateStatusButton(_viewModel.ShowSyncDiagnosticsCommand, nameof(MainViewModel.SyncStatusText), "#1E40AF"));
         statusBar.Items.Add(CreateStatusButton(_viewModel.ShowReminderHistoryCommand, nameof(MainViewModel.ReminderStatusText), "#166534"));
@@ -611,9 +615,20 @@ public partial class MainWindow : Window
                 }
             }
 
+            var request = new EventMoveConfirmationRequest(
+                segment.Event.Title, segment.Event.IsTodoLike, segment.Event.IsAllDay,
+                segment.Event.Start, segment.Event.End, segment.Date, targetDay.Date, recurrenceScope);
+            if (!ConfirmEventMove(request))
+            {
+                return;
+            }
             await _viewModel.MoveEventAsync(segment.Event, segment.Date, targetDay.Date, recurrenceScope);
         }, nameof(DayCell_Drop));
     }
+
+    private bool ConfirmEventMove(EventMoveConfirmationRequest request) =>
+        MessageBox.Show(this, EventMoveConfirmationFormatter.Format(request), "移動の確認",
+            MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes;
 
     private void SetDragTarget(CalendarDay day)
     {
