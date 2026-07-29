@@ -30,8 +30,9 @@ public sealed partial class MainViewModel
         SelectedEvent = null;
         var today = DateTime.Today;
         var visibleToday = VisibleCalendarDays.FirstOrDefault(day => day.Date.Date == today);
-        if (visibleToday is not null && SelectedDay?.Date.Date == today)
+        if (visibleToday is not null)
         {
+            SelectedDay = visibleToday;
             return;
         }
         await NavigateToDateAsync(today);

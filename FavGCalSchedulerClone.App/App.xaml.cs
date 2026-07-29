@@ -21,6 +21,9 @@ public partial class App : System.Windows.Application
     private bool _isExiting;
     private ServiceProvider? _serviceProvider;
     private CancellationTokenSource? _deactivationCancellation;
+    private bool _startupInitializationCompleted;
+    private IApplicationInteractionGuard? _interactionGuard;
+    private IAppLogger? _logger;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -36,20 +39,22 @@ public partial class App : System.Windows.Application
         base.OnStartup(e);
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
         _serviceProvider = CreateServiceProvider();
+        _interactionGuard = _serviceProvider.GetRequiredService<IApplicationInteractionGuard>();
+        _logger = _serviceProvider.GetRequiredService<IAppLogger>();
         JapaneseHolidayService.LoadWithFallback(
             AppPaths.JapaneseHolidayDataPath,
             Path.Combine(AppContext.BaseDirectory, "Data", "JapaneseHolidays.csv"),
-            _serviceProvider.GetRequiredService<IAppLogger>());
+            _logger);
         CreateTrayIcon();
 
         var mainWindow = _serviceProvider.GetRequiredService<MainWindow>();
         MainWindow = mainWindow;
         MainWindow.Show();
         Deactivated += App_Deactivated;
-        _ = RunStartupInitializationAsync(
+        _ = CompleteStartupInitializationAsync(
             () => _serviceProvider.GetRequiredService<IApplicationStartupService>()
                 .InitializeAsync(mainWindow, mainWindow.CreateReminderNotifier),
-            _serviceProvider.GetRequiredService<IAppLogger>());
+            _logger);
     }
 
     protected override void OnExit(ExitEventArgs e)
@@ -94,7 +99,11 @@ public partial class App : System.Windows.Application
         try
         {
             await Task.Delay(100, cancellation.Token);
-            if (_isExiting || Windows.OfType<Window>().Any(window => window.IsActive)
+            while (_interactionGuard?.IsReturnToTodaySuppressed == true && !_isExiting)
+            {
+                await Task.Delay(50, cancellation.Token);
+            }
+            if (ShouldSkipReturnToToday()
                 || MainWindow?.DataContext is not MainViewModel viewModel)
             {
                 return;
@@ -102,6 +111,24 @@ public partial class App : System.Windows.Application
             await viewModel.ReturnSelectionToTodayAsync(cancellation.Token);
         }
         catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            try { _logger?.LogError(ex, "Failed to return the calendar selection to today after application deactivation."); }
+            catch (Exception loggingException) { System.Diagnostics.Debug.WriteLine($"{ex}\nLogging failed: {loggingException}"); }
+        }
+    }
+
+    private bool ShouldSkipReturnToToday() =>
+        _isExiting
+        || !_startupInitializationCompleted
+        || _interactionGuard?.IsReturnToTodaySuppressed != false
+        || MainWindow?.DataContext is not MainViewModel
+        || Windows.OfType<Window>().Any(window => window.IsActive);
+
+    private async Task CompleteStartupInitializationAsync(Func<Task> initialize, IAppLogger logger)
+    {
+        try { await RunStartupInitializationAsync(initialize, logger); }
+        finally { _startupInitializationCompleted = true; }
     }
 
     private static ServiceProvider CreateServiceProvider()
@@ -120,6 +147,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<FavGCalSchedulerImportService>();
         services.AddSingleton<IAppLogger, FileAppLogger>();
         services.AddSingleton<IApplicationStartupService, ApplicationStartupService>();
+        services.AddSingleton<IApplicationInteractionGuard, ApplicationInteractionGuard>();
         services.AddSingleton<MainViewModel>();
         services.AddTransient<MainWindow>();
         services.AddTransient<CalendarViewModel>();

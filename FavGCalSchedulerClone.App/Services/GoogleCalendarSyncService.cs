@@ -539,10 +539,17 @@ public sealed class GoogleCalendarSyncService
 
             RemoteDelta remoteDelta;
             IReadOnlyList<SyncPlanItem> previewPlan;
+            ResolvedSyncPlan resolved;
+            var previewFailures = new List<SyncFailureDiagnostic>();
             try
             {
-                var resolved = await ResolveSyncPlanAsync(client, calendarId, calendarDirty, syncToken,
-                    settings.SyncConflictPolicy, isPreview: true, new List<SyncFailureDiagnostic>(), cancellationToken);
+                resolved = await ResolveSyncPlanAsync(client, calendarId, calendarDirty, syncToken,
+                    settings.SyncConflictPolicy, isPreview: true, previewFailures, cancellationToken);
+                if (!resolved.Delta.Success)
+                {
+                    errorItems.Add(CreateCalendarPreviewFailure(calendarId, previewFailures));
+                    continue;
+                }
                 remoteDelta = resolved.Delta with { Events = resolved.EffectiveRemoteEvents };
                 previewPlan = resolved.Plan;
             }
@@ -550,6 +557,16 @@ public sealed class GoogleCalendarSyncService
             {
                 errorItems.Add(new SyncPreviewItem(calendarId, null, null, "Preview error", null, "error", ex.Message));
                 continue;
+            }
+
+            foreach (var failedLocalId in resolved.FailedLocalIds)
+            {
+                var localEvent = calendarDirty.FirstOrDefault(item => item.Id == failedLocalId);
+                if (localEvent is null) continue;
+                var failure = previewFailures.LastOrDefault(item =>
+                    item.LocalId == failedLocalId
+                    || !string.IsNullOrWhiteSpace(localEvent.GoogleEventId) && item.GoogleEventId == localEvent.GoogleEventId);
+                errorItems.Add(CreateDirtyLookupPreviewFailure(calendarId, localEvent, failure));
             }
 
             foreach (var localEvent in calendarDirty)
@@ -560,14 +577,18 @@ public sealed class GoogleCalendarSyncService
                     continue;
                 }
 
-                var item = ToPreviewItem(calendarId, localEvent, localEvent.IsDeleted ? "delete" : "push", localEvent.IsDeleted ? "Googleから削除予定" : "Googleへ送信予定");
+                var wasNotFound = resolved.NotFoundLocalIds.Contains(localEvent.Id);
+                var detail = wasNotFound
+                    ? localEvent.IsDeleted ? "Google側では既に削除済み" : "Google側に存在しないため再作成予定"
+                    : localEvent.IsDeleted ? "Googleから削除予定" : "Googleへ送信予定";
+                var item = ToPreviewItem(calendarId, localEvent, localEvent.IsDeleted ? "delete" : "push", detail);
                 var remoteForDiff = planItem.RemoteEvent is { } plannedRemoteEvent
                     ? GoogleEventMapper.FromGoogleEvent(
                         plannedRemoteEvent,
                         calendarId,
                         GetDefaultReminders(reminderDefaults, calendarId),
                         settings.AdoptGoogleEmailRemindersAsLocalNotifications)
-                    : await TryLoadRemoteForPreviewAsync(
+                    : wasNotFound ? null : await TryLoadRemoteForPreviewAsync(
                         client,
                         calendarId,
                         localEvent,
@@ -1507,6 +1528,25 @@ public sealed class GoogleCalendarSyncService
             fieldDiffs ?? []);
     }
 
+    private static SyncPreviewItem CreateCalendarPreviewFailure(
+        string calendarId, IReadOnlyList<SyncFailureDiagnostic> failures)
+    {
+        var failure = failures.LastOrDefault();
+        var metadata = failure is null ? "分類: RemoteList / 再試行可能: はい" :
+            $"分類: {failure.FailureCategory ?? failure.Operation} / HTTP: {failure.HttpStatusCode ?? "不明"} / 再試行可能: はい";
+        return new SyncPreviewItem(calendarId, null, null, "Google予定を取得できませんでした", null, "error",
+            $"このカレンダーの同期プレビューを作成できませんでした。ローカル予定は変更されていません。{metadata}");
+    }
+
+    private static SyncPreviewItem CreateDirtyLookupPreviewFailure(
+        string calendarId, CalendarEvent localEvent, SyncFailureDiagnostic? failure)
+    {
+        var metadata = $"分類: {failure?.FailureCategory ?? failure?.Operation ?? "RemoteDirtyLookup"}"
+            + $" / HTTP: {failure?.HttpStatusCode ?? "不明"} / 再試行が必要です。";
+        return ToPreviewItem(calendarId, localEvent, "error",
+            $"Google側予定の確認に失敗したため、この予定は今回の同期対象から除外されます。{metadata}");
+    }
+
     private static SyncDirtyItem ToDirtyItem(CalendarEvent calendarEvent, SyncFailureDiagnostic? failure)
     {
         return new SyncDirtyItem(
@@ -1593,48 +1633,6 @@ public sealed class GoogleCalendarSyncService
             calendarEvent.IsDeleted ? "削除" : string.IsNullOrWhiteSpace(calendarEvent.GoogleEventId) ? "作成" : "更新",
             calendarEvent.GoogleEventId,
             calendarEvent.UpdatedAt);
-    }
-
-    private async Task<RemoteDelta> LoadRemoteChangesForPreviewAsync(
-        IGoogleCalendarClient client,
-        string calendarId,
-        string? syncToken,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var events = new List<Event>();
-            string? pageToken = null;
-            do
-            {
-                var page = await client.ListEventsAsync(
-                    new GoogleEventListRequest(
-                        calendarId,
-                        syncToken,
-                        pageToken,
-                        string.IsNullOrWhiteSpace(syncToken) ? DateTimeOffset.Now.AddYears(-5) : null,
-                        ShowDeleted: true,
-                        SingleEvents: false,
-                        MaxResults: 2500),
-                    cancellationToken);
-                events.AddRange(page.Items);
-                pageToken = page.NextPageToken;
-            }
-            while (!string.IsNullOrWhiteSpace(pageToken));
-
-            return new RemoteDelta(
-                events,
-                null,
-                true,
-                string.IsNullOrWhiteSpace(syncToken) ? RemoteSyncMode.InitialFull : RemoteSyncMode.Incremental,
-                string.IsNullOrWhiteSpace(syncToken) ? DateTimeOffset.Now.AddYears(-5) : null);
-        }
-        catch (GoogleApiException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.Gone && !string.IsNullOrWhiteSpace(syncToken))
-        {
-            await _repository.SaveSyncTokenAsync(calendarId, null);
-            var recovery = await LoadRemoteChangesForPreviewAsync(client, calendarId, null, cancellationToken);
-            return recovery with { Mode = RemoteSyncMode.RecoveryFull };
-        }
     }
 
     private async Task SaveSyncResultAsync(SyncResult result, bool keepHistory)
