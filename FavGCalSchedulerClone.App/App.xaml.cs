@@ -44,7 +44,7 @@ public partial class App : System.Windows.Application
         JapaneseHolidayService.LoadWithFallback(
             AppPaths.JapaneseHolidayDataPath,
             Path.Combine(AppContext.BaseDirectory, "Data", "JapaneseHolidays.csv"),
-            _serviceProvider.GetRequiredService<IAppLogger>());
+            _logger);
         CreateTrayIcon();
 
         var mainWindow = _serviceProvider.GetRequiredService<MainWindow>();

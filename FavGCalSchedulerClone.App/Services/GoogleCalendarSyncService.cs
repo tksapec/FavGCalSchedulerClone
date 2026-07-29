@@ -1635,48 +1635,6 @@ public sealed class GoogleCalendarSyncService
             calendarEvent.UpdatedAt);
     }
 
-    private async Task<RemoteDelta> LoadRemoteChangesForPreviewAsync(
-        IGoogleCalendarClient client,
-        string calendarId,
-        string? syncToken,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var events = new List<Event>();
-            string? pageToken = null;
-            do
-            {
-                var page = await client.ListEventsAsync(
-                    new GoogleEventListRequest(
-                        calendarId,
-                        syncToken,
-                        pageToken,
-                        string.IsNullOrWhiteSpace(syncToken) ? DateTimeOffset.Now.AddYears(-5) : null,
-                        ShowDeleted: true,
-                        SingleEvents: false,
-                        MaxResults: 2500),
-                    cancellationToken);
-                events.AddRange(page.Items);
-                pageToken = page.NextPageToken;
-            }
-            while (!string.IsNullOrWhiteSpace(pageToken));
-
-            return new RemoteDelta(
-                events,
-                null,
-                true,
-                string.IsNullOrWhiteSpace(syncToken) ? RemoteSyncMode.InitialFull : RemoteSyncMode.Incremental,
-                string.IsNullOrWhiteSpace(syncToken) ? DateTimeOffset.Now.AddYears(-5) : null);
-        }
-        catch (GoogleApiException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.Gone && !string.IsNullOrWhiteSpace(syncToken))
-        {
-            await _repository.SaveSyncTokenAsync(calendarId, null);
-            var recovery = await LoadRemoteChangesForPreviewAsync(client, calendarId, null, cancellationToken);
-            return recovery with { Mode = RemoteSyncMode.RecoveryFull };
-        }
-    }
-
     private async Task SaveSyncResultAsync(SyncResult result, bool keepHistory)
     {
         await _repository.SaveSettingValueAsync(SyncLastResultKey, JsonSerializer.Serialize(result));
