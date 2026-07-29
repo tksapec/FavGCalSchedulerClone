@@ -46,18 +46,35 @@ public static class WindowPlacementService
         double minimumHeight,
         IReadOnlyList<Rect> workingAreas)
     {
-        var width = Math.Max(minimumWidth, placement.Width);
-        var height = Math.Max(minimumHeight, placement.Height);
+        const double defaultWidth = 1180;
+        const double defaultHeight = 720;
+        static bool Finite(double value) => !double.IsNaN(value) && !double.IsInfinity(value);
+        var width = Finite(placement.Width) && placement.Width > 0 ? Math.Max(minimumWidth, placement.Width) : Math.Max(minimumWidth, defaultWidth);
+        var height = Finite(placement.Height) && placement.Height > 0 ? Math.Max(minimumHeight, placement.Height) : Math.Max(minimumHeight, defaultHeight);
         if (workingAreas.Count == 0)
         {
             return placement with { Width = width, Height = height };
         }
 
-        var bounds = new Rect(placement.Left, placement.Top, width, height);
-        var visibleArea = workingAreas.Any(area => area.IntersectsWith(bounds));
-        if (visibleArea)
+        var left = Finite(placement.Left) ? placement.Left : workingAreas[0].Left;
+        var top = Finite(placement.Top) ? placement.Top : workingAreas[0].Top;
+        var bounds = new Rect(left, top, width, height);
+        var target = workingAreas.FirstOrDefault(area =>
         {
-            return placement with { Width = width, Height = height };
+            var intersection = Rect.Intersect(area, bounds);
+            return !intersection.IsEmpty && intersection.Width >= 100 && intersection.Height >= 32;
+        });
+        if (target != Rect.Empty)
+        {
+            width = Math.Min(width, target.Width);
+            height = Math.Min(height, target.Height);
+            return placement with
+            {
+                Left = Math.Clamp(left, target.Left, target.Right - Math.Min(100, width)),
+                Top = Math.Clamp(top, target.Top, target.Bottom - Math.Min(32, height)),
+                Width = width,
+                Height = height
+            };
         }
 
         var fallback = workingAreas[0];

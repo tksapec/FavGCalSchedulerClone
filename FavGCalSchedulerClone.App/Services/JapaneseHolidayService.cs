@@ -30,8 +30,43 @@ public static class JapaneseHolidayService
         }
     }
 
+    public static HolidayLoadResult LoadWithFallback(string localPath, string bundledPath, IAppLogger? logger)
+    {
+        var errors = new List<string>();
+        foreach (var candidate in new[] { (localPath, HolidayDataSource.Local), (bundledPath, HolidayDataSource.Bundled) })
+        {
+            try
+            {
+                if (!File.Exists(candidate.Item1))
+                {
+                    errors.Add($"{candidate.Item2}: file not found");
+                    continue;
+                }
+                var parsed = ParseCsv(File.ReadAllText(candidate.Item1, OfficialCsvEncoding));
+                if (parsed.Count == 0)
+                {
+                    errors.Add($"{candidate.Item2}: no valid rows");
+                    continue;
+                }
+                _holidays = parsed;
+                HolidaysChanged?.Invoke(null, EventArgs.Empty);
+                logger?.LogInfo($"Loaded {parsed.Count} Japanese holidays from {candidate.Item2} data.");
+                return new HolidayLoadResult(candidate.Item2, parsed.Count, errors.Count == 0 ? null : string.Join("; ", errors));
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"{candidate.Item2}: {ex.Message}");
+                logger?.LogError(ex, $"Failed to load {candidate.Item2} Japanese holiday data.");
+            }
+        }
+        _holidays = new Dictionary<DateOnly, string>();
+        HolidaysChanged?.Invoke(null, EventArgs.Empty);
+        return new HolidayLoadResult(HolidayDataSource.Empty, 0, string.Join("; ", errors));
+    }
+
     public static async Task<bool> UpdateFromOfficialSourceAsync(HttpClient client, string destinationPath, IAppLogger? logger, CancellationToken cancellationToken = default)
     {
+        var temporaryPath = destinationPath + ".tmp";
         try
         {
             var bytes = await client.GetByteArrayAsync(OfficialCsvUrl, cancellationToken);
@@ -43,7 +78,6 @@ public static class JapaneseHolidayService
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
-            var temporaryPath = destinationPath + ".tmp";
             await File.WriteAllTextAsync(temporaryPath, csv, OfficialCsvEncoding, cancellationToken);
             File.Move(temporaryPath, destinationPath, true);
             _holidays = updated;
@@ -52,6 +86,7 @@ public static class JapaneseHolidayService
         }
         catch (Exception ex)
         {
+            try { File.Delete(temporaryPath); } catch (Exception cleanupEx) { logger?.LogError(cleanupEx, "Failed to remove holiday temporary file."); }
             logger?.LogError(ex, "Failed to update Japanese holiday data.");
             return false;
         }
@@ -86,3 +121,6 @@ public static class JapaneseHolidayService
         return Encoding.GetEncoding(932);
     }
 }
+
+public enum HolidayDataSource { Local, Bundled, Empty }
+public sealed record HolidayLoadResult(HolidayDataSource Source, int Count, string? ErrorMessage);
