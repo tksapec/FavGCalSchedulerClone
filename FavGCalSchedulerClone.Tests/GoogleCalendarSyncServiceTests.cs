@@ -9,6 +9,61 @@ namespace FavGCalSchedulerClone.Tests;
 public sealed class GoogleCalendarSyncServiceTests
 {
     [Fact]
+    public async Task PreviewAsync_ListFailureIsReportedWithoutChangingLocalStateOrToken()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi { ThrowOnList = true };
+        var settings = CreateSettings("work");
+        var local = new CalendarEvent
+        {
+            Id = "preview-list-failure", CalendarId = "work", Title = "local dirty",
+            Start = new DateTimeOffset(2026, 1, 1, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.Zero), IsDirty = true
+        };
+        await repository.SaveEventAsync(local);
+        await repository.SaveSyncTokenAsync("work", "keep-token");
+
+        var preview = await new GoogleCalendarSyncService(repository, api).PreviewAsync(settings);
+
+        var error = Assert.Single(preview.ErrorItems);
+        Assert.Equal("Google予定を取得できませんでした", error.Title);
+        Assert.Contains("ローカル予定は変更されていません", error.Detail);
+        Assert.Empty(preview.PushItems);
+        Assert.Empty(preview.PullItems);
+        Assert.Empty(preview.DeleteItems);
+        Assert.Empty(preview.ConflictItems);
+        Assert.Equal("keep-token", await repository.GetSyncTokenAsync("work"));
+        Assert.True((await repository.FindEventByIdAsync(local.Id))!.IsDirty);
+    }
+
+    [Fact]
+    public async Task PreviewAsync_DirtyLookupFailureIsReportedAndNotPlannedForPush()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi { ThrowOnGet = true };
+        var settings = CreateSettings("work");
+        var local = new CalendarEvent
+        {
+            Id = "preview-get-failure", CalendarId = "work", GoogleEventId = "missing-from-list",
+            Title = "営業会議", DirtyFields = "Description",
+            Start = new DateTimeOffset(2026, 1, 1, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.Zero), IsDirty = true
+        };
+        await repository.SaveEventAsync(local);
+
+        var preview = await new GoogleCalendarSyncService(repository, api).PreviewAsync(settings);
+
+        var error = Assert.Single(preview.ErrorItems);
+        Assert.Equal(local.Id, error.LocalId);
+        Assert.Equal(local.GoogleEventId, error.GoogleEventId);
+        Assert.Equal("Description", error.ChangeFields);
+        Assert.Contains("今回の同期対象から除外", error.Detail);
+        Assert.Empty(preview.PushItems);
+        Assert.Empty(preview.PullItems);
+        Assert.True((await repository.FindEventByIdAsync(local.Id))!.IsDirty);
+    }
+
+    [Fact]
     public void ResolveNotFoundAction_TreatsDeletedEventAsAlreadySynced()
     {
         var action = GoogleCalendarSyncService.ResolveNotFoundAction(new CalendarEvent { IsDeleted = true });
@@ -353,14 +408,13 @@ public sealed class GoogleCalendarSyncServiceTests
         var preview = await service.PreviewAsync(settings);
 
         Assert.Equal(2, preview.PullItems.Count);
-        Assert.Null(await repository.GetSyncTokenAsync("work"));
+        Assert.Equal("stale-token", await repository.GetSyncTokenAsync("work"));
         Assert.Collection(api.ListRequests,
             request => Assert.Equal("stale-token", request.SyncToken),
             request => { Assert.Null(request.SyncToken); Assert.Null(request.PageToken); },
             request => { Assert.Null(request.SyncToken); Assert.Equal("1", request.PageToken); });
 
         api.ListRequests.Clear();
-        await repository.SaveSyncTokenAsync("work", "stale-token");
         api.StaleSyncTokens.Add("stale-token");
         var result = await service.SyncAsync(settings);
 
