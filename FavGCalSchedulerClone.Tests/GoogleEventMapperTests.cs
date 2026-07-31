@@ -7,6 +7,48 @@ namespace FavGCalSchedulerClone.Tests;
 public sealed class GoogleEventMapperTests
 {
     [Fact]
+    public void ToGoogleEvent_TodoAlwaysDisablesAllGoogleReminders()
+    {
+        var local = new App.Models.CalendarEvent
+        {
+            Title = "Todo", Description = "#todoA0%", IsTodoLike = true, IsAllDay = true,
+            Start = new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 8, 2, 0, 0, 0, TimeSpan.Zero),
+            ReminderMinutesBeforeStart = 0, AppReminderMinutesBeforeStart = [0, 30],
+            GoogleEmailReminderMinutesBeforeStart = [60], IsAppReminderEnabled = true,
+            IsGoogleEmailReminderEnabled = true
+        };
+
+        var result = GoogleEventMapper.ToGoogleEvent(local);
+
+        Assert.NotNull(result.Reminders);
+        Assert.False(result.Reminders.UseDefault);
+        Assert.Empty(result.Reminders.Overrides);
+    }
+
+    [Fact]
+    public void FromGoogleEvent_TodoDoesNotAdoptPopupOrEmailReminders()
+    {
+        var google = new Event
+        {
+            Id = "todo-reminders", Summary = "Todo", Description = "#todoA0%",
+            Start = new EventDateTime { Date = "2026-08-01" }, End = new EventDateTime { Date = "2026-08-02" },
+            Reminders = new Event.RemindersData { UseDefault = false, Overrides =
+                [new EventReminder { Method = "popup", Minutes = 0 }, new EventReminder { Method = "email", Minutes = 30 }] }
+        };
+
+        var result = GoogleEventMapper.FromGoogleEvent(google, "primary");
+
+        Assert.True(result.IsTodoLike);
+        Assert.Null(result.ReminderMinutesBeforeStart);
+        Assert.Empty(result.AppReminderMinutesBeforeStart);
+        Assert.Empty(result.GoogleEmailReminderMinutesBeforeStart);
+        Assert.False(result.IsAppReminderEnabled);
+        Assert.False(result.IsGoogleEmailReminderEnabled);
+        Assert.True(result.GoogleReminderMetadata!.HasGoogleReminder);
+    }
+
+    [Fact]
     public void FromGoogleEvent_PreservesRemoteEtagAsSyncBaseline()
     {
         var googleEvent = CreateTimedGoogleEvent();
