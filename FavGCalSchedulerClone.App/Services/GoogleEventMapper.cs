@@ -59,6 +59,16 @@ public static class GoogleEventMapper
             GoogleReminderMetadata = reminderMetadata
         };
         local.IsTodoLike = TagService.IsTodoLike(local);
+        if (local.IsTodoLike)
+        {
+            // Preserve the fact that Google has reminders for sync cleanup, while never
+            // adopting those values as application notification settings.
+            local.ReminderMinutesBeforeStart = null;
+            local.AppReminderMinutesBeforeStart = [];
+            local.GoogleEmailReminderMinutesBeforeStart = [];
+            local.IsAppReminderEnabled = false;
+            local.IsGoogleEmailReminderEnabled = false;
+        }
         return local;
     }
 
@@ -145,6 +155,11 @@ public static class GoogleEventMapper
 
     private static Event.RemindersData ToGoogleReminders(LocalEvent localEvent)
     {
+        if (localEvent.IsTodoLike)
+        {
+            return TodoReminderPolicy.CreateGoogleRemindersDisabled();
+        }
+
         var reminders = new Event.RemindersData
         {
             UseDefault = false,

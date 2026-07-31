@@ -24,6 +24,23 @@ public sealed partial class MainViewModel
         Status = "今日を表示しました。";
     }
 
+    public async Task ReturnSelectionToTodayAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        SelectedEvent = null;
+        var today = DateTime.Today;
+        var visibleToday = VisibleCalendarDays.FirstOrDefault(day => day.Date.Date == today);
+        if (visibleToday is not null)
+        {
+            SelectedDay = visibleToday;
+            return;
+        }
+        await NavigateToDateAsync(today);
+        cancellationToken.ThrowIfCancellationRequested();
+        SelectedDay = VisibleCalendarDays.FirstOrDefault(day => day.Date.Date == today)
+            ?? CalendarDays.FirstOrDefault(day => day.Date.Date == today);
+    }
+
     public async Task NavigateToDateAsync(DateTime targetDate)
     {
         _pendingSelectedDate = targetDate.Date;

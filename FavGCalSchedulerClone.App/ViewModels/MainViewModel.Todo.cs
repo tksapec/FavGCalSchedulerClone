@@ -32,6 +32,11 @@ public sealed partial class MainViewModel
             IsDeleted = false,
             IsTodoLike = true,
             ReminderMinutesBeforeStart = null,
+            AppReminderMinutesBeforeStart = [],
+            GoogleEmailReminderMinutesBeforeStart = [],
+            IsAppReminderEnabled = false,
+            IsGoogleEmailReminderEnabled = false,
+            GoogleReminderMetadata = null,
             ColorId = EditorColorId
         };
 
@@ -60,6 +65,7 @@ public sealed partial class MainViewModel
         editingTodo.IsDirty = true;
         editingTodo.IsDeleted = false;
         editingTodo.IsTodoLike = true;
+        TodoReminderPolicy.NormalizeLocalFields(editingTodo);
         editingTodo.ColorId = EditorColorId;
 
         await SaveEventWithCalendarMoveAsync(editingTodo, originalTodo);
