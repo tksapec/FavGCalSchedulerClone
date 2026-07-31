@@ -1180,7 +1180,11 @@ public sealed class GoogleCalendarSyncService
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    failures.Add(CreatePullFailureDiagnostic(calendarId, null, null, ex, "TodoReminderCleanup", "ToDoのGoogle通知削除に失敗しました。"));
+                    var diagnostic = item.LocalEvent is { } localTodo
+                        ? CreateFailureDiagnostic(localTodo, "TodoReminderCleanup", ex, "ToDoのGoogle通知削除に失敗しました。")
+                            with { FailureCategory = "TodoReminderCleanup" }
+                        : CreatePullFailureDiagnostic(calendarId, null, null, ex, "TodoReminderCleanup", "ToDoのGoogle通知削除に失敗しました。");
+                    failures.Add(diagnostic);
                     failed++;
                     continue;
                 }
@@ -1218,9 +1222,7 @@ public sealed class GoogleCalendarSyncService
                         if (!localEvent.IsDeleted)
                         {
                             localEvent.IsDirty = true;
-                            localEvent.DirtyFields = string.Join(",", (localEvent.DirtyFields ?? string.Empty)
-                                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                                .Append("Reminder").Distinct(StringComparer.Ordinal));
+                            localEvent.DirtyFields = EventDirtyFieldTracker.MergeFieldNames(localEvent.DirtyFields, "Reminder");
                             await _repository.SaveEventAsync(localEvent);
                         }
                     }
@@ -1309,18 +1311,19 @@ public sealed class GoogleCalendarSyncService
         string? syncToken, SyncConflictPolicy conflictPolicy, bool isPreview,
         ICollection<SyncFailureDiagnostic> failures, CancellationToken cancellationToken)
     {
-        var effectiveDirtyEvents = dirtyEvents.ToList();
-        var existingIds = effectiveDirtyEvents.Select(item => item.Id).ToHashSet(StringComparer.Ordinal);
+        var effectiveDirtyEvents = dirtyEvents.Select(TodoReminderPolicy.CloneForSyncPlanning).ToList();
         foreach (var todo in (await _repository.LoadTodoEventsAsync())
                      .Where(item => item.CalendarId == calendarId && TodoReminderPolicy.RequiresLocalCleanup(item)))
         {
-            var candidate = effectiveDirtyEvents.FirstOrDefault(item => item.Id == todo.Id) ?? todo;
+            var candidate = effectiveDirtyEvents.FirstOrDefault(item => item.Id == todo.Id);
+            if (candidate is null)
+            {
+                candidate = TodoReminderPolicy.CloneForSyncPlanning(todo);
+                effectiveDirtyEvents.Add(candidate);
+            }
             TodoReminderPolicy.NormalizeLocalFields(candidate);
             candidate.IsDirty = true;
-            candidate.DirtyFields = string.Join(",", (candidate.DirtyFields ?? string.Empty)
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Append("Reminder").Distinct(StringComparer.Ordinal));
-            if (existingIds.Add(candidate.Id)) effectiveDirtyEvents.Add(candidate);
+            candidate.DirtyFields = EventDirtyFieldTracker.MergeFieldNames(candidate.DirtyFields, "Reminder");
         }
 
         var delta = await LoadRemoteDeltaAsync(client, calendarId, syncToken, failures, cancellationToken, !isPreview);

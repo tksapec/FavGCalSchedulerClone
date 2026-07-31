@@ -54,6 +54,10 @@ internal static class EventDirtyFieldTracker
         }));
     }
 
+    internal static string MergeFieldNames(string? fields, params string[] additionalFields) =>
+        string.Join(",", Parse(fields).Concat(additionalFields).Distinct(StringComparer.Ordinal)
+            .OrderBy(field => Array.IndexOf(FieldOrder, field) is var index && index >= 0 ? index : int.MaxValue));
+
     private static HashSet<string> Parse(string? value) => string.IsNullOrWhiteSpace(value)
         ? new HashSet<string>(StringComparer.Ordinal)
         : value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.Ordinal);

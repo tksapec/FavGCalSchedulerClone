@@ -54,4 +54,22 @@ internal static class TodoReminderPolicy
             || todo.IsAppReminderEnabled
             || todo.IsGoogleEmailReminderEnabled
             || todo.GoogleReminderMetadata?.HasGoogleReminder == true);
+
+    public static CalendarEvent CloneForSyncPlanning(CalendarEvent source) => new()
+    {
+        Id = source.Id, GoogleEventId = source.GoogleEventId, LastSyncedGoogleEtag = source.LastSyncedGoogleEtag,
+        RecurringEventId = source.RecurringEventId, RecurringParentId = source.RecurringParentId,
+        OriginalStart = source.OriginalStart, IsRecurrenceException = source.IsRecurrenceException,
+        CalendarId = source.CalendarId, Title = source.Title, Description = source.Description,
+        Location = source.Location, Start = source.Start, End = source.End, IsAllDay = source.IsAllDay,
+        ColorId = source.ColorId, RecurrenceJson = source.RecurrenceJson, IsDeleted = source.IsDeleted,
+        UpdatedAt = source.UpdatedAt, LastSyncedAt = source.LastSyncedAt, IsDirty = source.IsDirty,
+        DirtyFields = source.DirtyFields, IsTodoLike = source.IsTodoLike,
+        ReminderMinutesBeforeStart = source.ReminderMinutesBeforeStart,
+        AppReminderMinutesBeforeStart = [.. source.AppReminderMinutesBeforeStart],
+        GoogleEmailReminderMinutesBeforeStart = [.. source.GoogleEmailReminderMinutesBeforeStart],
+        IsAppReminderEnabled = source.IsAppReminderEnabled,
+        IsGoogleEmailReminderEnabled = source.IsGoogleEmailReminderEnabled,
+        GoogleReminderMetadata = source.GoogleReminderMetadata?.Clone(), IsGeneratedOccurrence = source.IsGeneratedOccurrence
+    };
 }
