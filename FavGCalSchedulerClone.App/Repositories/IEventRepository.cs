@@ -19,5 +19,6 @@ public interface IEventRepository
     Task SaveEventAsync(CalendarEvent calendarEvent);
     Task UpsertSyncedEventAsync(CalendarEvent calendarEvent);
     Task MarkSyncedAsync(CalendarEvent calendarEvent, string? googleEventId = null, string? lastSyncedGoogleEtag = null);
+    Task ApplyTodoReminderCleanupStateAsync(string localId, bool preserveDirtyState, string? cleanedGoogleEtag = null);
     Task DeleteEventAsync(CalendarEvent calendarEvent);
 }

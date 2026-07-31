@@ -7,6 +7,72 @@ namespace FavGCalSchedulerClone.Tests;
 public sealed class ReminderNotificationServiceTests
 {
     [Fact]
+    public async Task TodoReminder_UsesFixed0815OnceAndIgnoresLegacyReminderFields()
+    {
+        var repository = await CreateRepositoryAsync();
+        var notifier = new RecordingNotifier();
+        using var service = new ReminderNotificationService(repository, notifier);
+        var dueDate = DateTime.Today.AddDays(2);
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Id = "fixed-todo", Title = "Todo", Description = "#todoA0%", IsTodoLike = true,
+            IsAllDay = true, Start = new DateTimeOffset(dueDate), End = new DateTimeOffset(dueDate.AddDays(1)),
+            ReminderMinutesBeforeStart = 0, AppReminderMinutesBeforeStart = [0, 30, 45],
+            GoogleEmailReminderMinutesBeforeStart = [0, 30], IsAppReminderEnabled = true,
+            IsGoogleEmailReminderEnabled = true
+        });
+        var remindAt = TodoReminderPolicy.GetReminderTime(dueDate);
+
+        await service.CheckDueRemindersAsync(remindAt.AddSeconds(-1));
+        Assert.Equal(0, notifier.Count);
+        await service.CheckDueRemindersAsync(remindAt);
+        await service.CheckDueRemindersAsync(remindAt.AddSeconds(30));
+        await service.CheckDueRemindersAsync(remindAt.AddMinutes(45));
+
+        Assert.Equal(1, notifier.Count);
+        Assert.Contains(TodoReminderPolicy.OccurrenceKeySuffix,
+            (await service.LoadDiagnosticsAsync()).Candidates.Single().OccurrenceKey);
+    }
+
+    [Fact]
+    public async Task TodoReminder_NotifiesLateOnDueDateButNotAfterDueDate()
+    {
+        var repository = await CreateRepositoryAsync();
+        var notifier = new RecordingNotifier();
+        using var service = new ReminderNotificationService(repository, notifier);
+        var dueDate = DateTime.Today.AddDays(2);
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Id = "late-todo", Title = "Late Todo", Description = "#todoA0%", IsTodoLike = true,
+            IsAllDay = true, Start = new DateTimeOffset(dueDate), End = new DateTimeOffset(dueDate.AddDays(1))
+        });
+
+        await service.CheckDueRemindersAsync(TodoReminderPolicy.GetReminderTime(dueDate).AddHours(4));
+        await service.CheckDueRemindersAsync(TodoReminderPolicy.GetDueDayEnd(dueDate).AddSeconds(1));
+
+        Assert.Equal(1, notifier.Count);
+    }
+
+    [Fact]
+    public async Task TodoReminder_DoesNotNotifyCompletedTodo()
+    {
+        var repository = await CreateRepositoryAsync();
+        var notifier = new RecordingNotifier();
+        using var service = new ReminderNotificationService(repository, notifier);
+        var dueDate = DateTime.Today.AddDays(2);
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Id = "done-todo", Title = "Done", Description = "#todoA100%", IsTodoLike = true,
+            IsAllDay = true, Start = new DateTimeOffset(dueDate), End = new DateTimeOffset(dueDate.AddDays(1))
+        });
+
+        await service.CheckDueRemindersDetailedAsync(TodoReminderPolicy.GetReminderTime(dueDate));
+
+        Assert.Equal(0, notifier.Count);
+        Assert.Contains(service.CurrentDiagnostics.Candidates, item => item.Reason == "完了ToDo");
+    }
+
+    [Fact]
     public async Task StartAsync_IsIdempotentAndPublishesMonitoringState()
     {
         var repository = await CreateRepositoryAsync();

@@ -295,6 +295,43 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         return await command.ExecuteNonQueryAsync() > 0;
     }
 
+    public async Task ApplyTodoReminderCleanupStateAsync(
+        string localId,
+        bool preserveDirtyState,
+        string? cleanedGoogleEtag = null)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = preserveDirtyState
+            ? """
+              UPDATE events
+              SET reminder_minutes_before_start = NULL,
+                  app_reminder_enabled = 0,
+                  google_email_reminder_enabled = 0,
+                  app_reminder_minutes_json = '[]',
+                  google_email_reminder_minutes_json = '[]',
+                  google_reminder_metadata_json = NULL
+              WHERE id = $id
+              """
+            : """
+              UPDATE events
+              SET reminder_minutes_before_start = NULL,
+                  app_reminder_enabled = 0,
+                  google_email_reminder_enabled = 0,
+                  app_reminder_minutes_json = '[]',
+                  google_email_reminder_minutes_json = '[]',
+                  google_reminder_metadata_json = NULL,
+                  last_synced_google_etag = COALESCE($etag, last_synced_google_etag)
+              WHERE id = $id
+              """;
+        command.Parameters.AddWithValue("$id", localId);
+        if (!preserveDirtyState)
+        {
+            command.Parameters.AddWithValue("$etag", (object?)cleanedGoogleEtag ?? DBNull.Value);
+        }
+        await command.ExecuteNonQueryAsync();
+    }
+
     public async Task<CalendarEvent?> FindDuplicateEventAsync(CalendarEvent calendarEvent)
     {
         await using var connection = OpenConnection();

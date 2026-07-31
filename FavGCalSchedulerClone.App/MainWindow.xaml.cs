@@ -21,6 +21,7 @@ public partial class MainWindow : Window
     private readonly MainViewModel _viewModel;
     private readonly ReminderNotificationService _reminderService;
     private readonly IAppLogger? _logger;
+    private readonly IApplicationInteractionGuard _applicationInteractionGuard;
     private readonly DispatcherTimer _operationalStatusTimer;
     private readonly DispatcherTimer _monthLaneCapacityTimer;
     private readonly DispatcherTimer _windowPlacementTimer;
@@ -33,12 +34,14 @@ public partial class MainWindow : Window
     private CalendarDay? _dragOverDay;
     private DialogUiFactory DialogUi => new(this, _viewModel.EventColorOptions, _viewModel.SideListFontSize);
 
-    public MainWindow(MainViewModel viewModel, ReminderNotificationService reminderService, IAppLogger? logger = null)
+    public MainWindow(MainViewModel viewModel, ReminderNotificationService reminderService,
+        IApplicationInteractionGuard applicationInteractionGuard, IAppLogger? logger = null)
     {
         InitializeComponent();
         _viewModel = viewModel;
         _reminderService = reminderService;
         _logger = logger;
+        _applicationInteractionGuard = applicationInteractionGuard;
         _operationalStatusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         _operationalStatusTimer.Tick += async (_, _) => await RefreshOperationalStatusAsync();
         _monthLaneCapacityTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
@@ -51,26 +54,27 @@ public partial class MainWindow : Window
         SizeChanged += MainWindow_SizeChanged;
         LayoutUpdated += MainWindow_LayoutUpdated;
         DataContext = _viewModel;
-        _viewModel.SetManualSyncPreviewConfirmation(preview => Task.FromResult(SyncDialogs.ShowPreview(this, preview) == true));
+        _viewModel.SetManualSyncPreviewConfirmation(preview => Task.FromResult(
+            RunAsOwnedModal(() => SyncDialogs.ShowPreview(this, preview) == true)));
         _viewModel.SetWindowCommandHandlers(
-            ShowScheduleDialogAsync,
-            ShowTodoDialogAsync,
-            BackupAllCalendarsAsync,
-            RestoreAllCalendarsAsync,
-            ShowFavGCalSchedulerImportDialogAsync,
-            ImportCsvAsync,
-            ExportCsvAsync,
-            () => ShowEventListDialogAsync("スケジュール一覧", new EventListFilter(string.Empty, EventKindFilter.All, EventSearchRange.Year, _viewModel.CurrentMonth)),
-            ShowSearchDialogAsync,
-            ShowSyncDiagnosticsDialogAsync,
-            ShowSettingsDialogAsync,
-            ShowReminderHistoryDialogAsync,
+            () => RunAsOwnedModalAsync(ShowScheduleDialogAsync),
+            () => RunAsOwnedModalAsync(ShowTodoDialogAsync),
+            () => RunAsOwnedModalAsync(BackupAllCalendarsAsync),
+            () => RunAsOwnedModalAsync(RestoreAllCalendarsAsync),
+            () => RunAsOwnedModalAsync(ShowFavGCalSchedulerImportDialogAsync),
+            () => RunAsOwnedModalAsync(ImportCsvAsync),
+            () => RunAsOwnedModalAsync(ExportCsvAsync),
+            () => RunAsOwnedModalAsync(() => ShowEventListDialogAsync("スケジュール一覧", new EventListFilter(string.Empty, EventKindFilter.All, EventSearchRange.Year, _viewModel.CurrentMonth))),
+            () => RunAsOwnedModalAsync(ShowSearchDialogAsync),
+            () => RunAsOwnedModalAsync(ShowSyncDiagnosticsDialogAsync),
+            () => RunAsOwnedModalAsync(ShowSettingsDialogAsync),
+            () => RunAsOwnedModalAsync(ShowReminderHistoryDialogAsync),
             () =>
             {
-                AboutDialog.Show(this);
+                RunAsOwnedModal(() => AboutDialog.Show(this));
                 return Task.CompletedTask;
             },
-            ShowMonthJumpDialogAsync);
+            () => RunAsOwnedModalAsync(ShowMonthJumpDialogAsync));
         CustomizeMainUi();
     }
 
@@ -140,7 +144,12 @@ public partial class MainWindow : Window
         var bounds = WindowState == WindowState.Maximized ? RestoreBounds : new Rect(Left, Top, Width, Height);
         WindowPlacementService.Save(
             AppPaths.WindowPlacementPath,
-            new WindowPlacement(bounds.Left, bounds.Top, bounds.Width, bounds.Height, WindowState == WindowState.Maximized),
+            new WindowPlacement(
+                Left: bounds.Left,
+                Top: bounds.Top,
+                Width: bounds.Width,
+                Height: bounds.Height,
+                IsMaximized: WindowState == WindowState.Maximized),
             _logger);
     }
 
@@ -216,7 +225,6 @@ public partial class MainWindow : Window
             return;
         }
 
-        statusBar.Height = 30;
         statusBar.Items.Add(new Separator());
         statusBar.Items.Add(CreateStatusButton(_viewModel.ShowSyncDiagnosticsCommand, nameof(MainViewModel.SyncStatusText), "#1E40AF"));
         statusBar.Items.Add(CreateStatusButton(_viewModel.ShowReminderHistoryCommand, nameof(MainViewModel.ReminderStatusText), "#166534"));
@@ -405,7 +413,7 @@ public partial class MainWindow : Window
         {
             _logger?.LogError(ex, context);
             _viewModel.Status = $"操作に失敗しました: {ex.Message}";
-            MessageBox.Show(this, ex.Message, "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+            RunAsOwnedModal(() => MessageBox.Show(this, ex.Message, "エラー", MessageBoxButton.OK, MessageBoxImage.Error));
             System.Diagnostics.Debug.WriteLine($"{context}: {ex}");
         }
     }
@@ -531,7 +539,10 @@ public partial class MainWindow : Window
         _dragStartPoint = null;
         _dragSegment = null;
         _viewModel.SelectEventSegment(segment);
-        DragDrop.DoDragDrop(element, segment, DragDropEffects.Move);
+        using (_applicationInteractionGuard.EnterDragOperation())
+        {
+            DragDrop.DoDragDrop(element, segment, DragDropEffects.Move);
+        }
         ClearDragTarget();
     }
 
@@ -591,6 +602,7 @@ public partial class MainWindow : Window
     {
         await RunUiActionAsync(async () =>
         {
+            using var interaction = _applicationInteractionGuard.EnterDragOperation();
             e.Handled = true;
             if (sender is not FrameworkElement { DataContext: CalendarDay targetDay }
                 || e.Data.GetData(typeof(CalendarEventSegment)) is not CalendarEventSegment { Event: not null } segment
@@ -611,9 +623,20 @@ public partial class MainWindow : Window
                 }
             }
 
+            var request = new EventMoveConfirmationRequest(
+                segment.Event.Title, segment.Event.IsTodoLike, segment.Event.IsAllDay,
+                segment.Event.Start, segment.Event.End, segment.Date, targetDay.Date, recurrenceScope);
+            if (!ConfirmEventMove(request))
+            {
+                return;
+            }
             await _viewModel.MoveEventAsync(segment.Event, segment.Date, targetDay.Date, recurrenceScope);
         }, nameof(DayCell_Drop));
     }
+
+    private bool ConfirmEventMove(EventMoveConfirmationRequest request) => RunAsOwnedModal(() =>
+        MessageBox.Show(this, EventMoveConfirmationFormatter.Format(request), "移動の確認",
+            MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes);
 
     private void SetDragTarget(CalendarDay day)
     {
@@ -775,7 +798,7 @@ public partial class MainWindow : Window
             Title = "バックアップ先を選択"
         };
 
-        if (dialog.ShowDialog(this) != true)
+        if (!RunAsOwnedModal(() => dialog.ShowDialog(this) == true))
         {
             return;
         }
@@ -799,7 +822,7 @@ public partial class MainWindow : Window
             Title = "リストアするバックアップを選択"
         };
 
-        if (dialog.ShowDialog(this) != true)
+        if (!RunAsOwnedModal(() => dialog.ShowDialog(this) == true))
         {
             return;
         }
@@ -838,7 +861,7 @@ public partial class MainWindow : Window
             Title = "インポートするCSVを選択"
         };
 
-        if (dialog.ShowDialog(this) != true)
+        if (!RunAsOwnedModal(() => dialog.ShowDialog(this) == true))
         {
             return;
         }
@@ -879,7 +902,7 @@ public partial class MainWindow : Window
             Title = "エクスポート先を選択"
         };
 
-        if (dialog.ShowDialog(this) != true)
+        if (!RunAsOwnedModal(() => dialog.ShowDialog(this) == true))
         {
             return;
         }
@@ -1517,7 +1540,25 @@ public partial class MainWindow : Window
 
     private RecurrenceEditScope? PromptRecurrenceScope(bool isDelete)
     {
-        return RecurrenceScopeDialog.Show(DialogUi, new RecurrenceScopeDialogRequest(isDelete));
+        return RunAsOwnedModal(() => RecurrenceScopeDialog.Show(DialogUi, new RecurrenceScopeDialogRequest(isDelete)));
+    }
+
+    private T RunAsOwnedModal<T>(Func<T> show)
+    {
+        using var suppression = _applicationInteractionGuard.EnterOwnedModal();
+        return show();
+    }
+
+    private void RunAsOwnedModal(Action show)
+    {
+        using var suppression = _applicationInteractionGuard.EnterOwnedModal();
+        show();
+    }
+
+    private async Task RunAsOwnedModalAsync(Func<Task> show)
+    {
+        using var suppression = _applicationInteractionGuard.EnterOwnedModal();
+        await show();
     }
 
     private static string FormatImportErrors(IReadOnlyList<CalendarCsvImportError> errors)

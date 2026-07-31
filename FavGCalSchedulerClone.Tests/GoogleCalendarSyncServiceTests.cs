@@ -9,6 +9,137 @@ namespace FavGCalSchedulerClone.Tests;
 public sealed class GoogleCalendarSyncServiceTests
 {
     [Fact]
+    public async Task SyncAsync_TodoPushLocalDisablesGoogleRemindersWithOneUpdate()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        var settings = CreateSettings("work");
+        settings.SyncConflictPolicy = SyncConflictPolicy.PreferLocal;
+        var local = new CalendarEvent
+        {
+            Id = "todo-one-update",
+            CalendarId = "work",
+            GoogleEventId = "todo-one-update-remote",
+            LastSyncedGoogleEtag = "etag-before",
+            Title = "#todoA0% local",
+            Start = new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 8, 2, 0, 0, 0, TimeSpan.Zero),
+            IsAllDay = true,
+            IsTodoLike = true,
+            IsDirty = true,
+            DirtyFields = "Title",
+            ReminderMinutesBeforeStart = 30,
+            IsAppReminderEnabled = true,
+            AppReminderMinutesBeforeStart = [30]
+        };
+        await repository.SaveEventAsync(local);
+        api.UpsertRemote("work", new Event
+        {
+            Id = local.GoogleEventId,
+            ETag = local.LastSyncedGoogleEtag,
+            Summary = "#todoA0% remote",
+            Start = new EventDateTime { Date = "2026-08-01" },
+            End = new EventDateTime { Date = "2026-08-02" },
+            Status = "confirmed",
+            Reminders = new Event.RemindersData
+            {
+                UseDefault = false,
+                Overrides = [new EventReminder { Method = "popup", Minutes = 30 }]
+            }
+        });
+
+        var result = await new GoogleCalendarSyncService(repository, api).SyncAsync(settings);
+
+        Assert.Equal(1, result.Pushed);
+        Assert.Single(api.Operations, operation => operation == $"update:work:{local.GoogleEventId}");
+        var remote = api.EventsByCalendar["work"][local.GoogleEventId];
+        Assert.False(remote.Reminders!.UseDefault);
+        Assert.Empty(remote.Reminders.Overrides!);
+        var stored = Assert.IsType<CalendarEvent>(await repository.FindEventByIdAsync(local.Id));
+        Assert.False(stored.IsDirty);
+        Assert.Empty(stored.AppReminderMinutesBeforeStart);
+        Assert.Null(stored.ReminderMinutesBeforeStart);
+        Assert.NotEqual("etag-before", stored.LastSyncedGoogleEtag);
+    }
+
+    [Fact]
+    public async Task PreviewAsync_ListFailureIsReportedWithoutChangingLocalStateOrToken()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi { ThrowOnList = true };
+        var settings = CreateSettings("work");
+        var local = new CalendarEvent
+        {
+            Id = "preview-list-failure", CalendarId = "work", Title = "local dirty",
+            Start = new DateTimeOffset(2026, 1, 1, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.Zero), IsDirty = true
+        };
+        await repository.SaveEventAsync(local);
+        await repository.SaveSyncTokenAsync("work", "keep-token");
+
+        var preview = await new GoogleCalendarSyncService(repository, api).PreviewAsync(settings);
+
+        var error = Assert.Single(preview.ErrorItems);
+        Assert.Equal("Google予定を取得できませんでした", error.Title);
+        Assert.Contains("ローカル予定は変更されていません", error.Detail);
+        Assert.Empty(preview.PushItems);
+        Assert.Empty(preview.PullItems);
+        Assert.Empty(preview.DeleteItems);
+        Assert.Empty(preview.ConflictItems);
+        Assert.Equal("keep-token", await repository.GetSyncTokenAsync("work"));
+        Assert.True((await repository.FindEventByIdAsync(local.Id))!.IsDirty);
+    }
+
+    [Fact]
+    public async Task PreviewAsync_DirtyLookupFailureIsReportedAndNotPlannedForPush()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi { ThrowOnGet = true };
+        var settings = CreateSettings("work");
+        var original = new CalendarEvent
+        {
+            Id = "preview-get-failure", CalendarId = "work", GoogleEventId = "missing-from-list",
+            LastSyncedGoogleEtag = "etag-before", Title = "営業会議", Description = "変更前",
+            Start = new DateTimeOffset(2026, 1, 1, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.Zero), IsDirty = false
+        };
+        await repository.UpsertSyncedEventAsync(original);
+
+        var local = await repository.FindEventByIdAsync(original.Id);
+        Assert.NotNull(local);
+        Assert.False(local.IsDirty);
+        Assert.NotNull(local.GoogleEventId);
+
+        local.Description = "変更後";
+        local.IsDirty = true;
+        await repository.SaveEventAsync(local);
+
+        var storedDirty = await repository.FindEventByIdAsync(original.Id);
+        Assert.NotNull(storedDirty);
+        Assert.True(storedDirty.IsDirty);
+        Assert.Equal("Description", storedDirty.DirtyFields);
+
+        var preview = await new GoogleCalendarSyncService(repository, api).PreviewAsync(settings);
+
+        var error = Assert.Single(preview.ErrorItems);
+        Assert.Equal(original.Id, error.LocalId);
+        Assert.Equal(original.GoogleEventId, error.GoogleEventId);
+        Assert.Equal("Description", error.ChangeFields);
+        Assert.Contains("今回の同期対象から除外", error.Detail);
+        Assert.Empty(preview.PushItems);
+        Assert.Empty(preview.PullItems);
+        Assert.Empty(preview.DeleteItems);
+        Assert.Empty(preview.ConflictItems);
+        Assert.DoesNotContain(api.Operations, operation => operation.StartsWith("update:", StringComparison.Ordinal));
+        Assert.Null(await repository.GetSyncTokenAsync("work"));
+
+        var afterPreview = await repository.FindEventByIdAsync(original.Id);
+        Assert.NotNull(afterPreview);
+        Assert.True(afterPreview.IsDirty);
+        Assert.Equal("Description", afterPreview.DirtyFields);
+    }
+
+    [Fact]
     public void ResolveNotFoundAction_TreatsDeletedEventAsAlreadySynced()
     {
         var action = GoogleCalendarSyncService.ResolveNotFoundAction(new CalendarEvent { IsDeleted = true });
@@ -353,14 +484,13 @@ public sealed class GoogleCalendarSyncServiceTests
         var preview = await service.PreviewAsync(settings);
 
         Assert.Equal(2, preview.PullItems.Count);
-        Assert.Null(await repository.GetSyncTokenAsync("work"));
+        Assert.Equal("stale-token", await repository.GetSyncTokenAsync("work"));
         Assert.Collection(api.ListRequests,
             request => Assert.Equal("stale-token", request.SyncToken),
             request => { Assert.Null(request.SyncToken); Assert.Null(request.PageToken); },
             request => { Assert.Null(request.SyncToken); Assert.Equal("1", request.PageToken); });
 
         api.ListRequests.Clear();
-        await repository.SaveSyncTokenAsync("work", "stale-token");
         api.StaleSyncTokens.Add("stale-token");
         var result = await service.SyncAsync(settings);
 

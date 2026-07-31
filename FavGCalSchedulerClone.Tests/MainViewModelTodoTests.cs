@@ -358,7 +358,7 @@ public sealed class MainViewModelTodoTests
     }
 
     [Fact]
-    public async Task SaveTodoAsync_EditPreservesExistingReminderWhileChangingProgressAndColor()
+    public async Task SaveTodoAsync_EditClearsLegacyReminderWhileChangingProgressAndColor()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
         var repository = new CalendarRepository(dbPath);
@@ -370,6 +370,10 @@ public sealed class MainViewModelTodoTests
             CalendarId = "primary",
             ColorId = "5",
             ReminderMinutesBeforeStart = 30,
+            AppReminderMinutesBeforeStart = [0, 30],
+            GoogleEmailReminderMinutesBeforeStart = [60],
+            IsAppReminderEnabled = true,
+            IsGoogleEmailReminderEnabled = true,
             Start = new DateTimeOffset(DateTime.Today),
             End = new DateTimeOffset(DateTime.Today.AddDays(1)),
             IsAllDay = true
@@ -384,7 +388,13 @@ public sealed class MainViewModelTodoTests
 
         var updated = Assert.Single(viewModel.TodoEvents);
         Assert.Equal("9", updated.ColorId);
-        Assert.Equal(30, updated.ReminderMinutesBeforeStart);
+        Assert.Null(updated.ReminderMinutesBeforeStart);
+        Assert.Empty(updated.AppReminderMinutesBeforeStart);
+        Assert.Empty(updated.GoogleEmailReminderMinutesBeforeStart);
+        Assert.False(updated.IsAppReminderEnabled);
+        Assert.False(updated.IsGoogleEmailReminderEnabled);
+        Assert.Null(updated.GoogleReminderMetadata);
+        Assert.Contains("Reminder", updated.DirtyFields);
         Assert.Equal("F", updated.TodoPriority);
         Assert.Equal(56, updated.TodoProgress);
     }

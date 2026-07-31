@@ -18,6 +18,13 @@ public sealed class GoogleReminderMetadata
         || DefaultPopupMinutes.Count > 0
         || DefaultEmailMinutes.Count > 0;
 
+    public bool HasEffectiveGoogleReminder =>
+        UseDefault == true
+            ? DefaultPopupMinutes.Count > 0
+              || DefaultEmailMinutes.Count > 0
+              || string.Equals(Source, "default-unavailable", StringComparison.Ordinal)
+            : PopupMinutes.Count > 0 || EmailMinutes.Count > 0;
+
     public bool HasEmailOnly =>
         PopupMinutes.Count == 0
         && DefaultPopupMinutes.Count == 0

@@ -4,6 +4,32 @@ namespace FavGCalSchedulerClone.Tests;
 
 public sealed class GoogleReminderMetadataTests
 {
+    [Theory]
+    [InlineData(false, false, false, true, false, false)]
+    [InlineData(true, false, false, true, false, true)]
+    [InlineData(false, true, false, false, false, true)]
+    [InlineData(false, false, true, false, false, true)]
+    [InlineData(true, false, false, false, true, true)]
+    public void HasEffectiveGoogleReminder_UsesOnlyEffectiveReminderSource(
+        bool useDefault,
+        bool explicitPopup,
+        bool explicitEmail,
+        bool defaultPopup,
+        bool defaultUnavailable,
+        bool expected)
+    {
+        var metadata = new GoogleReminderMetadata
+        {
+            UseDefault = useDefault,
+            PopupMinutes = explicitPopup ? [30] : [],
+            EmailMinutes = explicitEmail ? [60] : [],
+            DefaultPopupMinutes = defaultPopup ? [30] : [],
+            Source = defaultUnavailable ? "default-unavailable" : null
+        };
+
+        Assert.Equal(expected, metadata.HasEffectiveGoogleReminder);
+    }
+
     [Fact]
     public void Clone_CopiesMutableLists()
     {

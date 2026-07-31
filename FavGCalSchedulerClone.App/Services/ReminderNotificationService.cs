@@ -162,6 +162,47 @@ public sealed class ReminderNotificationService : IDisposable
 
             foreach (var calendarEvent in expandedEvents)
             {
+                if (calendarEvent.IsTodoLike)
+                {
+                    reminderConfiguredCount++;
+                    var todoNotification = CreateTodoReminderNotification(calendarEvent);
+                    var todoIsFired = fired.ContainsKey(todoNotification.OccurrenceKey);
+                    var todoSnoozedUntil = TryGetSnoozedUntil(snoozed, todoNotification.OccurrenceKey);
+                    var todoIsDue = todoNotification.RemindAt <= current;
+                    string todoReason;
+                    if (calendarEvent.IsTodoDone)
+                    {
+                        todoReason = "完了ToDo";
+                    }
+                    else if (todoSnoozedUntil is not null && todoSnoozedUntil > current)
+                    {
+                        snoozedExcludedCount++;
+                        todoReason = "スヌーズ中";
+                    }
+                    else if (todoIsFired && todoSnoozedUntil is null)
+                    {
+                        firedExcludedCount++;
+                        todoReason = "発火済み";
+                    }
+                    else if (!todoIsDue)
+                    {
+                        todoReason = "ToDo固定通知時刻前";
+                    }
+                    else if (current >= TodoReminderPolicy.GetDueDayEnd(calendarEvent.Start.Date))
+                    {
+                        todoReason = "期限日終了済み";
+                    }
+                    else
+                    {
+                        todoReason = todoSnoozedUntil is not null ? "スヌーズ期限到達" : "ToDo固定通知対象";
+                        dueNotifications.Add(todoNotification);
+                    }
+
+                    candidateDiagnostics.Add(CreateCandidateDiagnostic(
+                        calendarEvent, current, null, todoNotification, todoIsDue, todoIsFired, todoSnoozedUntil, todoReason));
+                    continue;
+                }
+
                 var googleReminderReason = GetGoogleReminderDiagnosticReason(calendarEvent);
                 var appReminderMinutes = calendarEvent.EffectiveAppReminderMinutesBeforeStart;
                 if (appReminderMinutes.Count != 1
@@ -703,6 +744,21 @@ public sealed class ReminderNotificationService : IDisposable
         }
 
         return CreateReminderNotification(calendarEvent, now, reminderMinutes);
+    }
+
+    private static ReminderNotification CreateTodoReminderNotification(CalendarEvent calendarEvent)
+    {
+        var occurrenceStart = calendarEvent.OriginalStart ?? calendarEvent.Start;
+        return new ReminderNotification(
+            TodoReminderPolicy.BuildOccurrenceKey(calendarEvent),
+            calendarEvent.Id,
+            calendarEvent.Title,
+            calendarEvent.DateDisplayText,
+            TodoReminderPolicy.GetReminderTime(calendarEvent.Start.Date),
+            calendarEvent.Start,
+            occurrenceStart,
+            calendarEvent.CalendarId,
+            true);
     }
 
     private static ReminderNotification? CreateReminderNotification(CalendarEvent calendarEvent, DateTimeOffset now, int reminderMinutes)

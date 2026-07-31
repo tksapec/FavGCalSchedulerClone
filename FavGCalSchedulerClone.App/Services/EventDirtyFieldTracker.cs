@@ -23,7 +23,10 @@ internal static class EventDirtyFieldTracker
             AddIfChanged(fields, "Title", existing.Title, current.Title);
             AddIfChanged(fields, "Description", Normalize(existing.Description), Normalize(current.Description));
             AddIfChanged(fields, "Location", Normalize(existing.Location), Normalize(current.Location));
-            if (existing.Start != current.Start || existing.End != current.End) fields.Add("StartEnd");
+            var startEndChanged = existing.IsAllDay || current.IsAllDay
+                ? existing.Start.Date != current.Start.Date || existing.End.Date != current.End.Date
+                : existing.Start.UtcTicks != current.Start.UtcTicks || existing.End.UtcTicks != current.End.UtcTicks;
+            if (startEndChanged) fields.Add("StartEnd");
             AddIfChanged(fields, "AllDay", existing.IsAllDay, current.IsAllDay);
             AddIfChanged(fields, "Reminder", existing.ReminderMinutesBeforeStart, current.ReminderMinutesBeforeStart);
             AddIfChanged(fields, "Reminder", string.Join("|", existing.EffectiveAppReminderMinutesBeforeStart), string.Join("|", current.EffectiveAppReminderMinutesBeforeStart));
@@ -50,6 +53,10 @@ internal static class EventDirtyFieldTracker
             "Recurrence" => "繰り返し変更", _ => "変更内容不明"
         }));
     }
+
+    internal static string MergeFieldNames(string? fields, params string[] additionalFields) =>
+        string.Join(",", Parse(fields).Concat(additionalFields).Distinct(StringComparer.Ordinal)
+            .OrderBy(field => Array.IndexOf(FieldOrder, field) is var index && index >= 0 ? index : int.MaxValue));
 
     private static HashSet<string> Parse(string? value) => string.IsNullOrWhiteSpace(value)
         ? new HashSet<string>(StringComparer.Ordinal)
