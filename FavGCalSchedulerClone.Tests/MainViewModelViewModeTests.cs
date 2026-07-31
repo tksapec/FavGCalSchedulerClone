@@ -116,8 +116,9 @@ public sealed class MainViewModelViewModeTests
     public async Task NavigationCommands_UpdateCurrentMonthImmediatelyForRapidClicks()
     {
         var viewModel = await CreateViewModelAsync();
+        var selectedBaseline = new DateTime(2026, 5, 15);
+        await viewModel.NavigateToDateAsync(selectedBaseline);
         var baseline = viewModel.CurrentMonth;
-        var selectedBaseline = viewModel.SelectedDay?.Date ?? baseline;
         var loadCount = 0;
         var saveCount = 0;
         viewModel.NavigationRefreshDelay = TimeSpan.FromMilliseconds(200);
