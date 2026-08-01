@@ -271,7 +271,9 @@ public sealed class GoogleCalendarSyncService
             var executableDirty = selectedDirty
                 .Where(item => !remoteLookup.FailedLocalIds.Contains(item.Id))
                 .ToArray();
-            var plan = BuildSyncPlan(executableDirty, remoteLookup.Events, settings.SyncConflictPolicy, RemoteSyncMode.Incremental);
+            var plan = AnnotateTodoReminderCleanup(
+                BuildSyncPlan(executableDirty, remoteLookup.Events, settings.SyncConflictPolicy, RemoteSyncMode.Incremental),
+                executableDirty);
             var execution = await ExecuteSyncPlanAsync(
                 client,
                 calendarId,
@@ -561,7 +563,8 @@ public sealed class GoogleCalendarSyncService
 
             foreach (var failedLocalId in resolved.FailedLocalIds)
             {
-                var localEvent = calendarDirty.FirstOrDefault(item => item.Id == failedLocalId);
+                var localEvent = calendarDirty.FirstOrDefault(item => item.Id == failedLocalId)
+                    ?? await _repository.FindEventByIdAsync(failedLocalId);
                 if (localEvent is null) continue;
                 var failure = previewFailures.LastOrDefault(item =>
                     item.LocalId == failedLocalId
@@ -583,10 +586,14 @@ public sealed class GoogleCalendarSyncService
                 var wasNotFound = resolved.NotFoundLocalIds.Contains(localEvent.Id);
                 var detail = wasNotFound
                     ? localEvent.IsDeleted ? "Google側では既に削除済み" : "Google側に存在しないため再作成予定"
-                    : localEvent.IsTodoLike && (localEvent.DirtyFields ?? string.Empty).Split(',').Contains("Reminder")
-                        ? "Google側の通知を削除予定。アプリ内通知は期限日の08:15に固定されます。"
+                    : planItem.RequiresTodoReminderCleanup
+                        ? "Googleへ送信予定。同じ更新でGoogle側の通知も削除します。アプリ内通知は期限日の08:15です。"
                         : localEvent.IsDeleted ? "Googleから削除予定" : "Googleへ送信予定";
                 var item = ToPreviewItem(calendarId, localEvent, localEvent.IsDeleted ? "delete" : "push", detail);
+                if (planItem.RequiresTodoReminderCleanup)
+                {
+                    item = item with { ChangeFields = EventDirtyFieldTracker.MergeFieldNames(item.ChangeFields, "Reminder") };
+                }
                 var remoteForDiff = planItem.RemoteEvent is { } plannedRemoteEvent
                     ? GoogleEventMapper.FromGoogleEvent(
                         plannedRemoteEvent,
@@ -632,8 +639,12 @@ public sealed class GoogleCalendarSyncService
                         conflictItems[conflictIndex] = conflictItems[conflictIndex] with
                         {
                             LocalId = local.Id,
-                            ChangeFields = local.DirtyFields,
-                            Detail = $"Conflict: {settings.SyncConflictPolicy}",
+                            ChangeFields = planItem.RequiresTodoReminderCleanup
+                                ? EventDirtyFieldTracker.MergeFieldNames(local.DirtyFields, "Reminder")
+                                : local.DirtyFields,
+                            Detail = planItem.RequiresTodoReminderCleanup
+                                ? "通常フィールドは競合のためスキップします。Google側の通知だけ削除予定です。ローカルの未同期変更は維持されます。"
+                                : $"Conflict: {settings.SyncConflictPolicy}",
                             FieldDiffs = BuildFieldDiffs(local, remoteEvent, "Conflict")
                         };
                     }
@@ -643,7 +654,16 @@ public sealed class GoogleCalendarSyncService
                     }
                     else if (planItem?.Action == SyncPlanAction.PullRemote)
                     {
-                        pullItems.Add(item);
+                        pullItems.Add(planItem.RequiresTodoReminderCleanup
+                            ? item with
+                            {
+                                LocalId = planItem.LocalEvent?.Id,
+                                ChangeFields = "Reminder",
+                                Detail = planItem.LocalEvent?.IsDirty == true
+                                    ? "Google側の通知を削除してから取得予定。アプリ内通知は期限日の08:15です。"
+                                    : "Google側の通知を削除予定。アプリ内通知は期限日の08:15です。"
+                            }
+                            : item);
                     }
                 }
             }
@@ -1164,19 +1184,24 @@ public sealed class GoogleCalendarSyncService
         {
             cancellationToken.ThrowIfCancellationRequested();
             var executableItem = item;
-            if (item.RemoteEvent is { } currentRemote
-                && !string.Equals(currentRemote.Status, "cancelled", StringComparison.OrdinalIgnoreCase)
-                && TodoReminderPolicy.HasGoogleReminders(currentRemote)
-                && GoogleEventMapper.FromGoogleEvent(currentRemote, calendarId).IsTodoLike)
+            if (item.RequiresTodoReminderCleanup && item.Action != SyncPlanAction.PushLocal)
             {
                 try
                 {
+                    var currentRemote = item.RemoteEvent!;
                     currentRemote.Reminders = TodoReminderPolicy.CreateGoogleRemindersDisabled();
                     var cleanedRemote = client is IConditionalGoogleCalendarClient conditionalClient
                         ? await conditionalClient.UpdateEventAsync(
                             calendarId, currentRemote.Id, currentRemote, cancellationToken, currentRemote.ETag)
                         : await client.UpdateEventAsync(calendarId, currentRemote.Id, currentRemote, cancellationToken);
                     executableItem = item with { RemoteEvent = cleanedRemote };
+
+                    if (item.Action == SyncPlanAction.SkipConflict && item.LocalEvent is { } skippedLocal)
+                    {
+                        await _repository.ApplyTodoReminderCleanupStateAsync(
+                            skippedLocal.Id,
+                            preserveDirtyState: true);
+                    }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -1218,8 +1243,10 @@ public sealed class GoogleCalendarSyncService
                     var localEvent = executableItem.LocalEvent!;
                     if (localEvent.IsTodoLike)
                     {
+                        var requiresLocalCleanup = TodoReminderPolicy.RequiresLocalCleanup(localEvent)
+                            || executableItem.RequiresTodoReminderCleanup;
                         TodoReminderPolicy.NormalizeLocalFields(localEvent);
-                        if (!localEvent.IsDeleted)
+                        if (!localEvent.IsDeleted && requiresLocalCleanup)
                         {
                             localEvent.IsDirty = true;
                             localEvent.DirtyFields = EventDirtyFieldTracker.MergeFieldNames(localEvent.DirtyFields, "Reminder");
@@ -1311,30 +1338,75 @@ public sealed class GoogleCalendarSyncService
         string? syncToken, SyncConflictPolicy conflictPolicy, bool isPreview,
         ICollection<SyncFailureDiagnostic> failures, CancellationToken cancellationToken)
     {
-        var effectiveDirtyEvents = dirtyEvents.Select(TodoReminderPolicy.CloneForSyncPlanning).ToList();
-        foreach (var todo in (await _repository.LoadTodoEventsAsync())
-                     .Where(item => item.CalendarId == calendarId && TodoReminderPolicy.RequiresLocalCleanup(item)))
-        {
-            var candidate = effectiveDirtyEvents.FirstOrDefault(item => item.Id == todo.Id);
-            if (candidate is null)
-            {
-                candidate = TodoReminderPolicy.CloneForSyncPlanning(todo);
-                effectiveDirtyEvents.Add(candidate);
-            }
-            TodoReminderPolicy.NormalizeLocalFields(candidate);
-            candidate.IsDirty = true;
-            candidate.DirtyFields = EventDirtyFieldTracker.MergeFieldNames(candidate.DirtyFields, "Reminder");
-        }
+        var actualDirtyEvents = dirtyEvents.Select(TodoReminderPolicy.CloneForSyncPlanning).ToArray();
+        var todoCleanupCandidates = (await _repository.LoadTodoEventsAsync())
+            .Where(item => item.CalendarId == calendarId && TodoReminderPolicy.RequiresLocalCleanup(item))
+            .Select(TodoReminderPolicy.CloneForSyncPlanning)
+            .ToArray();
+        var remoteLookupCandidates = actualDirtyEvents
+            .Concat(todoCleanupCandidates)
+            .DistinctBy(item => item.Id)
+            .ToArray();
 
         var delta = await LoadRemoteDeltaAsync(client, calendarId, syncToken, failures, cancellationToken, !isPreview);
         if (!delta.Success)
         {
-            return new(delta, [], [], new HashSet<string>(), effectiveDirtyEvents.Select(e => e.Id).ToHashSet(StringComparer.Ordinal));
+            return new(delta, [], [], new HashSet<string>(), remoteLookupCandidates.Select(e => e.Id).ToHashSet(StringComparer.Ordinal));
         }
-        var lookup = await LoadRemoteEventsMissingFromFullSyncListAsync(client, calendarId, effectiveDirtyEvents, delta, failures, cancellationToken);
+        var lookup = await LoadRemoteEventsMissingFromFullSyncListAsync(client, calendarId, remoteLookupCandidates, delta, failures, cancellationToken);
+        var cleanupLookup = delta.Mode == RemoteSyncMode.Incremental
+            ? await LoadRemoteEventsForTodoCleanupAsync(client, calendarId, todoCleanupCandidates, delta.Events, failures, cancellationToken)
+            : new RemoteDirtyLookupResult([], new HashSet<string>(StringComparer.Ordinal), new HashSet<string>(StringComparer.Ordinal));
         var effective = delta.Events.Concat(lookup.Events).ToArray();
-        var executable = effectiveDirtyEvents.Where(e => !lookup.FailedLocalIds.Contains(e.Id)).ToArray();
-        return new(delta, effective, BuildSyncPlan(executable, effective, conflictPolicy, delta.Mode), lookup.NotFoundLocalIds, lookup.FailedLocalIds);
+        effective = effective.Concat(cleanupLookup.Events).DistinctBy(item => item.Id).ToArray();
+        var failedIds = lookup.FailedLocalIds.Concat(cleanupLookup.FailedLocalIds).ToHashSet(StringComparer.Ordinal);
+        var notFoundIds = lookup.NotFoundLocalIds.Concat(cleanupLookup.NotFoundLocalIds).ToHashSet(StringComparer.Ordinal);
+        var executable = actualDirtyEvents.Where(e => !failedIds.Contains(e.Id)).ToArray();
+        var plan = AnnotateTodoReminderCleanup(
+            BuildSyncPlan(executable, effective, conflictPolicy, delta.Mode),
+            todoCleanupCandidates);
+        return new(delta, effective, plan, notFoundIds, failedIds);
+    }
+
+    private static Task<RemoteDirtyLookupResult> LoadRemoteEventsForTodoCleanupAsync(
+        IGoogleCalendarClient client,
+        string calendarId,
+        IReadOnlyList<CalendarEvent> candidates,
+        IReadOnlyList<Event> listedEvents,
+        ICollection<SyncFailureDiagnostic> failures,
+        CancellationToken cancellationToken)
+    {
+        var listedIds = listedEvents.Where(item => !string.IsNullOrWhiteSpace(item.Id))
+            .Select(item => item.Id!).ToHashSet(StringComparer.Ordinal);
+        var missing = candidates.Where(item => !string.IsNullOrWhiteSpace(item.GoogleEventId)
+            && !listedIds.Contains(item.GoogleEventId!)).ToArray();
+        return LoadRemoteEventsForDirtyAsync(client, calendarId, missing, failures, cancellationToken);
+    }
+
+    private static IReadOnlyList<SyncPlanItem> AnnotateTodoReminderCleanup(
+        IReadOnlyList<SyncPlanItem> plan,
+        IReadOnlyList<CalendarEvent> cleanupCandidates)
+    {
+        var candidates = cleanupCandidates
+            .Where(item => !string.IsNullOrWhiteSpace(item.GoogleEventId))
+            .ToDictionary(item => item.GoogleEventId!, StringComparer.Ordinal);
+        return plan.Select(item =>
+        {
+            if (item.RemoteEvent is not { } remote
+                || string.Equals(remote.Status, "cancelled", StringComparison.OrdinalIgnoreCase)
+                || !TodoReminderPolicy.HasGoogleReminders(remote)
+                || !GoogleEventMapper.FromGoogleEvent(remote, item.LocalEvent?.CalendarId ?? "").IsTodoLike)
+            {
+                return item;
+            }
+
+            candidates.TryGetValue(remote.Id ?? string.Empty, out var candidate);
+            return item with
+            {
+                LocalEvent = item.LocalEvent ?? candidate,
+                RequiresTodoReminderCleanup = true
+            };
+        }).ToArray();
     }
 
     private static async Task<RemoteDirtyLookupResult> LoadRemoteEventsMissingFromFullSyncListAsync(
@@ -1866,7 +1938,8 @@ internal sealed record SyncPlanItem(
     SyncPlanAction Action,
     CalendarEvent? LocalEvent,
     Event? RemoteEvent,
-    bool IsConflict);
+    bool IsConflict,
+    bool RequiresTodoReminderCleanup = false);
 
 internal sealed record SyncPlanExecution(
     int Pushed,

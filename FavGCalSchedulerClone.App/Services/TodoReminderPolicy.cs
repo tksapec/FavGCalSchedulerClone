@@ -53,7 +53,7 @@ internal static class TodoReminderPolicy
             || todo.GoogleEmailReminderMinutesBeforeStart.Count > 0
             || todo.IsAppReminderEnabled
             || todo.IsGoogleEmailReminderEnabled
-            || todo.GoogleReminderMetadata?.HasGoogleReminder == true);
+            || todo.GoogleReminderMetadata?.HasEffectiveGoogleReminder == true);
 
     public static CalendarEvent CloneForSyncPlanning(CalendarEvent source) => new()
     {

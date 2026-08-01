@@ -9,6 +9,60 @@ namespace FavGCalSchedulerClone.Tests;
 public sealed class GoogleCalendarSyncServiceTests
 {
     [Fact]
+    public async Task SyncAsync_TodoPushLocalDisablesGoogleRemindersWithOneUpdate()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        var settings = CreateSettings("work");
+        settings.SyncConflictPolicy = SyncConflictPolicy.PreferLocal;
+        var local = new CalendarEvent
+        {
+            Id = "todo-one-update",
+            CalendarId = "work",
+            GoogleEventId = "todo-one-update-remote",
+            LastSyncedGoogleEtag = "etag-before",
+            Title = "#todoA0% local",
+            Start = new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 8, 2, 0, 0, 0, TimeSpan.Zero),
+            IsAllDay = true,
+            IsTodoLike = true,
+            IsDirty = true,
+            DirtyFields = "Title",
+            ReminderMinutesBeforeStart = 30,
+            IsAppReminderEnabled = true,
+            AppReminderMinutesBeforeStart = [30]
+        };
+        await repository.SaveEventAsync(local);
+        api.UpsertRemote("work", new Event
+        {
+            Id = local.GoogleEventId,
+            ETag = local.LastSyncedGoogleEtag,
+            Summary = "#todoA0% remote",
+            Start = new EventDateTime { Date = "2026-08-01" },
+            End = new EventDateTime { Date = "2026-08-02" },
+            Status = "confirmed",
+            Reminders = new Event.RemindersData
+            {
+                UseDefault = false,
+                Overrides = [new EventReminder { Method = "popup", Minutes = 30 }]
+            }
+        });
+
+        var result = await new GoogleCalendarSyncService(repository, api).SyncAsync(settings);
+
+        Assert.Equal(1, result.Pushed);
+        Assert.Single(api.Operations, operation => operation == $"update:work:{local.GoogleEventId}");
+        var remote = api.EventsByCalendar["work"][local.GoogleEventId];
+        Assert.False(remote.Reminders!.UseDefault);
+        Assert.Empty(remote.Reminders.Overrides!);
+        var stored = Assert.IsType<CalendarEvent>(await repository.FindEventByIdAsync(local.Id));
+        Assert.False(stored.IsDirty);
+        Assert.Empty(stored.AppReminderMinutesBeforeStart);
+        Assert.Null(stored.ReminderMinutesBeforeStart);
+        Assert.NotEqual("etag-before", stored.LastSyncedGoogleEtag);
+    }
+
+    [Fact]
     public async Task PreviewAsync_ListFailureIsReportedWithoutChangingLocalStateOrToken()
     {
         var repository = await CreateRepositoryAsync();
