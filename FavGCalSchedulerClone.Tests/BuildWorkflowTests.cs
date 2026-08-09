@@ -8,7 +8,7 @@ public sealed class BuildWorkflowTests
         ".github", "workflows", "build-test.yml"));
 
     [Fact]
-    public async Task BuildWorkflow_RestoresBuildsTestsAndUploadsCoverageResultsOnWindows()
+    public async Task BuildWorkflow_RestoresBuildsTestsPublishesSmokeTestsAndUploadsWindowsApp()
     {
         var workflow = await File.ReadAllTextAsync(WorkflowPath);
 
@@ -18,6 +18,11 @@ public sealed class BuildWorkflowTests
         Assert.Contains("dotnet restore FavGCalSchedulerClone.sln", workflow);
         Assert.Contains("dotnet build FavGCalSchedulerClone.sln --configuration Release --no-restore", workflow);
         Assert.Contains("dotnet test FavGCalSchedulerClone.sln --configuration Release --no-build --collect:\"XPlat Code Coverage\"", workflow);
+        Assert.Contains("dotnet publish .\\FavGCalSchedulerClone.App\\FavGCalSchedulerClone.App.csproj --configuration Release --runtime win-x64 --self-contained true", workflow);
+        Assert.Contains("Smoke test published app startup", workflow);
+        Assert.Contains("FavGCalSchedulerClone.App.exe", workflow);
+        Assert.Contains("name: FavGCalSchedulerClone-win-x64", workflow);
+        Assert.Contains("path: artifacts/FavGCalSchedulerClone-win-x64", workflow);
         Assert.Contains("actions/upload-artifact@v4", workflow);
         Assert.Contains("if: always()", workflow);
         Assert.Contains("path: TestResults", workflow);
