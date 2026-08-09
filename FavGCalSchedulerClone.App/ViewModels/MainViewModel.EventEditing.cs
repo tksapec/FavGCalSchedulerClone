@@ -69,17 +69,20 @@ public sealed partial class MainViewModel
         return true;
     }
 
-    public void BeginNewEvent(DateTime date)
+    public void BeginNewEvent(DateTime date, DateTime? now = null)
     {
         SelectedEvent = null;
         Title = _settings.ReuseLastScheduleInput ? _scheduleTitleHistory.FirstOrDefault() ?? "" : "";
         Description = "";
         Location = _settings.ReuseLastScheduleInput ? _scheduleLocationHistory.FirstOrDefault() ?? "" : "";
-        StartDate = date.Date;
-        EndDate = date.Date;
-        StartTime = "09:00";
-        EndTime = "10:00";
-        IsAllDay = _settings.DefaultNewEventIsAllDay;
+        var referenceNow = now ?? DateTime.Now;
+        var defaults = NewScheduleTimeDefaults.Create(referenceNow);
+        var dayOffset = (defaults.Start.Date - referenceNow.Date).Days;
+        StartDate = date.Date.AddDays(dayOffset);
+        EndDate = date.Date.AddDays((defaults.End.Date - referenceNow.Date).Days);
+        StartTime = defaults.Start.ToString("HH:mm", CultureInfo.InvariantCulture);
+        EndTime = defaults.End.ToString("HH:mm", CultureInfo.InvariantCulture);
+        IsAllDay = false;
         ReminderMinutesBeforeStart = _settings.DefaultScheduleReminderMinutes;
         AppReminderMinutesBeforeStart = _settings.DefaultScheduleReminderMinutes is int defaultMinutes ? [defaultMinutes] : [];
         GoogleEmailReminderMinutesBeforeStart = [];

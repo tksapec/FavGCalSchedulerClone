@@ -34,7 +34,6 @@ internal static class SettingsDialog
         var confirmDelete = new CheckBox { Content = "スケジュールを削除する際に確認ポップアップを表示する", IsChecked = settings.ConfirmBeforeDelete, Margin = new Thickness(0, 6, 0, 6) };
         var hideEditor = new CheckBox { Content = "スケジュール編集時にメインウィンドウを非表示にする", IsChecked = settings.HideMainWindowWhileEditingSchedule, Margin = new Thickness(0, 6, 0, 6) };
         var noReuse = new CheckBox { Content = "新規入力時、場所や件名に前回の入力内容を設定しない", IsChecked = !settings.ReuseLastScheduleInput, Margin = new Thickness(0, 6, 0, 6) };
-        var defaultAllDay = new CheckBox { Content = "スケジュール作成時に終日にチェックを付ける", IsChecked = settings.DefaultNewEventIsAllDay, Margin = new Thickness(0, 6, 0, 6) };
         var defaultReminder = new ComboBox { ItemsSource = request.ReminderOptions, DisplayMemberPath = nameof(ReminderOption.Label), SelectedValuePath = nameof(ReminderOption.MinutesBeforeStart), SelectedValue = settings.DefaultScheduleReminderMinutes, MinWidth = 190, HorizontalAlignment = HorizontalAlignment.Left };
         appPage.Children.Add(new TextBlock { Text = "起動時のカレンダー表示タイプ" });
         appPage.Children.Add(startupView);
@@ -44,7 +43,6 @@ internal static class SettingsDialog
         appPage.Children.Add(hideEditor);
         appPage.Children.Add(new Separator { Margin = new Thickness(0, 8, 0, 8) });
         appPage.Children.Add(noReuse);
-        appPage.Children.Add(defaultAllDay);
         appPage.Children.Add(new TextBlock { Text = "新規スケジュールの通知時間の既定値", Margin = new Thickness(0, 10, 0, 4) });
         appPage.Children.Add(defaultReminder);
         var updateHolidays = new Button { Content = "祝日データをオンライン更新", Width = 210, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 12, 0, 0) };
@@ -293,7 +291,6 @@ internal static class SettingsDialog
         settings.CloseButtonExitsApplication = false;
         settings.HideMainWindowWhileEditingSchedule = hideEditor.IsChecked == true;
         settings.ReuseLastScheduleInput = noReuse.IsChecked != true;
-        settings.DefaultNewEventIsAllDay = defaultAllDay.IsChecked == true;
         settings.DefaultScheduleReminderMinutes = defaultReminder.SelectedValue as int?;
         settings.CalendarLabelFontSizeIndex = calendarFont.SelectedItem is int cf ? cf : 2;
         settings.SideListFontSizeIndex = sideFont.SelectedItem is int sf ? sf : 2;

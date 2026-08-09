@@ -125,6 +125,7 @@ internal sealed class DialogUiFactory
         {
             SelectedDate = selectedDate
         };
+        TextEditingBehavior.Attach(datePicker);
         var today = new Button
         {
             Content = "今日",

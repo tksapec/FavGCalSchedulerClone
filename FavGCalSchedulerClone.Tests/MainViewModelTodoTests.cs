@@ -63,18 +63,31 @@ public sealed class MainViewModelTodoTests
     }
 
     [Fact]
-    public async Task BeginNewEvent_UsesDefaultAllDaySetting()
+    public async Task BeginNewEvent_AlwaysStartsAsTimedEventEvenWhenLegacySettingIsEnabled()
     {
         var viewModel = await CreateViewModelAsync();
         await viewModel.SaveApplicationSettingsAsync(
             startupTabIndex: 0,
             confirmBeforeDelete: true,
             closeButtonExitsApplication: true,
-            defaultNewEventIsAllDay: false);
+            defaultNewEventIsAllDay: true);
 
         viewModel.BeginNewEvent(DateTime.Today);
 
         Assert.False(viewModel.IsAllDay);
+    }
+
+    [Fact]
+    public async Task BeginNewEvent_UsesRoundedTimeAndRollsSelectedDateForwardAtMidnight()
+    {
+        var viewModel = await CreateViewModelAsync();
+
+        viewModel.BeginNewEvent(new DateTime(2026, 8, 9), new DateTime(2026, 8, 9, 23, 31, 0));
+
+        Assert.Equal(new DateTime(2026, 8, 10), viewModel.StartDate);
+        Assert.Equal(new DateTime(2026, 8, 10), viewModel.EndDate);
+        Assert.Equal("00:00", viewModel.StartTime);
+        Assert.Equal("01:00", viewModel.EndTime);
     }
 
     [Fact]

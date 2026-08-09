@@ -34,6 +34,7 @@ internal static class ScheduleEditorDialog
         var startTime = TimeComboBox(request.StartTime);
         var endTime = TimeComboBox(request.EndTime);
         var dayCount = new TextBox { Width = ui.X(64), Text = "1", HorizontalContentAlignment = HorizontalAlignment.Right };
+        TextEditingBehavior.Attach(dayCount);
         var isAllDay = new CheckBox
         {
             Content = "終日",
@@ -73,6 +74,7 @@ internal static class ScheduleEditorDialog
             MinHeight = ui.Y(ScheduleDescriptionMinHeightPhysical),
             VerticalContentAlignment = VerticalAlignment.Top
         };
+        TextEditingBehavior.Attach(description);
 
         var updatingDateRange = false;
         void UpdateDayCount()
@@ -421,6 +423,7 @@ internal static class ScheduleEditorDialog
             Text = selected,
             ItemsSource = TimeChoices().ToArray()
         };
+        TextEditingBehavior.Attach(combo);
         combo.LostKeyboardFocus += (_, _) => combo.Text = NormalizeTimeText(combo.Text);
         return combo;
     }

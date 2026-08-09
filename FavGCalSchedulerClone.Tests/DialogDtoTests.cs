@@ -170,21 +170,26 @@ public sealed class DialogDtoTests
     }
 
     [Fact]
-    public async Task EditableHistoryComboBoxBehavior_UsesWpfStandardTextEditingOnly()
+    public async Task ScheduleAndTodoEditors_AttachSharedTextEditingBehavior()
     {
+        var scheduleCode = await File.ReadAllTextAsync(DialogSourcePath("ScheduleEditorDialog.cs"));
+        var todoCode = await File.ReadAllTextAsync(DialogSourcePath("TodoEditorDialog.cs"));
+        var factoryPath = Path.Combine(
+            Path.GetDirectoryName(DialogSourcePath("ScheduleEditorDialog.cs"))!,
+            "DialogUiFactory.cs");
+        var factoryCode = await File.ReadAllTextAsync(factoryPath);
         var behaviorPath = Path.Combine(
             Path.GetDirectoryName(DialogSourcePath("ScheduleEditorDialog.cs"))!,
-            "EditableHistoryComboBoxBehavior.cs");
+            "TextEditingBehavior.cs");
         var behaviorCode = await File.ReadAllTextAsync(behaviorPath);
 
-        Assert.Contains("PART_EditableTextBox", behaviorCode);
-        Assert.Contains("IsEditable = true", behaviorCode);
-        Assert.Contains("IsTextSearchEnabled = true", behaviorCode);
-        Assert.DoesNotContain("PreviewKeyDown", behaviorCode);
-        Assert.DoesNotContain("KeyBinding", behaviorCode);
-        Assert.DoesNotContain("CommandBinding", behaviorCode);
-        Assert.DoesNotContain("Clipboard", behaviorCode);
-        Assert.DoesNotContain("ContextMenu", behaviorCode);
+        Assert.Contains("TextEditingBehavior.Attach", scheduleCode);
+        Assert.Contains("TextEditingBehavior.Attach", todoCode);
+        Assert.Contains("TextEditingBehavior.Attach", factoryCode);
+        Assert.Contains("ApplicationCommands.Cut", behaviorCode);
+        Assert.Contains("ApplicationCommands.Copy", behaviorCode);
+        Assert.Contains("ApplicationCommands.Paste", behaviorCode);
+        Assert.Contains("ApplicationCommands.SelectAll", behaviorCode);
     }
 
     [Fact]

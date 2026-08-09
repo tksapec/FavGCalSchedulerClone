@@ -8,6 +8,7 @@ internal static class EditableHistoryComboBoxBehavior
     {
         comboBox.IsEditable = true;
         comboBox.IsTextSearchEnabled = true;
+        TextEditingBehavior.Attach(comboBox);
         comboBox.Loaded += (_, _) => ConfigureEditor(comboBox);
     }
 

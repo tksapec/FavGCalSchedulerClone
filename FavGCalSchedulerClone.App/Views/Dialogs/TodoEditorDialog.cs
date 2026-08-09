@@ -102,6 +102,7 @@ internal static class TodoEditorDialog
         };
         var color = ui.CreateColorComboBox(request.ColorId);
         var title = new TextBox { Text = request.Title };
+        TextEditingBehavior.Attach(title);
         var description = new TextBox
         {
             Text = request.Description,
@@ -112,6 +113,7 @@ internal static class TodoEditorDialog
             MinHeight = ui.Y(TodoDescriptionMinHeightPhysical),
             VerticalContentAlignment = VerticalAlignment.Top
         };
+        TextEditingBehavior.Attach(description);
 
         AddTodoEditorLayout(ui, root, window, request.IsNew, dueDateEditor, priority, progressInput, progressValue, complete, color, calendar, title, description);
         if (window.ShowDialog() != true)
