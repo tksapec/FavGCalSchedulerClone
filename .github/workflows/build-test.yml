@@ -16,8 +16,6 @@ jobs:
         run: dotnet restore FavGCalSchedulerClone.sln
       - name: Build
         run: dotnet build FavGCalSchedulerClone.sln --configuration Release --no-restore
-      - name: Test
-        run: dotnet test FavGCalSchedulerClone.sln --configuration Release --no-build --collect:"XPlat Code Coverage" --results-directory TestResults
       - name: Publish self-contained Windows app
         run: dotnet publish .\FavGCalSchedulerClone.App\FavGCalSchedulerClone.App.csproj --configuration Release --runtime win-x64 --self-contained true --output .\artifacts\FavGCalSchedulerClone-win-x64
       - name: Smoke test published app startup
@@ -41,6 +39,8 @@ jobs:
         with:
           name: FavGCalSchedulerClone-win-x64
           path: artifacts/FavGCalSchedulerClone-win-x64
+      - name: Test
+        run: dotnet test FavGCalSchedulerClone.sln --configuration Release --no-build --collect:"XPlat Code Coverage" --results-directory TestResults
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
