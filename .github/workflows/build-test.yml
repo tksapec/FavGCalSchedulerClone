@@ -16,8 +16,8 @@ jobs:
         run: dotnet restore FavGCalSchedulerClone.sln
       - name: Build
         run: dotnet build FavGCalSchedulerClone.sln --configuration Release --no-restore
-      - name: Publish self-contained Windows app
-        run: dotnet publish .\FavGCalSchedulerClone.App\FavGCalSchedulerClone.App.csproj --configuration Release --runtime win-x64 --self-contained true --output .\artifacts\FavGCalSchedulerClone-win-x64
+      - name: Publish Windows app
+        run: dotnet publish .\FavGCalSchedulerClone.App\FavGCalSchedulerClone.App.csproj --configuration Release --runtime win-x64 --self-contained false --output .\artifacts\FavGCalSchedulerClone-win-x64
       - name: Smoke test published app startup
         shell: pwsh
         run: |
