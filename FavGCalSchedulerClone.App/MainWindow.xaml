@@ -8,7 +8,7 @@
         WindowStartupLocation="CenterScreen"
         FontFamily="Meiryo UI" FontSize="12"
         Background="#EDF1F5" Opacity="{Binding WindowOpacity}"
-        Closing="Window_Closing">
+        Closing="Window_Closing" PreviewKeyDown="Window_PreviewKeyDown">
     <Window.InputBindings>
         <KeyBinding Key="F5" Command="{Binding ShowMonthViewCommand}" />
         <KeyBinding Key="F6" Command="{Binding ShowWeekViewCommand}" />
@@ -19,6 +19,8 @@
         <KeyBinding Key="G" Modifiers="Control" Command="{Binding ShowMonthJumpCommand}" />
         <KeyBinding Key="F8" Command="{Binding SyncCommand}" />
         <KeyBinding Key="Z" Modifiers="Control" Command="{Binding UndoLastChangeCommand}" />
+        <KeyBinding Key="N" Modifiers="Control" Command="{Binding AddScheduleCommand}" />
+        <KeyBinding Key="N" Modifiers="Control+Shift" Command="{Binding AddTodoCommand}" />
     </Window.InputBindings>
     <Window.Resources>
         <SolidColorBrush x:Key="ChromeBrush" Color="#243447" />
@@ -117,7 +119,7 @@
             </Setter>
         </Style>
 
-        <Style x:Key="MonthNavRepeatButton" TargetType="RepeatButton">
+        <Style x:Key="MonthNavCompactButton" TargetType="Button">
             <Setter Property="MinWidth" Value="64" />
             <Setter Property="Height" Value="26" />
             <Setter Property="Padding" Value="6,0" />
@@ -126,11 +128,9 @@
             <Setter Property="Background" Value="#34495E" />
             <Setter Property="BorderBrush" Value="#50657A" />
             <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Delay" Value="250" />
-            <Setter Property="Interval" Value="70" />
             <Setter Property="Template">
                 <Setter.Value>
-                    <ControlTemplate TargetType="RepeatButton">
+                    <ControlTemplate TargetType="Button">
                         <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="1" CornerRadius="3">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -292,6 +292,14 @@
             <EventSetter Event="Checked" Handler="CalendarSelectionMenu_Checked" />
             <EventSetter Event="Unchecked" Handler="CalendarSelectionMenu_Unchecked" />
         </Style>
+        <Style x:Key="NormalRightPane" TargetType="Grid">
+            <Setter Property="Visibility" Value="Visible" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsSearchResultsVisible}" Value="True">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
     </Window.Resources>
 
     <DockPanel Background="#EDF1F5">
@@ -360,12 +368,19 @@
                 <ColumnDefinition Width="72" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <RepeatButton Grid.Column="1" Style="{StaticResource MonthNavRepeatButton}" Content="{Binding PreviousYearLabel}" Command="{Binding PreviousYearCommand}" />
-            <RepeatButton Grid.Column="2" Style="{StaticResource MonthNavRepeatButton}" Content="{Binding PreviousMonthLabel}" Command="{Binding PreviousMonthCommand}" />
+            <Button Grid.Column="1" Style="{StaticResource MonthNavCompactButton}" Content="{Binding PreviousYearLabel}" Command="{Binding PreviousYearCommand}" />
+            <Button Grid.Column="2" Style="{StaticResource MonthNavCompactButton}" Content="{Binding PreviousMonthLabel}" Command="{Binding PreviousMonthCommand}" />
             <Button Grid.Column="3" Style="{StaticResource MonthPeriodButton}"
                     Content="{Binding CurrentPeriodTitle}" Command="{Binding TodayCommand}" />
-            <RepeatButton Grid.Column="4" Style="{StaticResource MonthNavRepeatButton}" Content="{Binding NextMonthLabel}" Command="{Binding NextMonthCommand}" />
-            <RepeatButton Grid.Column="5" Style="{StaticResource MonthNavRepeatButton}" Content="{Binding NextYearLabel}" Command="{Binding NextYearCommand}" />
+            <Button Grid.Column="4" Style="{StaticResource MonthNavCompactButton}" Content="{Binding NextMonthLabel}" Command="{Binding NextMonthCommand}" />
+            <Button Grid.Column="5" Style="{StaticResource MonthNavCompactButton}" Content="{Binding NextYearLabel}" Command="{Binding NextYearCommand}" />
+            <StackPanel Grid.Column="6" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="8,0,8,0">
+                <TextBox x:Name="SearchTextBox" Width="180" VerticalContentAlignment="Center"
+                         Text="{Binding SearchQuery, UpdateSourceTrigger=PropertyChanged}"
+                         ToolTip="表示中の年から検索 (Ctrl+F, Enter)" KeyDown="SearchTextBox_KeyDown" />
+                <Button Content="検索" Command="{Binding RunCurrentYearSearchCommand}" MinWidth="56" Margin="4,0,0,0" />
+                <Button Content="クリア" Command="{Binding ClearCurrentYearSearchCommand}" MinWidth="56" Margin="4,0,0,0" />
+            </StackPanel>
         </Grid>
 
         <StatusBar DockPanel.Dock="Bottom" Background="#F8FAFC" BorderBrush="#CBD5E1" BorderThickness="1,1,0,0" Height="26">
@@ -630,6 +645,7 @@
                         Background="{StaticResource PanelBrush}"
                         Visibility="{Binding IsMonthView, Converter={StaticResource BoolToVisibilityConverter}}">
                     <Grid>
+                        <Grid Style="{StaticResource NormalRightPane}">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="*" />
                             <RowDefinition Height="8" />
@@ -699,6 +715,28 @@
                                 </TabItem>
                             </TabControl>
                         </Border>
+                        </Grid>
+
+                        <Grid Visibility="{Binding IsSearchResultsVisible, Converter={StaticResource BoolToVisibilityConverter}}" Background="#FFFFFF" Margin="10">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <DockPanel Margin="0,0,0,6">
+                                <Button DockPanel.Dock="Right" Content="戻る" Command="{Binding ClearCurrentYearSearchCommand}" MinWidth="64" />
+                                <TextBlock Text="検索結果" FontSize="13" FontWeight="SemiBold" Foreground="#1E293B" VerticalAlignment="Center" />
+                            </DockPanel>
+                            <TextBlock Grid.Row="1" Text="{Binding SearchResultsScopeText}" Foreground="#64748B" Margin="0,0,0,6" />
+                            <DataGrid Grid.Row="2" ItemsSource="{Binding SearchResults}" SelectedItem="{Binding SelectedSearchResult, Mode=TwoWay}"
+                                      MouseDoubleClick="SearchResultsGrid_MouseDoubleClick" KeyDown="SearchResultsGrid_KeyDown">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="日時" Binding="{Binding DateDisplayText}" Width="112" />
+                                    <DataGridTemplateColumn Header="件名" CellTemplate="{StaticResource ColoredTitleTemplate}" Width="*" />
+                                    <DataGridTextColumn Header="カレンダー" Binding="{Binding CalendarId}" Width="92" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Grid>
                     </Grid>
                 </Border>
             </Grid>

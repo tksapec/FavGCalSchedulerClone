@@ -124,6 +124,8 @@ dotnet run --project .\FavGCalSchedulerClone.App\FavGCalSchedulerClone.App.cspro
 ## 個人利用 ZIP 作成
 
 ```powershell
-dotnet publish .\FavGCalSchedulerClone.App\FavGCalSchedulerClone.App.csproj -c Release -r win-x64 --self-contained false -o .\publish\win-x64
-Compress-Archive -Path .\publish\win-x64\* -DestinationPath .\FavGCalSchedulerClone-win-x64.zip -Force
+.\scripts\publish-release.ps1
+Compress-Archive -Path .\publish\* -DestinationPath .\FavGCalSchedulerClone-win-x64.zip -Force
 ```
+
+発行済みアプリは常に `publish\FavGCalSchedulerClone.App.exe` を使用します。`bin` と `obj` は開発時の中間出力であり、配布・起動には使用しません。

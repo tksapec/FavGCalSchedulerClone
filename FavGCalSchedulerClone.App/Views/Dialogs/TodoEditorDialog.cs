@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using FavGCalSchedulerClone.App.Models;
 
 namespace FavGCalSchedulerClone.App.Views.Dialogs;
@@ -114,8 +115,49 @@ internal static class TodoEditorDialog
             VerticalContentAlignment = VerticalAlignment.Top
         };
         TextEditingBehavior.Attach(description);
+        KeyboardNavigation.SetTabIndex(title, 0);
+        KeyboardNavigation.SetTabIndex(dueDate, 1);
+        KeyboardNavigation.SetTabIndex(priority, 2);
+        KeyboardNavigation.SetTabIndex(progressInput, 3);
+        KeyboardNavigation.SetTabIndex(color, 4);
+        KeyboardNavigation.SetTabIndex(calendar, 5);
+        KeyboardNavigation.SetTabIndex(description, 6);
 
-        AddTodoEditorLayout(ui, root, window, request.IsNew, dueDateEditor, priority, progressInput, progressValue, complete, color, calendar, title, description);
+        var validationMessage = new TextBlock
+        {
+            Foreground = System.Windows.Media.Brushes.Firebrick,
+            Margin = new Thickness(0, 4, 12, 0),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
+        void SaveIfValid()
+        {
+            if (!TryValidateInput(title.Text, dueDate.SelectedDate, out var error))
+            {
+                validationMessage.Text = error;
+                FrameworkElement target = string.IsNullOrWhiteSpace(title.Text) ? title : dueDate;
+                target.Focus();
+                return;
+            }
+
+            window.DialogResult = true;
+        }
+
+        window.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == System.Windows.Input.Key.S && System.Windows.Input.Keyboard.Modifiers == System.Windows.Input.ModifierKeys.Control)
+            {
+                SaveIfValid();
+                e.Handled = true;
+            }
+            else if (e.Key == System.Windows.Input.Key.Escape)
+            {
+                window.DialogResult = false;
+                e.Handled = true;
+            }
+        };
+
+        AddTodoEditorLayout(ui, root, window, request.IsNew, dueDateEditor, priority, progressInput, progressValue, complete, color, calendar, title, description, validationMessage, SaveIfValid);
         if (window.ShowDialog() != true)
         {
             return null;
@@ -144,7 +186,9 @@ internal static class TodoEditorDialog
         ComboBox color,
         ComboBox calendar,
         TextBox title,
-        TextBox description)
+        TextBox description,
+        TextBlock validationMessage,
+        Action saveIfValid)
     {
         var dueGroup = new GroupBox { Header = "期限／進捗", Padding = ui.Thickness(16, 16, 16, 8), Margin = new Thickness(0, 0, ui.X(10), ui.Y(10)) };
         var dueGrid = new Grid();
@@ -203,7 +247,19 @@ internal static class TodoEditorDialog
         Grid.SetRowSpan(formScrollViewer, 2);
         root.Children.Add(formScrollViewer);
 
-        var buttons = ui.DialogButtons(window, isNew ? "登録" : "保存", "キャンセル");
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 8, 0, 0)
+        };
+        buttons.Children.Add(validationMessage);
+        var save = new Button { Content = isNew ? "登録" : "保存", MinWidth = 96 };
+        var cancel = new Button { Content = "キャンセル", MinWidth = 96 };
+        save.Click += (_, _) => saveIfValid();
+        cancel.Click += (_, _) => window.DialogResult = false;
+        buttons.Children.Add(save);
+        buttons.Children.Add(cancel);
         Grid.SetRow(buttons, 2);
         root.Children.Add(buttons);
 
@@ -212,6 +268,24 @@ internal static class TodoEditorDialog
             title.Focus();
             title.SelectAll();
         };
+    }
+
+    internal static bool TryValidateInput(string? title, DateTime? dueDate, out string error)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            error = "件名を入力してください。";
+            return false;
+        }
+
+        if (dueDate is null)
+        {
+            error = "期限を入力してください。";
+            return false;
+        }
+
+        error = "";
+        return true;
     }
 }
 

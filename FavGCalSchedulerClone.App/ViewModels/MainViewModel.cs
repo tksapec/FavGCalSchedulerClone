@@ -26,6 +26,7 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly BulkObservableCollection<CalendarDay> _calendarDays = [];
     private readonly BulkObservableCollection<CalendarDay> _visibleCalendarDays = [];
     private readonly BulkObservableCollection<CalendarWeekNumber> _monthWeekNumbers = [];
+    private readonly BulkObservableCollection<CalendarEvent> _searchResults = [];
     private IReadOnlyList<CalendarEvent> _storedEvents = [];
     private IReadOnlyList<CalendarEvent> _visibleEvents = [];
     private IReadOnlyList<CalendarEvent> _dayDirectiveEvents = [];
@@ -35,6 +36,10 @@ public sealed partial class MainViewModel : ObservableObject
     private CalendarDay? _selectedDay;
     private CalendarEvent? _selectedEvent;
     private string _status = "起動中...";
+    private string _searchQuery = "";
+    private bool _isSearchResultsVisible;
+    private CalendarEvent? _selectedSearchResult;
+    private int? _searchResultsYear;
     private string _title = "";
     private string _description = "";
     private string _location = "";
@@ -155,6 +160,8 @@ public sealed partial class MainViewModel : ObservableObject
         ExportCsvCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_exportCsvAsync));
         ShowScheduleListCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_showScheduleListAsync));
         SearchCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_showSearchAsync));
+        RunCurrentYearSearchCommand = CreateAsyncCommand(RunCurrentYearSearchAsync);
+        ClearCurrentYearSearchCommand = new RelayCommand(ClearCurrentYearSearch);
         ShowSyncDiagnosticsCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_showSyncDiagnosticsAsync));
         ShowSettingsCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_showSettingsAsync));
         ShowReminderHistoryCommand = CreateAsyncCommand(() => InvokeWindowCommandAsync(_showReminderHistoryAsync));
@@ -187,6 +194,7 @@ public sealed partial class MainViewModel : ObservableObject
     public ObservableCollection<CalendarDay> CalendarDays => _calendarDays;
     public ObservableCollection<CalendarDay> VisibleCalendarDays => _visibleCalendarDays;
     public ObservableCollection<CalendarWeekNumber> MonthWeekNumbers => _monthWeekNumbers;
+    public ObservableCollection<CalendarEvent> SearchResults => _searchResults;
     public ObservableCollection<CalendarEvent> SelectedDayEvents { get; } = [];
     public ObservableCollection<CalendarEvent> SevenDayEvents { get; } = [];
     public ObservableCollection<CalendarEvent> TodoEvents { get; } = [];
@@ -225,6 +233,8 @@ public sealed partial class MainViewModel : ObservableObject
     public AsyncRelayCommand ExportCsvCommand { get; }
     public AsyncRelayCommand ShowScheduleListCommand { get; }
     public AsyncRelayCommand SearchCommand { get; }
+    public AsyncRelayCommand RunCurrentYearSearchCommand { get; }
+    public RelayCommand ClearCurrentYearSearchCommand { get; }
     public AsyncRelayCommand ShowSyncDiagnosticsCommand { get; }
     public AsyncRelayCommand ShowSettingsCommand { get; }
     public AsyncRelayCommand ShowReminderHistoryCommand { get; }
@@ -272,6 +282,33 @@ public sealed partial class MainViewModel : ObservableObject
         _ => JapaneseMonthTitle
     };
     public string CalendarStatusText => CalendarStatusFormatter.FormatCalendarStatus(SelectedDay?.Date ?? DateTime.Today);
+    public string SearchQuery
+    {
+        get => _searchQuery;
+        set => SetProperty(ref _searchQuery, value);
+    }
+
+    public bool IsSearchResultsVisible
+    {
+        get => _isSearchResultsVisible;
+        private set => SetProperty(ref _isSearchResultsVisible, value);
+    }
+
+    public string SearchResultsScopeText => _searchResultsYear is int year
+        ? $"{year}年の検索結果"
+        : "検索結果";
+
+    public CalendarEvent? SelectedSearchResult
+    {
+        get => _selectedSearchResult;
+        set
+        {
+            if (SetProperty(ref _selectedSearchResult, value) && value is not null)
+            {
+                SelectEvent(value, selectEventDay: false);
+            }
+        }
+    }
     public bool CanUndoLastChange => _undoService.CanUndo;
     public string UndoStatusText => _undoService.StatusText;
     public bool IsMonthView => CurrentViewMode == CalendarViewMode.Month;

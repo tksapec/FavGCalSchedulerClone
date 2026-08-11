@@ -597,18 +597,24 @@ public sealed partial class MainViewModel
         }
 
         var (gridStart, gridEnd) = DateRangeHelper.MonthGridRange(month, _settings.WeekStartsOnMonday);
-        // A new shell avoids clearing Events/Segments and then immediately
-        // resetting them again when the narrow snapshot arrives.
-        _calendarDays.ReplaceAll(Enumerable.Range(0, (gridEnd - gridStart).Days)
-            .Select(offset => new CalendarDay
-            {
-                Date = gridStart.AddDays(offset),
-                IsCurrentMonth = gridStart.AddDays(offset).Month == CurrentMonth.Month
-            }));
+        EnsureCalendarDayCapacity((gridEnd - gridStart).Days);
+        for (var index = 0; index < CalendarDays.Count; index++)
+        {
+            var day = CalendarDays[index];
+            UpdateCalendarDayShell(day, gridStart.AddDays(index));
+            day.ReplaceEvents(Array.Empty<CalendarEvent>());
+            day.ReplaceSegments(Array.Empty<CalendarEventSegment>());
+            day.HiddenEventCount = 0;
+            day.IsDropTarget = false;
+        }
 
         var anchor = _pendingSelectedDate?.Date ?? _navigationAnchorDate?.Date ?? month.Date;
-        RefreshVisibleCalendarDays(anchor);
-        SetSelectedDayForImmediateNavigation(FindOrCreateCalendarDay(anchor));
+        if (CurrentViewMode != CalendarViewMode.Month || VisibleCalendarDays.Count != CalendarDays.Count)
+        {
+            RefreshVisibleCalendarDays(anchor);
+        }
+
+        SetSelectedDayForImmediateNavigation(CalendarDays.FirstOrDefault(day => day.Date == anchor));
         SelectedDayEvents.Clear();
         SevenDayEvents.Clear();
     }
@@ -714,6 +720,7 @@ public sealed partial class MainViewModel
         day.IsCurrentMonth = date.Month == CurrentMonth.Month;
         day.IsWorkdayOverride = false;
         day.IsHoliday = false;
+        day.HolidayName = null;
     }
 
     private void SetSelectedDayForImmediateNavigation(CalendarDay? day)

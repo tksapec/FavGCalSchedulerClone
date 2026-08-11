@@ -14,4 +14,6 @@ public sealed record BulkEventUpdateRequest(
         ReminderMinutesBeforeStart is not null
         || AppReminderEnabled is not null
         || GoogleEmailReminderEnabled is not null;
+
+    public bool HasUpdates => UpdatesCalendar || UpdatesColor || UpdatesReminder;
 }

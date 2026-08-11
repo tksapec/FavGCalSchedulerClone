@@ -7,6 +7,11 @@ public sealed partial class MainViewModel
 {
     public async Task<int> BulkUpdateEventsAsync(IReadOnlyCollection<string> localIds, BulkEventUpdateRequest request)
     {
+        if (!request.HasUpdates)
+        {
+            return 0;
+        }
+
         var events = await LoadEventsForBulkOperationAsync(localIds);
         if (events.Count == 0)
         {

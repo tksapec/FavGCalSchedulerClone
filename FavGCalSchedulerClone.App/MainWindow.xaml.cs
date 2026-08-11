@@ -992,6 +992,56 @@ public partial class MainWindow : Window
         }, nameof(SelectedDayEventsGrid_MouseDoubleClick));
     }
 
+    private void Window_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.F && System.Windows.Input.Keyboard.Modifiers == System.Windows.Input.ModifierKeys.Control)
+        {
+            SearchTextBox.Focus();
+            SearchTextBox.SelectAll();
+            e.Handled = true;
+        }
+    }
+
+    private async void SearchTextBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != System.Windows.Input.Key.Enter)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        await RunUiActionAsync(_viewModel.RunCurrentYearSearchAsync, nameof(SearchTextBox_KeyDown));
+    }
+
+    private async void SearchResultsGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        var calendarEvent = DataGridDoubleClickHelper.GetEditableRowItem<CalendarEvent>(e.OriginalSource);
+        if (calendarEvent is not null)
+        {
+            await OpenSearchResultEditorAsync(calendarEvent);
+        }
+    }
+
+    private async void SearchResultsGrid_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != System.Windows.Input.Key.Enter || sender is not DataGrid { SelectedItem: CalendarEvent calendarEvent })
+        {
+            return;
+        }
+
+        e.Handled = true;
+        await OpenSearchResultEditorAsync(calendarEvent);
+    }
+
+    private async Task OpenSearchResultEditorAsync(CalendarEvent calendarEvent)
+    {
+        await RunUiActionAsync(async () =>
+        {
+            await OpenGridEventEditorAsync(calendarEvent);
+            await _viewModel.RefreshCurrentYearSearchAsync();
+        }, nameof(OpenSearchResultEditorAsync));
+    }
+
     private void SidePanelEventsGrid_PreviewMouseRightButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (sender is not FrameworkElement element || DataGridDoubleClickHelper.IsChromeTarget(e.OriginalSource))
@@ -1388,6 +1438,7 @@ public partial class MainWindow : Window
         SyncDialogs.ShowDiagnostics(
             this,
             diagnostics,
+            _viewModel.LoadSyncDiagnosticsAsync,
             _viewModel.ClearSyncDiagnosticsAsync,
             async ids => await _viewModel.ResyncFailedItemsAsync(ids),
             OpenDirtyItemFromDiagnosticsAsync,

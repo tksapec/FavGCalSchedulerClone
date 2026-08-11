@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using FavGCalSchedulerClone.App.Models;
 
 namespace FavGCalSchedulerClone.App.Views.Dialogs;
@@ -75,6 +76,16 @@ internal static class ScheduleEditorDialog
             VerticalContentAlignment = VerticalAlignment.Top
         };
         TextEditingBehavior.Attach(description);
+        KeyboardNavigation.SetTabIndex(title, 0);
+        KeyboardNavigation.SetTabIndex(location, 1);
+        KeyboardNavigation.SetTabIndex(calendar, 2);
+        KeyboardNavigation.SetTabIndex(color, 3);
+        KeyboardNavigation.SetTabIndex(startDate, 4);
+        KeyboardNavigation.SetTabIndex(endDate, 5);
+        KeyboardNavigation.SetTabIndex(startTime, 6);
+        KeyboardNavigation.SetTabIndex(endTime, 7);
+        KeyboardNavigation.SetTabIndex(isAllDay, 8);
+        KeyboardNavigation.SetTabIndex(description, 9);
 
         var updatingDateRange = false;
         void UpdateDayCount()
@@ -247,7 +258,65 @@ internal static class ScheduleEditorDialog
         Grid.SetRowSpan(formScrollViewer, 2);
         root.Children.Add(formScrollViewer);
 
-        var buttons = ui.DialogButtons(window, request.IsNew ? "登録" : "保存", "キャンセル");
+        var validationMessage = new TextBlock
+        {
+            Foreground = System.Windows.Media.Brushes.Firebrick,
+            Margin = new Thickness(0, 4, 12, 0),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 8, 0, 0)
+        };
+        buttons.Children.Add(validationMessage);
+        var save = new Button { Content = request.IsNew ? "登録" : "保存", MinWidth = 96 };
+        var cancel = new Button { Content = "キャンセル", MinWidth = 96 };
+        buttons.Children.Add(save);
+        buttons.Children.Add(cancel);
+
+        void FocusValidationField(ScheduleValidationField field)
+        {
+            FrameworkElement target = field switch
+            {
+                ScheduleValidationField.Title => title,
+                ScheduleValidationField.StartDate => startDate,
+                ScheduleValidationField.EndDate => endDate,
+                ScheduleValidationField.StartTime => startTime,
+                _ => endTime
+            };
+            target.Focus();
+        }
+
+        void SaveIfValid()
+        {
+            UpdateEndDateFromCount();
+            if (!TryValidateInput(title.Text, startDate.SelectedDate, endDate.SelectedDate, isAllDay.IsChecked == true, startTime.Text, endTime.Text, out var error, out var field))
+            {
+                validationMessage.Text = error;
+                FocusValidationField(field);
+                return;
+            }
+
+            window.DialogResult = true;
+        }
+
+        save.Click += (_, _) => SaveIfValid();
+        cancel.Click += (_, _) => window.DialogResult = false;
+        window.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == System.Windows.Input.Key.S && System.Windows.Input.Keyboard.Modifiers == System.Windows.Input.ModifierKeys.Control)
+            {
+                SaveIfValid();
+                e.Handled = true;
+            }
+            else if (e.Key == System.Windows.Input.Key.Escape)
+            {
+                window.DialogResult = false;
+                e.Handled = true;
+            }
+        };
         Grid.SetRow(buttons, 2);
         root.Children.Add(buttons);
 
@@ -476,6 +545,70 @@ internal static class ScheduleEditorDialog
         return value;
     }
 
+    internal static bool TryValidateInput(
+        string? title,
+        DateTime? startDate,
+        DateTime? endDate,
+        bool isAllDay,
+        string? startTime,
+        string? endTime,
+        out string error,
+        out ScheduleValidationField field)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            error = "件名を入力してください。";
+            field = ScheduleValidationField.Title;
+            return false;
+        }
+
+        if (startDate is null)
+        {
+            error = "開始日を入力してください。";
+            field = ScheduleValidationField.StartDate;
+            return false;
+        }
+
+        if (endDate is null || endDate.Value.Date < startDate.Value.Date)
+        {
+            error = "終了日は開始日以降にしてください。";
+            field = ScheduleValidationField.EndDate;
+            return false;
+        }
+
+        if (isAllDay)
+        {
+            error = "";
+            field = ScheduleValidationField.Title;
+            return true;
+        }
+
+        if (!TryParseTimeOfDay(startTime, out var start))
+        {
+            error = "開始時刻を HH:mm 形式で入力してください。";
+            field = ScheduleValidationField.StartTime;
+            return false;
+        }
+
+        if (!TryParseTimeOfDay(endTime, out var end))
+        {
+            error = "終了時刻を HH:mm 形式で入力してください。";
+            field = ScheduleValidationField.EndTime;
+            return false;
+        }
+
+        if (startDate.Value.Date == endDate.Value.Date && end <= start)
+        {
+            error = "終了時刻は開始時刻より後にしてください。";
+            field = ScheduleValidationField.EndTime;
+            return false;
+        }
+
+        error = "";
+        field = ScheduleValidationField.Title;
+        return true;
+    }
+
     internal static bool TryCreateEndTimeFromDuration(string? startTime, TimeSpan duration, out string endTime)
     {
         endTime = startTime ?? "";
@@ -546,6 +679,15 @@ internal static class ScheduleEditorDialog
             }
         }
     }
+}
+
+internal enum ScheduleValidationField
+{
+    Title,
+    StartDate,
+    EndDate,
+    StartTime,
+    EndTime
 }
 
 internal sealed record ScheduleEditorRequest(

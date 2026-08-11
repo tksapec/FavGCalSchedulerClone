@@ -86,6 +86,7 @@ internal static class SyncDialogs
     public static void ShowDiagnostics(
         Window owner,
         SyncDiagnosticsSnapshot diagnostics,
+        Func<Task<SyncDiagnosticsSnapshot>> reloadDiagnosticsAsync,
         Func<Task> clearAsync,
         Func<IReadOnlyList<string>, Task>? retryFailuresAsync = null,
         Func<string, Task>? openDirtyItemAsync = null,
@@ -94,6 +95,7 @@ internal static class SyncDialogs
         Func<IReadOnlyList<string>, Task>? discardDirtyItemsAsync = null,
         Func<Task<int>>? refreshGoogleRemindersAsync = null)
     {
+        var currentDiagnostics = diagnostics;
         var window = CreateOwnedDialog(owner, "Google同期センター", 820, 540);
         var panel = new DockPanel { Margin = new Thickness(12), LastChildFill = true };
         window.Content = panel;
@@ -102,9 +104,37 @@ internal static class SyncDialogs
         var summaryText = last is null
             ? $"未同期変更: {diagnostics.DirtyCount} 件\n最終同期結果はありません。"
             : $"未同期変更: {diagnostics.DirtyCount} 件\n最終同期: {last.FinishedAt:yyyy/MM/dd HH:mm:ss} / {last.SummaryText}";
-        var summary = new TextBlock { Text = summaryText, Margin = new Thickness(0, 0, 0, 8), FontWeight = FontWeights.SemiBold };
+        var summary = new TextBlock { Text = BuildDiagnosticsSummary(diagnostics), Margin = new Thickness(0, 0, 0, 8), FontWeight = FontWeights.SemiBold };
         DockPanel.SetDock(summary, Dock.Top);
         panel.Children.Add(summary);
+
+        var status = new TextBlock { Margin = new Thickness(0, 0, 0, 8), Foreground = System.Windows.Media.Brushes.DarkSlateGray };
+        DockPanel.SetDock(status, Dock.Top);
+        panel.Children.Add(status);
+
+        var calendarItems = new ObservableCollection<SyncCalendarDiagnostic>(diagnostics.Calendars);
+        var dirtyItems = new ObservableCollection<SyncDirtyItem>(diagnostics.DirtyItems);
+        var failureItems = new ObservableCollection<SyncFailureDiagnostic>(diagnostics.Failures);
+        var historyItems = new ObservableCollection<SyncResult>(diagnostics.History);
+
+        async Task RunAndRefreshAsync(Func<Task> operation, string successMessage)
+        {
+            try
+            {
+                await operation();
+                currentDiagnostics = await reloadDiagnosticsAsync();
+                ReplaceAll(calendarItems, currentDiagnostics.Calendars);
+                ReplaceAll(dirtyItems, currentDiagnostics.DirtyItems);
+                ReplaceAll(failureItems, currentDiagnostics.Failures);
+                ReplaceAll(historyItems, currentDiagnostics.History);
+                summary.Text = BuildDiagnosticsSummary(currentDiagnostics);
+                status.Text = successMessage;
+            }
+            catch (Exception ex)
+            {
+                status.Text = $"操作に失敗しました: {ex.Message}";
+            }
+        }
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0) };
         var clear = new Button
@@ -124,34 +154,32 @@ internal static class SyncDialogs
         {
             if (retryFailuresAsync is not null)
             {
-                var ids = diagnostics.Failures
+                var ids = currentDiagnostics.Failures
                     .Select(item => item.LocalId)
                     .Where(id => !string.IsNullOrWhiteSpace(id))
                     .Distinct(StringComparer.Ordinal)
                     .ToArray();
                 if (ConfirmBulk(owner, "失敗分を再同期", ids.Length, "失敗診断に記録された dirty データだけを再同期します。"))
                 {
-                    await retryFailuresAsync(ids);
+                    await RunAndRefreshAsync(() => retryFailuresAsync(ids), "失敗した同期を再試行しました。");
                 }
-
-                window.Close();
             }
         };
         refreshReminders.Click += async (_, _) =>
         {
             if (refreshGoogleRemindersAsync is not null)
             {
-                var updated = await refreshGoogleRemindersAsync();
-                MessageBox.Show(owner, $"Google通知設定を再取得しました: {updated} 件", "Google通知設定", MessageBoxButton.OK, MessageBoxImage.Information);
-                window.Close();
+                await RunAndRefreshAsync(async () => await refreshGoogleRemindersAsync(), "Google通知設定を更新しました。");
             }
         };
-        exportDirty.Click += (_, _) => ExportText(owner, "unsynced.csv", BuildDirtyCsv(diagnostics.DirtyItems));
-        exportLog.Click += (_, _) => ExportText(owner, "sync-diagnostics.txt", BuildDiagnosticsLog(diagnostics));
+        exportDirty.Click += (_, _) => ExportText(owner, "unsynced.csv", BuildDirtyCsv(currentDiagnostics.DirtyItems));
+        exportLog.Click += (_, _) => ExportText(owner, "sync-diagnostics.txt", BuildDiagnosticsLog(currentDiagnostics));
         clear.Click += async (_, _) =>
         {
-            await clearAsync();
-            window.Close();
+            if (ConfirmBulk(owner, "ログ削除", 1, "同期ログと失敗診断を削除します。未同期データは削除されません。"))
+            {
+                await RunAndRefreshAsync(clearAsync, "同期ログを削除しました。");
+            }
         };
         close.Click += (_, _) => window.Close();
         buttons.Children.Add(retryFailures);
@@ -166,7 +194,7 @@ internal static class SyncDialogs
         var tabs = new TabControl();
         var calendarGrid = new DataGrid
         {
-            ItemsSource = new ObservableCollection<SyncCalendarDiagnostic>(diagnostics.Calendars),
+            ItemsSource = calendarItems,
             AutoGenerateColumns = false,
             CanUserAddRows = false,
             IsReadOnly = true
@@ -178,7 +206,7 @@ internal static class SyncDialogs
 
         var dirtyGrid = new DataGrid
         {
-            ItemsSource = new ObservableCollection<SyncDirtyItem>(diagnostics.DirtyItems),
+            ItemsSource = dirtyItems,
             AutoGenerateColumns = false,
             CanUserAddRows = false,
             IsReadOnly = true,
@@ -201,6 +229,22 @@ internal static class SyncDialogs
         var retryDirty = new Button { Content = "選択行を再同期", MinWidth = 116, Height = 28, Margin = new Thickness(0, 0, 8, 0), IsEnabled = retryDirtyItemsAsync is not null };
         var markSynced = new Button { Content = "同期済み扱い", MinWidth = 110, Height = 28, Margin = new Thickness(0, 0, 8, 0), IsEnabled = markDirtyItemsSyncedAsync is not null };
         var discardLocal = new Button { Content = "ローカル変更破棄", MinWidth = 120, Height = 28, IsEnabled = discardDirtyItemsAsync is not null };
+        openDirty.IsEnabled = false;
+        retryDirty.IsEnabled = false;
+        markSynced.IsEnabled = false;
+        discardLocal.IsEnabled = false;
+
+        void UpdateDirtyActionState()
+        {
+            var hasSelection = GetSelectedDirtyIds(dirtyGrid).Count > 0;
+            openDirty.IsEnabled = hasSelection && openDirtyItemAsync is not null;
+            retryDirty.IsEnabled = hasSelection && retryDirtyItemsAsync is not null;
+            markSynced.IsEnabled = hasSelection && markDirtyItemsSyncedAsync is not null;
+            discardLocal.IsEnabled = hasSelection && discardDirtyItemsAsync is not null;
+        }
+
+        dirtyGrid.SelectionChanged += (_, _) => UpdateDirtyActionState();
+
         openDirty.Click += async (_, _) =>
         {
             if (openDirtyItemAsync is not null && GetSelectedDirtyIds(dirtyGrid).FirstOrDefault() is { } id)
@@ -214,8 +258,7 @@ internal static class SyncDialogs
             var ids = GetSelectedDirtyIds(dirtyGrid);
             if (retryDirtyItemsAsync is not null && ConfirmBulk(owner, "選択行を再同期", ids.Count, "選択した dirty データだけを Google へ送信します。"))
             {
-                await retryDirtyItemsAsync(ids);
-                window.Close();
+                await RunAndRefreshAsync(() => retryDirtyItemsAsync(ids), "選択した未同期データを再同期しました。");
             }
         };
         markSynced.Click += async (_, _) =>
@@ -223,8 +266,7 @@ internal static class SyncDialogs
             var ids = GetSelectedDirtyIds(dirtyGrid);
             if (markDirtyItemsSyncedAsync is not null && ConfirmBulk(owner, "選択行を同期済み扱い", ids.Count, "Googleへ送信せず dirty 状態を解除します。実行前に自動バックアップを作成します。"))
             {
-                await markDirtyItemsSyncedAsync(ids);
-                window.Close();
+                await RunAndRefreshAsync(() => markDirtyItemsSyncedAsync(ids), "選択した未同期データを同期済み扱いにしました。");
             }
         };
         discardLocal.Click += async (_, _) =>
@@ -232,8 +274,7 @@ internal static class SyncDialogs
             var ids = GetSelectedDirtyIds(dirtyGrid);
             if (discardDirtyItemsAsync is not null && ConfirmBulk(owner, "選択行のローカル変更を破棄", ids.Count, "Googleから再取得できるものだけ復元し、ローカル新規は削除します。実行前に自動バックアップを作成します。"))
             {
-                await discardDirtyItemsAsync(ids);
-                window.Close();
+                await RunAndRefreshAsync(() => discardDirtyItemsAsync(ids), "選択したローカル変更を破棄しました。");
             }
         };
         dirtyButtons.Children.Add(openDirty);
@@ -247,7 +288,7 @@ internal static class SyncDialogs
 
         var failureGrid = new DataGrid
         {
-            ItemsSource = new ObservableCollection<SyncFailureDiagnostic>(diagnostics.Failures),
+            ItemsSource = failureItems,
             AutoGenerateColumns = false,
             CanUserAddRows = false,
             IsReadOnly = true
@@ -270,7 +311,7 @@ internal static class SyncDialogs
 
         var historyGrid = new DataGrid
         {
-            ItemsSource = new ObservableCollection<SyncResult>(diagnostics.History),
+            ItemsSource = historyItems,
             AutoGenerateColumns = false,
             CanUserAddRows = false,
             IsReadOnly = true
@@ -285,6 +326,23 @@ internal static class SyncDialogs
         panel.Children.Add(tabs);
 
         window.ShowDialog();
+    }
+
+    private static string BuildDiagnosticsSummary(SyncDiagnosticsSnapshot diagnostics)
+    {
+        var last = diagnostics.LastResult;
+        return last is null
+            ? $"未同期変更: {diagnostics.DirtyCount} 件\n最後の同期結果はありません。"
+            : $"未同期変更: {diagnostics.DirtyCount} 件\n最後の同期: {last.FinishedAt:yyyy/MM/dd HH:mm:ss} / {last.SummaryText}";
+    }
+
+    private static void ReplaceAll<T>(ObservableCollection<T> target, IEnumerable<T> items)
+    {
+        target.Clear();
+        foreach (var item in items)
+        {
+            target.Add(item);
+        }
     }
 
     private static Style CreatePreviewRowStyle()
