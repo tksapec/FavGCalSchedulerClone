@@ -100,10 +100,6 @@ internal static class SyncDialogs
         var panel = new DockPanel { Margin = new Thickness(12), LastChildFill = true };
         window.Content = panel;
 
-        var last = diagnostics.LastResult;
-        var summaryText = last is null
-            ? $"未同期変更: {diagnostics.DirtyCount} 件\n最終同期結果はありません。"
-            : $"未同期変更: {diagnostics.DirtyCount} 件\n最終同期: {last.FinishedAt:yyyy/MM/dd HH:mm:ss} / {last.SummaryText}";
         var summary = new TextBlock { Text = BuildDiagnosticsSummary(diagnostics), Margin = new Thickness(0, 0, 0, 8), FontWeight = FontWeights.SemiBold };
         DockPanel.SetDock(summary, Dock.Top);
         panel.Children.Add(summary);
@@ -169,7 +165,10 @@ internal static class SyncDialogs
         {
             if (refreshGoogleRemindersAsync is not null)
             {
-                await RunAndRefreshAsync(async () => await refreshGoogleRemindersAsync(), "Google通知設定を更新しました。");
+                await RunAndRefreshAsync(async () =>
+                {
+                    await refreshGoogleRemindersAsync();
+                }, "Google通知設定を更新しました。");
             }
         };
         exportDirty.Click += (_, _) => ExportText(owner, "unsynced.csv", BuildDirtyCsv(currentDiagnostics.DirtyItems));
