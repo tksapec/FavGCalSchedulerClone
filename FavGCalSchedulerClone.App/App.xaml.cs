@@ -123,7 +123,9 @@ public partial class App : System.Windows.Application
         || !_startupInitializationCompleted
         || _interactionGuard?.IsReturnToTodaySuppressed != false
         || MainWindow?.DataContext is not MainViewModel
-        || Windows.OfType<Window>().Any(window => window.IsActive);
+        || Windows.OfType<Window>().Any(window =>
+            window.IsActive
+            || (window.IsVisible && ReferenceEquals(window.Owner, MainWindow)));
 
     private async Task CompleteStartupInitializationAsync(Func<Task> initialize, IAppLogger logger)
     {
