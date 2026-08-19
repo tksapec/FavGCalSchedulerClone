@@ -4,8 +4,20 @@ namespace FavGCalSchedulerClone.App.ViewModels;
 
 public sealed partial class MainViewModel
 {
+    private CalendarViewMode? _searchReturnViewMode;
+
     public async Task RunCurrentYearSearchAsync()
     {
+        if (!IsSearchResultsVisible)
+        {
+            _searchReturnViewMode = CurrentViewMode;
+        }
+
+        if (CurrentViewMode != CalendarViewMode.Month)
+        {
+            CurrentViewMode = CalendarViewMode.Month;
+        }
+
         _searchResultsYear = CurrentMonth.Year;
         await RunSearchForYearAsync(_searchResultsYear.Value);
     }
@@ -32,12 +44,20 @@ public sealed partial class MainViewModel
 
     private void ClearCurrentYearSearch()
     {
+        var returnViewMode = _searchReturnViewMode;
+        _searchReturnViewMode = null;
         SearchQuery = "";
         _searchResults.Clear();
         _searchResultsYear = null;
         SelectedSearchResult = null;
         IsSearchResultsVisible = false;
         OnPropertyChanged(nameof(SearchResultsScopeText));
+
+        if (returnViewMode is { } viewMode && CurrentViewMode == CalendarViewMode.Month)
+        {
+            CurrentViewMode = viewMode;
+        }
+
         Status = "検索結果を閉じました。";
     }
 }
