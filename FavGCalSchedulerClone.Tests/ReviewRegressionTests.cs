@@ -8,6 +8,14 @@ namespace FavGCalSchedulerClone.Tests;
 public sealed class ReviewRegressionTests
 {
     [Fact]
+    public async Task AppDeactivation_KeepsSelectionWhileOwnedDialogIsVisible()
+    {
+        var code = await File.ReadAllTextAsync(AppSourcePath("App.xaml.cs"));
+
+        Assert.Contains("window.IsVisible && ReferenceEquals(window.Owner, MainWindow)", code);
+    }
+
+    [Fact]
     public async Task BulkReminderEditor_UsesReminderOptionMinutesBeforeStartValue()
     {
         var code = await File.ReadAllTextAsync(AppSourcePath("Views", "Dialogs", "BulkEventUpdateDialog.cs"));
@@ -36,6 +44,19 @@ public sealed class ReviewRegressionTests
 
         Assert.True(viewModel.IsMonthView);
         Assert.True(viewModel.IsSearchResultsVisible);
+    }
+
+    [Fact]
+    public async Task InlineYearSearch_ClearRestoresOriginalView()
+    {
+        var viewModel = await CreateViewModelAsync();
+        viewModel.CurrentViewMode = CalendarViewMode.Week;
+
+        await viewModel.RunCurrentYearSearchAsync();
+        viewModel.ClearCurrentYearSearchCommand.Execute(null);
+
+        Assert.Equal(CalendarViewMode.Week, viewModel.CurrentViewMode);
+        Assert.False(viewModel.IsSearchResultsVisible);
     }
 
     [Fact]
