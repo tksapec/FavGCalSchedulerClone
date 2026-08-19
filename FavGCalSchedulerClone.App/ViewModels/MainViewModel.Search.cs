@@ -50,6 +50,7 @@ public sealed partial class MainViewModel
         _searchResults.Clear();
         _searchResultsYear = null;
         SelectedSearchResult = null;
+        SelectedEvent = null;
         IsSearchResultsVisible = false;
         OnPropertyChanged(nameof(SearchResultsScopeText));
 
