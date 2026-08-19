@@ -45,12 +45,16 @@ public sealed partial class MainViewModel
     private void ClearCurrentYearSearch()
     {
         var returnViewMode = _searchReturnViewMode;
+        var selectedSearchResult = SelectedSearchResult;
         _searchReturnViewMode = null;
         SearchQuery = "";
         _searchResults.Clear();
         _searchResultsYear = null;
         SelectedSearchResult = null;
-        SelectedEvent = null;
+        if (selectedSearchResult is not null && ReferenceEquals(SelectedEvent, selectedSearchResult))
+        {
+            SelectedEvent = null;
+        }
         IsSearchResultsVisible = false;
         OnPropertyChanged(nameof(SearchResultsScopeText));
 
