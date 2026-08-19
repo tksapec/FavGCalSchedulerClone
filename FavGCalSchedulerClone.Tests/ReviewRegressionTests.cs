@@ -39,6 +39,15 @@ public sealed class ReviewRegressionTests
         Assert.Contains("Remove-Item -LiteralPath $publishDirectory -Recurse -Force", code);
     }
 
+    [Fact]
+    public async Task SyncDiagnostics_ReevaluatesFailureRetryStateAfterRefresh()
+    {
+        var code = await File.ReadAllTextAsync(AppSourcePath("Views", "Dialogs", "SyncDialogs.cs"));
+
+        Assert.Contains("updateRetryFailuresState();", code);
+        Assert.Contains("currentDiagnostics.Failures.Any", code);
+    }
+
     private static async Task<MainViewModel> CreateViewModelAsync()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
