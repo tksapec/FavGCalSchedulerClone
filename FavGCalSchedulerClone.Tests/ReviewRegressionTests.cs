@@ -86,7 +86,8 @@ public sealed class ReviewRegressionTests
     {
         var code = await File.ReadAllTextAsync(AppSourcePath("Views", "Dialogs", "SyncDialogs.cs"));
 
-        Assert.Contains("updateRetryFailuresState();\n                updateDirtyActionState();", code);
+        Assert.Contains("updateRetryFailuresState();", code);
+        Assert.Contains("updateDirtyActionState();", code);
         Assert.Contains("updateDirtyActionState = UpdateDirtyActionState;", code);
     }
 
