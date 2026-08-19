@@ -16,6 +16,17 @@ public sealed class ReviewRegressionTests
     }
 
     [Fact]
+    public async Task BulkReminderEditor_AllowsNotificationOffAndDisablesChannelsWithoutATime()
+    {
+        var code = await File.ReadAllTextAsync(AppSourcePath("Views", "Dialogs", "BulkEventUpdateDialog.cs"));
+
+        Assert.DoesNotContain("reminderEnabled.IsChecked == true && minutes.SelectedValue is int", code);
+        Assert.Contains("var reminderHasTime = minutes.SelectedValue is int;", code);
+        Assert.Contains("reminderHasTime && appReminder.IsChecked == true", code);
+        Assert.Contains("reminderHasTime && emailReminder.IsChecked == true", code);
+    }
+
+    [Fact]
     public async Task InlineYearSearch_FromWeekViewSwitchesToMonthSoResultsPaneIsVisible()
     {
         var viewModel = await CreateViewModelAsync();
