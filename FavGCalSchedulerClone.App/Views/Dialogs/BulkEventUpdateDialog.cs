@@ -23,7 +23,14 @@ internal static class BulkEventUpdateDialog
 
         var reminderEnabled = new CheckBox { Content = "通知設定を変更", Margin = new Thickness(0, 0, 0, 4) };
         var reminderPanel = new StackPanel { Margin = new Thickness(20, 0, 0, 8), IsEnabled = false };
-        var minutes = new ComboBox { ItemsSource = ReminderOption.Defaults, DisplayMemberPath = "Label", SelectedValuePath = "Minutes", SelectedValue = 10, Width = 160 };
+        var minutes = new ComboBox
+        {
+            ItemsSource = ReminderOption.Defaults,
+            DisplayMemberPath = nameof(ReminderOption.Label),
+            SelectedValuePath = nameof(ReminderOption.MinutesBeforeStart),
+            SelectedValue = 10,
+            Width = 160
+        };
         var appReminder = new CheckBox { Content = "アプリ内通知", IsChecked = true, Margin = new Thickness(0, 4, 0, 0) };
         var emailReminder = new CheckBox { Content = "Googleメール通知", IsChecked = false, Margin = new Thickness(0, 4, 0, 0) };
         reminderPanel.Children.Add(minutes);
