@@ -113,6 +113,7 @@ internal static class SyncDialogs
         var failureItems = new ObservableCollection<SyncFailureDiagnostic>(diagnostics.Failures);
         var historyItems = new ObservableCollection<SyncResult>(diagnostics.History);
         Action updateRetryFailuresState = static () => { };
+        Action updateDirtyActionState = static () => { };
 
         async Task RunAndRefreshAsync(Func<Task> operation, string successMessage)
         {
@@ -126,6 +127,7 @@ internal static class SyncDialogs
                 ReplaceAll(historyItems, currentDiagnostics.History);
                 summary.Text = BuildDiagnosticsSummary(currentDiagnostics);
                 updateRetryFailuresState();
+                updateDirtyActionState();
                 status.Text = successMessage;
             }
             catch (Exception ex)
@@ -250,7 +252,9 @@ internal static class SyncDialogs
             discardLocal.IsEnabled = hasSelection && discardDirtyItemsAsync is not null;
         }
 
-        dirtyGrid.SelectionChanged += (_, _) => UpdateDirtyActionState();
+        updateDirtyActionState = UpdateDirtyActionState;
+        dirtyGrid.SelectionChanged += (_, _) => updateDirtyActionState();
+        updateDirtyActionState();
 
         openDirty.Click += async (_, _) =>
         {
