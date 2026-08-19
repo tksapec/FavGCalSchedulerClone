@@ -56,9 +56,18 @@ internal static class BulkEventUpdateDialog
             calendar.IsEnabled = calendarEnabled.IsChecked == true;
             color.IsEnabled = colorEnabled.IsChecked == true;
             reminderPanel.IsEnabled = reminderEnabled.IsChecked == true;
+            var reminderHasTime = minutes.SelectedValue is int;
+            appReminder.IsEnabled = reminderEnabled.IsChecked == true && reminderHasTime;
+            emailReminder.IsEnabled = reminderEnabled.IsChecked == true && reminderHasTime;
+            if (reminderEnabled.IsChecked == true && !reminderHasTime)
+            {
+                appReminder.IsChecked = false;
+                emailReminder.IsChecked = false;
+            }
+
             ok.IsEnabled = calendarEnabled.IsChecked == true && calendar.SelectedItem is string
                 || colorEnabled.IsChecked == true
-                || reminderEnabled.IsChecked == true && minutes.SelectedValue is int;
+                || reminderEnabled.IsChecked == true;
         }
 
         calendarEnabled.Checked += (_, _) => UpdateApplyState();
@@ -69,16 +78,18 @@ internal static class BulkEventUpdateDialog
         reminderEnabled.Checked += (_, _) => UpdateApplyState();
         reminderEnabled.Unchecked += (_, _) => UpdateApplyState();
         minutes.SelectionChanged += (_, _) => UpdateApplyState();
+        UpdateApplyState();
 
         BulkEventUpdateRequest? result = null;
         ok.Click += (_, _) =>
         {
+            var reminderHasTime = minutes.SelectedValue is int;
             result = new BulkEventUpdateRequest(
                 CalendarId: calendarEnabled.IsChecked == true ? calendar.SelectedItem as string : null,
                 ColorId: colorEnabled.IsChecked == true ? color.SelectedValue as string : null,
                 ReminderMinutesBeforeStart: reminderEnabled.IsChecked == true ? minutes.SelectedValue as int? : null,
-                AppReminderEnabled: reminderEnabled.IsChecked == true ? appReminder.IsChecked == true : null,
-                GoogleEmailReminderEnabled: reminderEnabled.IsChecked == true ? emailReminder.IsChecked == true : null,
+                AppReminderEnabled: reminderEnabled.IsChecked == true ? reminderHasTime && appReminder.IsChecked == true : null,
+                GoogleEmailReminderEnabled: reminderEnabled.IsChecked == true ? reminderHasTime && emailReminder.IsChecked == true : null,
                 UpdateColor: colorEnabled.IsChecked == true);
             if (result.HasUpdates)
             {
