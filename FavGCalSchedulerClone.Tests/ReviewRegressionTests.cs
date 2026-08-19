@@ -61,6 +61,15 @@ public sealed class ReviewRegressionTests
     }
 
     [Fact]
+    public async Task SyncDiagnostics_ReevaluatesDirtySelectionActionsAfterRefresh()
+    {
+        var code = await File.ReadAllTextAsync(AppSourcePath("Views", "Dialogs", "SyncDialogs.cs"));
+
+        Assert.Contains("updateRetryFailuresState();\n                updateDirtyActionState();", code);
+        Assert.Contains("updateDirtyActionState = UpdateDirtyActionState;", code);
+    }
+
+    [Fact]
     public void ScheduleDurationShortcut_ReportsNextDayAcrossMidnight()
     {
         var success = ScheduleEditorDialog.TryCreateEndTimeFromDuration(
