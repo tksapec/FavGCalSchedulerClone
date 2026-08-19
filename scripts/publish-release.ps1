@@ -12,6 +12,16 @@ $intermediateOutputDirectory = Join-Path $intermediateDirectory 'bin'
 $intermediateObjectDirectory = Join-Path $intermediateDirectory 'obj'
 $selfContainedValue = $SelfContained.ToString().ToLowerInvariant()
 
+if (Test-Path -LiteralPath $publishDirectory)
+{
+    Remove-Item -LiteralPath $publishDirectory -Recurse -Force
+}
+
+if (Test-Path -LiteralPath $intermediateDirectory)
+{
+    Remove-Item -LiteralPath $intermediateDirectory -Recurse -Force
+}
+
 try
 {
     dotnet restore $projectPath -r win-x64 "-p:BaseIntermediateOutputPath=$intermediateObjectDirectory\"
@@ -38,7 +48,7 @@ finally
 {
     if (Test-Path -LiteralPath $intermediateDirectory)
     {
-        [System.IO.Directory]::Delete($intermediateDirectory, $true)
+        Remove-Item -LiteralPath $intermediateDirectory -Recurse -Force
     }
 }
 
