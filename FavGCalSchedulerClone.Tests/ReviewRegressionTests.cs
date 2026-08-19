@@ -1,6 +1,7 @@
 using FavGCalSchedulerClone.App.Models;
 using FavGCalSchedulerClone.App.Services;
 using FavGCalSchedulerClone.App.ViewModels;
+using FavGCalSchedulerClone.App.Views.Dialogs;
 
 namespace FavGCalSchedulerClone.Tests;
 
@@ -46,6 +47,35 @@ public sealed class ReviewRegressionTests
 
         Assert.Contains("updateRetryFailuresState();", code);
         Assert.Contains("currentDiagnostics.Failures.Any", code);
+    }
+
+    [Fact]
+    public void ScheduleDurationShortcut_ReportsNextDayAcrossMidnight()
+    {
+        var success = ScheduleEditorDialog.TryCreateEndTimeFromDuration(
+            "23:30",
+            TimeSpan.FromHours(1),
+            out var endTime,
+            out var dayOffset);
+
+        Assert.True(success);
+        Assert.Equal("00:30", endTime);
+        Assert.Equal(1, dayOffset);
+    }
+
+    [Fact]
+    public void ScheduleStartTimeShift_ReportsEndDateShiftAcrossMidnight()
+    {
+        var success = ScheduleEditorDialog.TryShiftEndTimeForStartChange(
+            "23:00",
+            "23:30",
+            "23:30",
+            out var endTime,
+            out var dayOffset);
+
+        Assert.True(success);
+        Assert.Equal("00:00", endTime);
+        Assert.Equal(1, dayOffset);
     }
 
     private static async Task<MainViewModel> CreateViewModelAsync()
