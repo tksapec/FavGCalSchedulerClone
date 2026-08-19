@@ -73,6 +73,7 @@ public sealed class SearchEventListTests
         await repository.SaveEventAsync(Event("other", isTodo: false, start: new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.Zero)));
         var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
         viewModel.CurrentMonth = new DateTime(2026, 5, 1);
+        await viewModel.InitializeAsync();
         viewModel.SelectEvent(preselected, selectEventDay: false);
 
         await viewModel.RunCurrentYearSearchAsync();
