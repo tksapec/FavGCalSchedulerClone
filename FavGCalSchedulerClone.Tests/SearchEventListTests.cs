@@ -64,6 +64,27 @@ public sealed class SearchEventListTests
     }
 
     [Fact]
+    public async Task ClearCurrentYearSearch_ClearsSelectedEventFromHiddenResult()
+    {
+        var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
+        await repository.InitializeAsync();
+        await repository.SaveEventAsync(Event("target", isTodo: false, start: new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.Zero)));
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        viewModel.CurrentMonth = new DateTime(2026, 5, 1);
+
+        await viewModel.RunCurrentYearSearchAsync();
+        var result = Assert.Single(viewModel.SearchResults);
+        viewModel.SelectedSearchResult = result;
+        Assert.Same(result, viewModel.SelectedEvent);
+
+        viewModel.ClearCurrentYearSearchCommand.Execute(null);
+
+        Assert.False(viewModel.IsSearchResultsVisible);
+        Assert.Null(viewModel.SelectedSearchResult);
+        Assert.Null(viewModel.SelectedEvent);
+    }
+
+    [Fact]
     public void EventListDialog_ResultColumnsMatchSearchListRequirements()
     {
         Assert.Equal(
