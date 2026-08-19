@@ -64,6 +64,26 @@ public sealed class SearchEventListTests
     }
 
     [Fact]
+    public async Task ClearCurrentYearSearch_PreservesSelectionWhenNoSearchResultWasSelected()
+    {
+        var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
+        await repository.InitializeAsync();
+        var preselected = Event("preselected", isTodo: false, start: new DateTimeOffset(2026, 5, 10, 9, 0, 0, TimeSpan.Zero));
+        await repository.SaveEventAsync(preselected);
+        await repository.SaveEventAsync(Event("other", isTodo: false, start: new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.Zero)));
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        viewModel.CurrentMonth = new DateTime(2026, 5, 1);
+        viewModel.SelectEvent(preselected, selectEventDay: false);
+
+        await viewModel.RunCurrentYearSearchAsync();
+        Assert.Null(viewModel.SelectedSearchResult);
+
+        viewModel.ClearCurrentYearSearchCommand.Execute(null);
+
+        Assert.Same(preselected, viewModel.SelectedEvent);
+    }
+
+    [Fact]
     public async Task ClearCurrentYearSearch_ClearsSelectedEventFromHiddenResult()
     {
         var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
