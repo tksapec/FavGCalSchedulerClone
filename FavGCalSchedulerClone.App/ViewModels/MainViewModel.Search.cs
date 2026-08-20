@@ -25,8 +25,13 @@ public sealed partial class MainViewModel
     private async Task RunSearchForYearAsync(int year)
     {
         var results = await SearchYearEventsAsync(new DateTime(year, 1, 1), SearchQuery);
+        var selectedSearchResult = SelectedSearchResult;
         _searchResults.ReplaceAll(results);
         SelectedSearchResult = null;
+        if (selectedSearchResult is not null && ReferenceEquals(SelectedEvent, selectedSearchResult))
+        {
+            SelectedEvent = null;
+        }
         IsSearchResultsVisible = true;
         OnPropertyChanged(nameof(SearchResultsScopeText));
         Status = string.IsNullOrWhiteSpace(SearchQuery)
