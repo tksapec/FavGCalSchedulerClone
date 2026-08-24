@@ -357,16 +357,16 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
             FROM events
             WHERE calendar_id = $calendar_id
               AND title = $title
-              AND start = $start
-              AND end = $end
+              AND start_utc_ticks = $start_utc_ticks
+              AND end_utc_ticks = $end_utc_ticks
               AND COALESCE(location, '') = COALESCE($location, '')
               AND is_deleted = 0
             LIMIT 1
             """;
         command.Parameters.AddWithValue("$calendar_id", calendarEvent.CalendarId);
         command.Parameters.AddWithValue("$title", calendarEvent.Title);
-        command.Parameters.AddWithValue("$start", calendarEvent.Start.ToString("O"));
-        command.Parameters.AddWithValue("$end", calendarEvent.End.ToString("O"));
+        command.Parameters.AddWithValue("$start_utc_ticks", calendarEvent.Start.UtcTicks);
+        command.Parameters.AddWithValue("$end_utc_ticks", calendarEvent.End.UtcTicks);
         command.Parameters.AddWithValue("$location", (object?)calendarEvent.Location ?? DBNull.Value);
         return (await ReadEventsAsync(command)).FirstOrDefault();
     }
