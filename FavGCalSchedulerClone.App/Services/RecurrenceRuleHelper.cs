@@ -1,6 +1,8 @@
 using System.Globalization;
-using FavGCalSchedulerClone.App.Models;
 using System.Text.Json;
+using FavGCalSchedulerClone.App.Models;
+using Ical.Net.DataTypes;
+using IcalCalendarEvent = Ical.Net.CalendarComponents.CalendarEvent;
 
 namespace FavGCalSchedulerClone.App.Services;
 
@@ -175,22 +177,45 @@ internal static class RecurrenceRuleHelper
 
     public static IEnumerable<DateTimeOffset> ExpandOccurrences(CalendarEvent masterEvent, DateTimeOffset rangeStart, DateTimeOffset rangeEnd)
     {
-        var rule = ParsePrimaryRule(masterEvent);
-        if (rule is null)
+        var ruleLine = ParseLines(masterEvent.RecurrenceJson)
+            .FirstOrDefault(line => line.StartsWith("RRULE:", StringComparison.OrdinalIgnoreCase));
+        if (ruleLine is null)
         {
             yield break;
         }
 
-        var excluded = ParseExDates(masterEvent);
-        foreach (var occurrence in ExpandOccurrences(masterEvent.Start, masterEvent.IsAllDay, rule, rangeStart, rangeEnd))
+        var recurrenceEvent = new IcalCalendarEvent
         {
-            if (excluded.Contains(occurrence))
+            DtStart = ToCalDateTime(masterEvent.Start, masterEvent.IsAllDay),
+            RecurrenceRule = new RecurrencePattern(ruleLine[6..])
+        };
+        var excluded = ParseExDates(masterEvent);
+        var evaluationStart = ToCalDateTime(rangeStart, masterEvent.IsAllDay);
+        var evaluationEnd = ToCalDateTime(rangeEnd, masterEvent.IsAllDay).Value;
+
+        foreach (var occurrence in recurrenceEvent
+                     .GetOccurrences(evaluationStart)
+                     .TakeWhile(item => item.Period.StartTime.Value < evaluationEnd))
+        {
+            var value = DateTime.SpecifyKind(occurrence.Period.StartTime.Value, DateTimeKind.Unspecified);
+            var candidate = new DateTimeOffset(value, masterEvent.Start.Offset);
+            if (candidate < rangeStart || candidate >= rangeEnd || excluded.Contains(candidate))
             {
                 continue;
             }
 
-            yield return occurrence;
+            yield return candidate;
         }
+    }
+
+    private static CalDateTime ToCalDateTime(DateTimeOffset value, bool isAllDay)
+    {
+        if (isAllDay)
+        {
+            return new CalDateTime(DateOnly.FromDateTime(value.Date));
+        }
+
+        return new CalDateTime(DateTime.SpecifyKind(value.DateTime, DateTimeKind.Unspecified), hasTime: true);
     }
 
     public static IEnumerable<DateTimeOffset> ExpandOccurrences(
@@ -310,19 +335,12 @@ internal static class RecurrenceRuleHelper
 
     private static int CountOccurrencesBefore(CalendarEvent masterEvent, DateTimeOffset occurrenceStart)
     {
-        var rule = ParsePrimaryRule(masterEvent);
-        if (rule is null)
+        if (occurrenceStart <= masterEvent.Start)
         {
             return 0;
         }
 
-        var searchEnd = occurrenceStart.AddSeconds(-1);
-        if (searchEnd < masterEvent.Start)
-        {
-            return 0;
-        }
-
-        return ExpandOccurrences(masterEvent.Start, masterEvent.IsAllDay, rule, masterEvent.Start, occurrenceStart)
+        return ExpandOccurrences(masterEvent, masterEvent.Start, occurrenceStart)
             .Count(item => item < occurrenceStart);
     }
 
