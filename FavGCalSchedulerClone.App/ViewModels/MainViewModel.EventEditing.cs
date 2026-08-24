@@ -394,6 +394,12 @@ public sealed partial class MainViewModel
 
     private string ResolveEditorCalendarId()
     {
+        if (SelectedEvent is not null
+            && string.Equals(EditorCalendarId, SelectedEvent.CalendarId, StringComparison.Ordinal))
+        {
+            return SelectedEvent.CalendarId;
+        }
+
         if (AvailableCalendars.Any(item => item.Id == EditorCalendarId))
         {
             return EditorCalendarId;
