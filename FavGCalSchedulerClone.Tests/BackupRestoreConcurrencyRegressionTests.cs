@@ -22,4 +22,18 @@ public sealed class BackupRestoreConcurrencyRegressionTests
 
         Assert.Contains("同期", exception.Message, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task MainWindowRestore_PausesReminderDatabaseWorkAndResumesInFinally()
+    {
+        var sourcePath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..",
+            "FavGCalSchedulerClone.App", "MainWindow.xaml.cs"));
+        var source = await File.ReadAllTextAsync(sourcePath);
+
+        Assert.Contains("var reminderWasRunning = await _reminderService.PauseForMaintenanceAsync();", source);
+        Assert.Contains("finally", source);
+        Assert.Contains("await _reminderService.ResumeAfterMaintenanceAsync(reminderWasRunning);", source);
+    }
 }
