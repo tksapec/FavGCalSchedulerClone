@@ -58,4 +58,31 @@ public sealed class GoogleTimeZoneRoundTripTests
         Assert.Equal("America/New_York", stored.StartTimeZoneId);
         Assert.Equal("America/New_York", stored.EndTimeZoneId);
     }
+
+    [Fact]
+    public void RecurrenceExpansion_RetainsTimeZoneAndDoesNotShareGoogleMetadata()
+    {
+        var master = new CalendarEvent
+        {
+            Id = "timezone-series",
+            CalendarId = "work",
+            Title = "NY series",
+            Start = new DateTimeOffset(2026, 11, 2, 9, 0, 0, TimeSpan.FromHours(-5)),
+            End = new DateTimeOffset(2026, 11, 2, 10, 0, 0, TimeSpan.FromHours(-5)),
+            StartTimeZoneId = "America/New_York",
+            EndTimeZoneId = "America/New_York",
+            RecurrenceJson = "[\"RRULE:FREQ=DAILY;COUNT=2\"]",
+            GoogleReminderMetadata = new GoogleReminderMetadata { UseDefault = true, Source = "default" }
+        };
+
+        var generated = RecurrenceExpansionService.ExpandForRange(
+            [master],
+            new DateTimeOffset(2026, 11, 2, 0, 0, 0, TimeSpan.FromHours(-5)),
+            new DateTimeOffset(2026, 11, 4, 0, 0, 0, TimeSpan.FromHours(-5)));
+
+        Assert.Equal(2, generated.Count);
+        Assert.All(generated, item => Assert.Equal("America/New_York", item.StartTimeZoneId));
+        generated[0].GoogleReminderMetadata!.Source = "changed";
+        Assert.Equal("default", master.GoogleReminderMetadata!.Source);
+    }
 }
