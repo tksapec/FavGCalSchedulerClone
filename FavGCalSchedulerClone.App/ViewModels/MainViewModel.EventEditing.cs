@@ -241,8 +241,25 @@ public sealed partial class MainViewModel
             }
             else
             {
-                calendarEvent.Start = new DateTimeOffset(StartDate.Date.Add(startTime));
-                calendarEvent.End = new DateTimeOffset(EndDate.Date.Add(endTime));
+                var startWallClock = StartDate.Date.Add(startTime);
+                var endWallClock = EndDate.Date.Add(endTime);
+                if (!GoogleCalendarTimeZone.TryCreateDateTimeOffset(
+                        startWallClock,
+                        calendarEvent.StartTimeZoneId,
+                        SelectedEvent?.Start.Offset,
+                        out var editedStart)
+                    || !GoogleCalendarTimeZone.TryCreateDateTimeOffset(
+                        endWallClock,
+                        calendarEvent.EndTimeZoneId ?? calendarEvent.StartTimeZoneId,
+                        SelectedEvent?.End.Offset,
+                        out var editedEnd))
+                {
+                    Status = "予定のタイムゾーンで日時を解釈できません。タイムゾーンまたはDST切替時刻を確認してください。";
+                    return null;
+                }
+
+                calendarEvent.Start = editedStart;
+                calendarEvent.End = editedEnd;
             }
             if (calendarEvent.End <= calendarEvent.Start)
             {
