@@ -107,6 +107,8 @@ public static class RecurrenceExpansionService
             Location = source.Location,
             Start = source.Start,
             End = source.End,
+            StartTimeZoneId = source.StartTimeZoneId,
+            EndTimeZoneId = source.EndTimeZoneId,
             IsAllDay = source.IsAllDay,
             ColorId = source.ColorId,
             RecurrenceJson = source.RecurrenceJson,
@@ -120,7 +122,7 @@ public static class RecurrenceExpansionService
             GoogleEmailReminderMinutesBeforeStart = [.. source.GoogleEmailReminderMinutesBeforeStart],
             AppReminderEnabled = source.AppReminderEnabled,
             GoogleEmailReminderEnabled = source.GoogleEmailReminderEnabled,
-            GoogleReminderMetadata = source.GoogleReminderMetadata,
+            GoogleReminderMetadata = source.GoogleReminderMetadata?.Clone(),
             DisplayColor = source.DisplayColor,
             DisplayForegroundColor = source.DisplayForegroundColor,
             IsGeneratedOccurrence = source.IsGeneratedOccurrence
