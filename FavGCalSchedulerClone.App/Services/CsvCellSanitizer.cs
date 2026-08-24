@@ -4,7 +4,7 @@ internal static class CsvCellSanitizer
 {
     public static string NeutralizeForSpreadsheet(string? value)
     {
-        value ??= string.Empty;
+        value ??= "";
         return value.Length > 0 && IsFormulaPrefix(value[0])
             ? "'" + value
             : value;
@@ -12,12 +12,13 @@ internal static class CsvCellSanitizer
 
     public static string RestoreNeutralizedValue(string? value)
     {
-        value ??= string.Empty;
+        value ??= "";
         return value.Length > 1 && value[0] == '\'' && IsFormulaPrefix(value[1])
             ? value[1..]
             : value;
     }
 
-    internal static bool IsFormulaPrefix(char value)
-        => value is '=' or '+' or '-' or '@' or '\t' or '\r' or '\n';
+    private static bool IsFormulaPrefix(char value) =>
+        value is '=' or '+' or '-' or '@' or '\t' or '\r' or '\n'
+            or '＝' or '＋' or '－' or '＠';
 }
