@@ -11,7 +11,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
 {
     private readonly string _databasePath;
     private readonly object _maintenanceLock = new();
-    private readonly AsyncLocal<int> _maintenanceAccessDepth = new();
+    private readonly AsyncLocal<MaintenanceAccessToken?> _maintenanceAccess = new();
     private bool _databaseMaintenanceRequested;
     private int _activeConnectionCount;
     private TaskCompletionSource<bool>? _connectionsDrained;
@@ -68,27 +68,33 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
 
     internal async Task RunWithMaintenanceAccessAsync(Func<Task> action)
     {
-        _maintenanceAccessDepth.Value++;
+        var previousAccess = _maintenanceAccess.Value;
+        var access = new MaintenanceAccessToken();
+        _maintenanceAccess.Value = access;
         try
         {
             await action();
         }
         finally
         {
-            _maintenanceAccessDepth.Value--;
+            access.Deactivate();
+            _maintenanceAccess.Value = previousAccess;
         }
     }
 
     internal async Task<T> RunWithMaintenanceAccessAsync<T>(Func<Task<T>> action)
     {
-        _maintenanceAccessDepth.Value++;
+        var previousAccess = _maintenanceAccess.Value;
+        var access = new MaintenanceAccessToken();
+        _maintenanceAccess.Value = access;
         try
         {
             return await action();
         }
         finally
         {
-            _maintenanceAccessDepth.Value--;
+            access.Deactivate();
+            _maintenanceAccess.Value = previousAccess;
         }
     }
 
@@ -725,7 +731,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
     {
         lock (_maintenanceLock)
         {
-            if (_databaseMaintenanceRequested && _maintenanceAccessDepth.Value == 0)
+            if (_databaseMaintenanceRequested && _maintenanceAccess.Value?.IsActive != true)
             {
                 throw new InvalidOperationException("Database maintenance is in progress.");
             }
@@ -1048,5 +1054,14 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         }
 
         await ExecuteAsync(connection, transaction, $"ALTER TABLE {tableName} ADD COLUMN {columnName} {sqlDefinition};");
+    }
+
+    private sealed class MaintenanceAccessToken
+    {
+        private int _isActive = 1;
+
+        public bool IsActive => Volatile.Read(ref _isActive) != 0;
+
+        public void Deactivate() => Interlocked.Exchange(ref _isActive, 0);
     }
 }
