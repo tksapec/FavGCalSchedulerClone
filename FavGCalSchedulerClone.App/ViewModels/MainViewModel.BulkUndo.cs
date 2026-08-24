@@ -18,7 +18,7 @@ public sealed partial class MainViewModel
             return 0;
         }
 
-        CaptureUndo("一括編集", events);
+        var undoSnapshots = events.Select(UndoService.Clone).ToArray();
         var writes = new List<CalendarEvent>();
         var updated = 0;
         foreach (var calendarEvent in events)
@@ -68,6 +68,7 @@ public sealed partial class MainViewModel
         }
 
         await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes);
+        CaptureUndo("一括編集", undoSnapshots);
         await RefreshCalendarAsync();
         Status = $"一括編集しました: {updated} 件";
         await SyncAfterLocalChangeAsync();
@@ -82,7 +83,7 @@ public sealed partial class MainViewModel
             return 0;
         }
 
-        CaptureUndo("一括削除", events);
+        var undoSnapshots = events.Select(UndoService.Clone).ToArray();
         foreach (var calendarEvent in events)
         {
             calendarEvent.IsDeleted = true;
@@ -90,6 +91,7 @@ public sealed partial class MainViewModel
         }
 
         await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, events);
+        CaptureUndo("一括削除", undoSnapshots);
         var deleted = events.Count;
         SelectedEvent = null;
         await RefreshCalendarAsync();
@@ -100,8 +102,7 @@ public sealed partial class MainViewModel
 
     public async Task<bool> UndoLastChangeAsync()
     {
-        var operation = _undoService.Pop();
-        NotifyUndoStateChanged();
+        var operation = _undoService.Peek();
         if (operation is null)
         {
             return false;
@@ -128,6 +129,11 @@ public sealed partial class MainViewModel
         }
 
         await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes, hardDeleteIds);
+        if (_undoService.Consume(operation))
+        {
+            NotifyUndoStateChanged();
+        }
+
         SelectedEvent = operation.BeforeEvents.Count == 1
             ? await _repository.FindMasterByIdAsync(operation.BeforeEvents[0].Id)
             : null;
