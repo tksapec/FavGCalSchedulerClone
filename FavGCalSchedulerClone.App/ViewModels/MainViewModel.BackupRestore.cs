@@ -47,13 +47,8 @@ public sealed partial class MainViewModel
             repositoryMaintenanceStarted = true;
             var result = await _backupService.RestoreBackupAsync(backupZipPath, _repository.DatabasePath);
 
-            // Keep the application's repository gate closed while migrations are applied
-            // to an older-but-valid backup. A temporary repository has an independent
-            // maintenance gate, so it can safely open the replaced file while all normal
-            // application repository access is still rejected.
-            var migrationRepository = new CalendarRepository(_repository.DatabasePath);
-            await migrationRepository.InitializeAsync();
-
+            // RestoreBackupAsync validates and migrates the extracted database before
+            // replacing the live file, so normal repository access can resume here.
             _repository.EndMaintenance();
             repositoryMaintenanceStarted = false;
 
