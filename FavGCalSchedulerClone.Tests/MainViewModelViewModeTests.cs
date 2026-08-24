@@ -564,22 +564,20 @@ public sealed class MainViewModelViewModeTests
         var firstPrefetchStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var secondPrefetchStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseFirstPrefetch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var firstTargetBuilds = 0;
-        var secondTargetBuilds = 0;
-        viewModel.BeforeBuildCalendarSnapshot = (month, _) =>
+        viewModel.BeforeLoadCalendarPrefetchDataAsync = (month, _) =>
         {
-            if (month.Year == firstTarget.Year && month.Month == firstTarget.Month
-                && Interlocked.Increment(ref firstTargetBuilds) == 2)
+            if (month.Year == firstTarget.Year && month.Month == firstTarget.Month)
             {
                 firstPrefetchStarted.TrySetResult();
-                releaseFirstPrefetch.Task.Wait();
+                return releaseFirstPrefetch.Task;
             }
 
-            if (month.Year == secondTarget.Year && month.Month == secondTarget.Month
-                && Interlocked.Increment(ref secondTargetBuilds) == 2)
+            if (month.Year == secondTarget.Year && month.Month == secondTarget.Month)
             {
                 secondPrefetchStarted.TrySetResult();
             }
+
+            return Task.CompletedTask;
         };
 
         viewModel.CurrentMonth = firstTarget;
@@ -612,6 +610,7 @@ public sealed class MainViewModelViewModeTests
     public async Task Navigation_ReusesCalendarDataWindowForNearbyMonths()
     {
         var viewModel = await CreateViewModelAsync();
+        await WaitUntilAsync(() => viewModel.GetCalendarPrefetchRequirement(viewModel.CurrentMonth) == CalendarPrefetchRequirement.None);
         var databaseLoads = 0;
         viewModel.BeforeLoadCalendarSnapshotAsync = (_, _) =>
         {
@@ -876,6 +875,7 @@ public sealed class MainViewModelViewModeTests
             loadCount++;
             return Task.CompletedTask;
         };
+        viewModel.BeforeRefreshTodos = () => { };
 
         await viewModel.SaveTagsAsync();
 
