@@ -52,6 +52,8 @@ public sealed class UndoService
             Location = source.Location,
             Start = source.Start,
             End = source.End,
+            StartTimeZoneId = source.StartTimeZoneId,
+            EndTimeZoneId = source.EndTimeZoneId,
             IsAllDay = source.IsAllDay,
             ColorId = source.ColorId,
             RecurrenceJson = source.RecurrenceJson,
