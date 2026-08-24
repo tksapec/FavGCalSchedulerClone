@@ -73,7 +73,7 @@ internal static class RecurrenceRuleHelper
             }
 
             var header = line[..separatorIndex];
-            var timeZoneId = TryGetPropertyParameter(header, "TZID");
+            var timeZoneId = TryGetPropertyParameter(header, "TZID") ?? calendarEvent.StartTimeZoneId;
             foreach (var token in line[(separatorIndex + 1)..].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
                 if (TryParseRecurrenceDate(token, calendarEvent.Start.Offset, timeZoneId, out var exDate))
