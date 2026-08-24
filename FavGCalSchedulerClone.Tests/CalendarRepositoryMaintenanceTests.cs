@@ -46,6 +46,33 @@ public sealed class CalendarRepositoryMaintenanceTests
         }
     }
 
+    [Fact]
+    public async Task FailedOpen_DoesNotLeakMaintenanceConnectionCount()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"repository-open-failure-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var blockerPath = Path.Combine(directory, "not-a-directory");
+        await File.WriteAllTextAsync(blockerPath, "block");
+        var repository = new CalendarRepository(Path.Combine(blockerPath, "calendar.db"));
+
+        try
+        {
+            await Assert.ThrowsAnyAsync<Exception>(() => repository.LoadSettingsAsync());
+
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+            await repository.BeginMaintenanceAsync(cancellation.Token);
+            repository.EndMaintenance();
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
     private static void DeleteIfExists(string path)
     {
         if (File.Exists(path))
