@@ -11,6 +11,12 @@ public sealed class GoogleReminderMetadata
     public string? AdoptedReminderMethod { get; set; }
     public string? Source { get; set; }
 
+    // This object is the existing persisted Google-event metadata envelope. Keeping
+    // source time-zone IDs here avoids a destructive SQLite migration while allowing
+    // old databases to gain lossless Google time-zone round-tripping immediately.
+    public string? StartTimeZoneId { get; set; }
+    public string? EndTimeZoneId { get; set; }
+
     public bool HasGoogleReminder =>
         UseDefault == true
         || PopupMinutes.Count > 0
@@ -39,6 +45,8 @@ public sealed class GoogleReminderMetadata
         DefaultEmailMinutes = [.. DefaultEmailMinutes],
         AdoptedReminderMinutes = AdoptedReminderMinutes,
         AdoptedReminderMethod = AdoptedReminderMethod,
-        Source = Source
+        Source = Source,
+        StartTimeZoneId = StartTimeZoneId,
+        EndTimeZoneId = EndTimeZoneId
     };
 }
