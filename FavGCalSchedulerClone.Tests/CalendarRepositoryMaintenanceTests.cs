@@ -47,6 +47,39 @@ public sealed class CalendarRepositoryMaintenanceTests
     }
 
     [Fact]
+    public async Task MaintenanceAccessScope_AllowsOnlyTheOwnerFlowToUseTheRepository()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        try
+        {
+            var repository = new CalendarRepository(dbPath);
+            await repository.InitializeAsync();
+            await repository.SaveSettingsAsync(new FavGCalSchedulerClone.App.Models.AppSettings { StartupTabIndex = 3 });
+            await repository.BeginMaintenanceAsync();
+            try
+            {
+                await Assert.ThrowsAsync<InvalidOperationException>(() => repository.LoadSettingsAsync());
+
+                var loaded = await repository.RunWithMaintenanceAccessAsync(repository.LoadSettingsAsync);
+                Assert.Equal(3, loaded.StartupTabIndex);
+
+                await Assert.ThrowsAsync<InvalidOperationException>(() => repository.LoadSettingsAsync());
+            }
+            finally
+            {
+                repository.EndMaintenance();
+            }
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            DeleteIfExists(dbPath);
+            DeleteIfExists(dbPath + "-wal");
+            DeleteIfExists(dbPath + "-shm");
+        }
+    }
+
+    [Fact]
     public async Task FailedOpen_DoesNotLeakMaintenanceConnectionCount()
     {
         var directory = Path.Combine(Path.GetTempPath(), $"repository-open-failure-{Guid.NewGuid():N}");
