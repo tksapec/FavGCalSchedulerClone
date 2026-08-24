@@ -136,19 +136,21 @@ public sealed class BackupService
                 File.Delete(tempRestorePath);
             }
 
+            // Once the current database has been displaced, rollback is recovery work and
+            // must not be aborted just because the caller's cancellation token was canceled.
             if (currentMoved && !File.Exists(databasePath) && File.Exists(rollbackPath))
             {
-                await MoveFileWithRetryAsync(rollbackPath, databasePath, overwrite: false, cancellationToken);
+                await MoveFileWithRetryAsync(rollbackPath, databasePath, overwrite: false, CancellationToken.None);
             }
 
             if (walMoved && !File.Exists(databaseWalPath) && File.Exists(rollbackWalPath))
             {
-                await MoveFileWithRetryAsync(rollbackWalPath, databaseWalPath, overwrite: false, cancellationToken);
+                await MoveFileWithRetryAsync(rollbackWalPath, databaseWalPath, overwrite: false, CancellationToken.None);
             }
 
             if (shmMoved && !File.Exists(databaseShmPath) && File.Exists(rollbackShmPath))
             {
-                await MoveFileWithRetryAsync(rollbackShmPath, databaseShmPath, overwrite: false, cancellationToken);
+                await MoveFileWithRetryAsync(rollbackShmPath, databaseShmPath, overwrite: false, CancellationToken.None);
             }
 
             throw;
