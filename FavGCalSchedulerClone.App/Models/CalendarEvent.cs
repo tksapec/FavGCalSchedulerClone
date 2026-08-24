@@ -2,6 +2,10 @@ namespace FavGCalSchedulerClone.App.Models;
 
 public sealed class CalendarEvent
 {
+    private string? _startTimeZoneId;
+    private string? _endTimeZoneId;
+    private GoogleReminderMetadata? _googleReminderMetadata;
+
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string? GoogleEventId { get; set; }
     public string? LastSyncedGoogleEtag { get; set; }
@@ -15,8 +19,42 @@ public sealed class CalendarEvent
     public string? Location { get; set; }
     public DateTimeOffset Start { get; set; }
     public DateTimeOffset End { get; set; }
-    public string? StartTimeZoneId { get; set; }
-    public string? EndTimeZoneId { get; set; }
+    public string? StartTimeZoneId
+    {
+        get => _startTimeZoneId ?? _googleReminderMetadata?.StartTimeZoneId;
+        set
+        {
+            _startTimeZoneId = value;
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                _googleReminderMetadata ??= new GoogleReminderMetadata();
+                _googleReminderMetadata.StartTimeZoneId = value;
+            }
+            else if (_googleReminderMetadata is not null)
+            {
+                _googleReminderMetadata.StartTimeZoneId = null;
+            }
+        }
+    }
+
+    public string? EndTimeZoneId
+    {
+        get => _endTimeZoneId ?? _googleReminderMetadata?.EndTimeZoneId;
+        set
+        {
+            _endTimeZoneId = value;
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                _googleReminderMetadata ??= new GoogleReminderMetadata();
+                _googleReminderMetadata.EndTimeZoneId = value;
+            }
+            else if (_googleReminderMetadata is not null)
+            {
+                _googleReminderMetadata.EndTimeZoneId = null;
+            }
+        }
+    }
+
     public bool IsAllDay { get; set; }
     public string? ColorId { get; set; }
     public string? RecurrenceJson { get; set; }
@@ -31,7 +69,36 @@ public sealed class CalendarEvent
     public List<int> GoogleEmailReminderMinutesBeforeStart { get; set; } = [];
     internal bool? AppReminderEnabled { get; set; }
     internal bool? GoogleEmailReminderEnabled { get; set; }
-    public GoogleReminderMetadata? GoogleReminderMetadata { get; set; }
+    public GoogleReminderMetadata? GoogleReminderMetadata
+    {
+        get => _googleReminderMetadata;
+        set
+        {
+            _googleReminderMetadata = value;
+            if (value is null)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(_startTimeZoneId))
+            {
+                value.StartTimeZoneId = _startTimeZoneId;
+            }
+            else
+            {
+                _startTimeZoneId = value.StartTimeZoneId;
+            }
+
+            if (!string.IsNullOrWhiteSpace(_endTimeZoneId))
+            {
+                value.EndTimeZoneId = _endTimeZoneId;
+            }
+            else
+            {
+                _endTimeZoneId = value.EndTimeZoneId;
+            }
+        }
+    }
     public string DisplayColor { get; set; } = "#FFFFFF";
     public string DisplayForegroundColor { get; set; } = "#111827";
     public string ToolTipText { get; set; } = "";
