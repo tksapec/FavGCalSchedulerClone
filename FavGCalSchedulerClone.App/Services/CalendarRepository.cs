@@ -724,34 +724,35 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
             }
         }
 
-        var directory = Path.GetDirectoryName(_databasePath);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
-        var connection = new SqliteConnection(new SqliteConnectionStringBuilder
-        {
-            DataSource = _databasePath,
-            DefaultTimeout = 10
-        }.ToString());
-        connection.StateChange += (_, args) =>
-        {
-            if (args.CurrentState is ConnectionState.Closed or ConnectionState.Broken)
-            {
-                ReleaseConnection();
-            }
-        };
-
+        SqliteConnection? connection = null;
         try
         {
+            var directory = Path.GetDirectoryName(_databasePath);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            connection = new SqliteConnection(new SqliteConnectionStringBuilder
+            {
+                DataSource = _databasePath,
+                DefaultTimeout = 10
+            }.ToString());
+            connection.StateChange += (_, args) =>
+            {
+                if (args.CurrentState is ConnectionState.Closed or ConnectionState.Broken)
+                {
+                    ReleaseConnection();
+                }
+            };
+
             connection.Open();
             return connection;
         }
         catch
         {
             ReleaseConnection();
-            connection.Dispose();
+            connection?.Dispose();
             throw;
         }
     }
