@@ -23,17 +23,17 @@ public sealed class FinalReliabilitySourceTests
     }
 
     [Fact]
-    public async Task Restore_AcquiresRepositoryMaintenanceLeaseBeforeReplacingDatabase()
+    public async Task Restore_KeepsRepositoryMaintenanceLeaseThroughViewModelReinitialization()
     {
         var source = await ReadAppFileAsync("ViewModels", "MainViewModel.BackupRestore.cs");
 
         var leaseIndex = source.IndexOf("BeginMaintenanceAsync", StringComparison.Ordinal);
         var restoreIndex = source.IndexOf("RestoreBackupAsync", StringComparison.Ordinal);
+        var initializeIndex = source.IndexOf("RunWithMaintenanceAccessAsync(InitializeAsync)", restoreIndex, StringComparison.Ordinal);
         var endMaintenanceIndex = source.IndexOf("EndMaintenance", restoreIndex, StringComparison.Ordinal);
-        var initializeIndex = source.IndexOf("InitializeAsync", restoreIndex, StringComparison.Ordinal);
         Assert.True(leaseIndex >= 0 && restoreIndex > leaseIndex);
-        Assert.True(endMaintenanceIndex > restoreIndex);
-        Assert.True(initializeIndex > endMaintenanceIndex);
+        Assert.True(initializeIndex > restoreIndex);
+        Assert.True(endMaintenanceIndex > initializeIndex);
     }
 
     [Fact]
@@ -61,6 +61,7 @@ public sealed class FinalReliabilitySourceTests
         var atomicWriter = await ReadAppFileAsync("Services", "CalendarRepositoryAtomicWriter.cs");
 
         Assert.Contains("BeginMaintenanceAsync", repository, StringComparison.Ordinal);
+        Assert.Contains("RunWithMaintenanceAccessAsync", repository, StringComparison.Ordinal);
         Assert.Contains("_databaseMaintenanceRequested", repository, StringComparison.Ordinal);
         Assert.Contains("Database maintenance is in progress", repository, StringComparison.Ordinal);
         Assert.Contains("repository.OpenConnection()", atomicWriter, StringComparison.Ordinal);
