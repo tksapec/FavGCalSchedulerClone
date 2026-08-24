@@ -64,6 +64,35 @@ public sealed class GoogleTimeZoneRoundTripTests
     }
 
     [Fact]
+    public void Mapper_DoesNotInventLocalTimeZoneWhenGoogleSuppliesOnlyExplicitOffset()
+    {
+        var google = new Event
+        {
+            Id = "offset-only-event",
+            Summary = "Offset only",
+            Start = new EventDateTime
+            {
+                DateTimeDateTimeOffset = new DateTimeOffset(2026, 7, 15, 9, 0, 0, TimeSpan.FromHours(-4))
+            },
+            End = new EventDateTime
+            {
+                DateTimeDateTimeOffset = new DateTimeOffset(2026, 7, 15, 10, 0, 0, TimeSpan.FromHours(-4))
+            },
+            Status = "confirmed"
+        };
+
+        var local = GoogleEventMapper.FromGoogleEvent(google, "work");
+        var roundTripped = GoogleEventMapper.ToGoogleEvent(local);
+
+        Assert.Null(local.StartTimeZoneId);
+        Assert.Null(local.EndTimeZoneId);
+        Assert.Null(roundTripped.Start.TimeZone);
+        Assert.Null(roundTripped.End.TimeZone);
+        Assert.Equal(TimeSpan.FromHours(-4), roundTripped.Start.DateTimeDateTimeOffset!.Value.Offset);
+        Assert.Equal(TimeSpan.FromHours(-4), roundTripped.End.DateTimeDateTimeOffset!.Value.Offset);
+    }
+
+    [Fact]
     public async Task Repository_PersistsEventTimeZoneIds()
     {
         var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
@@ -156,6 +185,23 @@ public sealed class GoogleTimeZoneRoundTripTests
         Assert.Equal(10, result.Hour);
         Assert.Equal(30, result.Minute);
         Assert.Equal(TimeSpan.FromHours(expectedOffsetHours), result.Offset);
+    }
+
+    [Fact]
+    public void TryCreateDateTimeOffset_WithoutTimeZoneKeepsPreferredExistingOffset()
+    {
+        var wallClock = new DateTime(2026, 7, 15, 10, 30, 0, DateTimeKind.Unspecified);
+
+        var created = GoogleCalendarTimeZone.TryCreateDateTimeOffset(
+            wallClock,
+            timeZoneId: null,
+            preferredOffset: TimeSpan.FromHours(-4),
+            out var result);
+
+        Assert.True(created);
+        Assert.Equal(TimeSpan.FromHours(-4), result.Offset);
+        Assert.Equal(10, result.Hour);
+        Assert.Equal(30, result.Minute);
     }
 
     [Fact]
