@@ -22,6 +22,11 @@ public sealed partial class MainViewModel
 
     public async Task<RestoreResult> RestoreAllCalendarsAsync(string backupZipPath)
     {
+        if (Volatile.Read(ref _syncInProgress) != 0)
+        {
+            throw new InvalidOperationException("Google同期中はバックアップをリストアできません。同期完了後に再実行してください。");
+        }
+
         var result = await _backupService.RestoreBackupAsync(backupZipPath, _repository.DatabasePath);
         await InitializeAsync();
         Status = "バックアップからリストアしました。Google認証は必要に応じて再実行してください。";
