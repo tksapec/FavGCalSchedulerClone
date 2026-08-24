@@ -72,9 +72,11 @@ internal static class RecurrenceRuleHelper
                 continue;
             }
 
+            var header = line[..separatorIndex];
+            var timeZoneId = TryGetPropertyParameter(header, "TZID");
             foreach (var token in line[(separatorIndex + 1)..].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
-                if (TryParseRecurrenceDate(token, calendarEvent.Start.Offset, out var exDate))
+                if (TryParseRecurrenceDate(token, calendarEvent.Start.Offset, timeZoneId, out var exDate))
                 {
                     results.Add(exDate);
                 }
@@ -186,19 +188,18 @@ internal static class RecurrenceRuleHelper
 
         var recurrenceEvent = new IcalCalendarEvent
         {
-            DtStart = ToCalDateTime(masterEvent.Start, masterEvent.IsAllDay),
+            DtStart = ToCalDateTime(masterEvent.Start, masterEvent.IsAllDay, masterEvent.StartTimeZoneId),
             RecurrenceRule = new RecurrencePattern(ruleLine[6..])
         };
         var excluded = ParseExDates(masterEvent);
-        var evaluationStart = ToCalDateTime(rangeStart, masterEvent.IsAllDay);
-        var evaluationEnd = ToCalDateTime(rangeEnd, masterEvent.IsAllDay).Value;
+        var evaluationStart = ToEvaluationBoundary(rangeStart, masterEvent.IsAllDay);
+        var evaluationEnd = ToEvaluationBoundary(rangeEnd, masterEvent.IsAllDay);
 
         foreach (var occurrence in recurrenceEvent
                      .GetOccurrences(evaluationStart)
-                     .TakeWhile(item => item.Period.StartTime.Value < evaluationEnd))
+                     .TakeWhile(item => item.Period.StartTime < evaluationEnd))
         {
-            var value = DateTime.SpecifyKind(occurrence.Period.StartTime.Value, DateTimeKind.Unspecified);
-            var candidate = new DateTimeOffset(value, masterEvent.Start.Offset);
+            var candidate = FromCalDateTime(occurrence.Period.StartTime, masterEvent.Start.Offset);
             if (candidate < rangeStart || candidate >= rangeEnd || excluded.Contains(candidate))
             {
                 continue;
@@ -208,14 +209,37 @@ internal static class RecurrenceRuleHelper
         }
     }
 
-    private static CalDateTime ToCalDateTime(DateTimeOffset value, bool isAllDay)
+    private static CalDateTime ToCalDateTime(DateTimeOffset value, bool isAllDay, string? timeZoneId)
     {
         if (isAllDay)
         {
             return new CalDateTime(DateOnly.FromDateTime(value.Date));
         }
 
-        return new CalDateTime(DateTime.SpecifyKind(value.DateTime, DateTimeKind.Unspecified), hasTime: true);
+        var wallClock = DateTime.SpecifyKind(value.DateTime, DateTimeKind.Unspecified);
+        return string.IsNullOrWhiteSpace(timeZoneId)
+            ? new CalDateTime(wallClock, hasTime: true)
+            : new CalDateTime(wallClock, timeZoneId, hasTime: true);
+    }
+
+    private static CalDateTime ToEvaluationBoundary(DateTimeOffset value, bool isAllDay)
+    {
+        return isAllDay
+            ? new CalDateTime(DateOnly.FromDateTime(value.Date))
+            : new CalDateTime(value.UtcDateTime, CalDateTime.UtcTzId, hasTime: true);
+    }
+
+    private static DateTimeOffset FromCalDateTime(CalDateTime value, TimeSpan fallbackOffset)
+    {
+        var wallClock = DateTime.SpecifyKind(value.Value, DateTimeKind.Unspecified);
+        if (value.IsFloating || !value.HasTime)
+        {
+            return new DateTimeOffset(wallClock, fallbackOffset);
+        }
+
+        var utcUnspecified = DateTime.SpecifyKind(value.AsUtc, DateTimeKind.Unspecified);
+        var offset = wallClock - utcUnspecified;
+        return new DateTimeOffset(wallClock, offset);
     }
 
     public static IEnumerable<DateTimeOffset> ExpandOccurrences(
@@ -348,6 +372,17 @@ internal static class RecurrenceRuleHelper
     {
         var content = ruleLine.StartsWith("RRULE:", StringComparison.OrdinalIgnoreCase) ? ruleLine[6..] : ruleLine;
         return content.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
+
+    private static string? TryGetPropertyParameter(string header, string key)
+    {
+        return header.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Skip(1)
+            .Select(part => part.Split('=', 2))
+            .Where(parts => parts.Length == 2)
+            .Where(parts => string.Equals(parts[0], key, StringComparison.OrdinalIgnoreCase))
+            .Select(parts => parts[1])
+            .FirstOrDefault();
     }
 
     public static string? AddExDate(string? recurrenceJson, DateTimeOffset originalStart, bool isAllDay)
@@ -575,6 +610,25 @@ internal static class RecurrenceRuleHelper
 
     private static bool TryParseRecurrenceDate(string value, TimeSpan defaultOffset, out DateTimeOffset dateTime)
     {
+        return TryParseRecurrenceDate(value, defaultOffset, timeZoneId: null, out dateTime);
+    }
+
+    private static bool TryParseRecurrenceDate(string value, TimeSpan defaultOffset, string? timeZoneId, out DateTimeOffset dateTime)
+    {
+        if (!string.IsNullOrWhiteSpace(timeZoneId)
+            && DateTime.TryParseExact(
+                value,
+                "yyyyMMdd'T'HHmmss",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var localDateTime))
+        {
+            dateTime = FromCalDateTime(
+                new CalDateTime(DateTime.SpecifyKind(localDateTime, DateTimeKind.Unspecified), timeZoneId, hasTime: true),
+                defaultOffset);
+            return true;
+        }
+
         if (DateTimeOffset.TryParseExact(
             value,
             ["yyyyMMdd'T'HHmmss'Z'", "yyyyMMdd'T'HHmmss", "yyyyMMdd"],
