@@ -15,6 +15,9 @@ public sealed class ReliabilityHardeningSourceTests
         Assert.Contains("rollbackPath + \"-wal\"", source);
         Assert.Contains("databasePath + \"-shm\"", source);
         Assert.Contains("rollbackPath + \"-shm\"", source);
+        Assert.Contains("rollbackPath, databasePath, overwrite: false, CancellationToken.None", source);
+        Assert.Contains("rollbackWalPath, databaseWalPath, overwrite: false, CancellationToken.None", source);
+        Assert.Contains("rollbackShmPath, databaseShmPath, overwrite: false, CancellationToken.None", source);
     }
 
     [Fact]
@@ -88,12 +91,41 @@ public sealed class ReliabilityHardeningSourceTests
     }
 
     [Fact]
-    public async Task CsvExport_NeutralizesSpreadsheetFormulaPrefixes()
+    public async Task Undo_IsConsumedOnlyAfterTheTransactionalRestoreSucceeds()
+    {
+        var source = await ReadAppFileAsync("ViewModels", "MainViewModel.BulkUndo.cs");
+
+        var peekIndex = source.IndexOf("_undoService.Peek()", StringComparison.Ordinal);
+        var writeIndex = source.IndexOf("CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes, hardDeleteIds)", StringComparison.Ordinal);
+        var consumeIndex = source.IndexOf("_undoService.Consume(operation)", StringComparison.Ordinal);
+        Assert.True(peekIndex >= 0);
+        Assert.True(writeIndex > peekIndex);
+        Assert.True(consumeIndex > writeIndex);
+        Assert.Contains("operation.CreatedEventIds.Reverse()", source);
+    }
+
+    [Fact]
+    public async Task RecurrenceMutations_RecordCreatedRowsForUndo()
+    {
+        var source = await ReadAppFileAsync("ViewModels", "MainViewModel.Recurrence.cs");
+
+        Assert.Contains("createdIds.Add(future.Id)", source);
+        Assert.Contains("createdIds.Add(moved.Id)", source);
+        Assert.Contains("return created ? [candidate.Id] : []", source);
+        Assert.Contains("return [tombstone.Id]", source);
+        Assert.Contains("LoadRecurrenceUndoSnapshotsAsync", source);
+    }
+
+    [Fact]
+    public async Task CsvExport_NeutralizesSpreadsheetFormulaPrefixesIncludingFullWidthForms()
     {
         var source = await ReadAppFileAsync("Services", "CsvCellSanitizer.cs");
 
         Assert.Contains("IsFormulaPrefix", source);
-        Assert.Contains("'", source);
+        Assert.Contains("＝", source);
+        Assert.Contains("＋", source);
+        Assert.Contains("－", source);
+        Assert.Contains("＠", source);
     }
 
     private static Task<string> ReadAppFileAsync(params string[] relativePath)
