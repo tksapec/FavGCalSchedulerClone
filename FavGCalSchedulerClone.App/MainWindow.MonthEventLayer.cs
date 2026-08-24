@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media;
 using FavGCalSchedulerClone.App.Controls;
 using FavGCalSchedulerClone.App.Models;
 
@@ -7,6 +8,22 @@ namespace FavGCalSchedulerClone.App;
 
 public partial class MainWindow
 {
+    private async void MonthDayList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        await RunUiActionAsync(async () =>
+        {
+            if (FindMonthEventLayer(e.OriginalSource) is { } layer
+                && layer.HitTestSegment(e.GetPosition(layer)) is { Event: not null })
+            {
+                e.Handled = true;
+                return;
+            }
+
+            _viewModel.SelectedEvent = null;
+            await ShowScheduleDialogAsync();
+        }, nameof(MonthDayList_MouseDoubleClick));
+    }
+
     private async void MonthEventLayer_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         await RunUiActionAsync(async () =>
@@ -84,5 +101,21 @@ public partial class MainWindow
         _viewModel.SelectEventSegment(segment);
         e.Handled = true;
         ShowCalendarContextMenu(layer);
+    }
+
+    private static MonthEventLayer? FindMonthEventLayer(object? source)
+    {
+        var current = source as DependencyObject;
+        while (current is not null)
+        {
+            if (current is MonthEventLayer layer)
+            {
+                return layer;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return null;
     }
 }

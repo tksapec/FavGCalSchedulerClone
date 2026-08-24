@@ -25,6 +25,8 @@ public partial class MainWindow
             return;
         }
 
+        DayList.MouseDoubleClick -= DayList_MouseDoubleClick;
+        DayList.MouseDoubleClick += MonthDayList_MouseDoubleClick;
         DayList.ItemTemplate = CreateFastMonthDayTemplate();
         _monthViewFastTemplateInstalled = true;
     }

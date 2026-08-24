@@ -50,6 +50,19 @@ public sealed class MonthViewFastPathSourceTests
     }
 
     [Fact]
+    public async Task MonthView_ReplacesTheOriginalDayListDoubleClickHandlerWithMonthAwareHandling()
+    {
+        var sources = await ReadMainWindowSourcesAsync();
+
+        Assert.Contains("DayList.MouseDoubleClick -= DayList_MouseDoubleClick", sources);
+        Assert.Contains("DayList.MouseDoubleClick += MonthDayList_MouseDoubleClick", sources);
+        Assert.Contains("FindMonthEventLayer(e.OriginalSource)", sources);
+        Assert.Contains("layer.HitTestSegment(e.GetPosition(layer))", sources);
+        Assert.Contains("e.Handled = true", sources);
+        Assert.Contains("await ShowScheduleDialogAsync()", sources);
+    }
+
+    [Fact]
     public async Task WeekView_KeepsExistingPerSegmentControls()
     {
         var xaml = await File.ReadAllTextAsync(MainWindowXamlPath);
