@@ -36,6 +36,12 @@ internal static class GoogleCalendarTimeZone
         out DateTimeOffset result)
     {
         var unspecified = DateTime.SpecifyKind(wallClock, DateTimeKind.Unspecified);
+        if (string.IsNullOrWhiteSpace(timeZoneId) && preferredOffset is { } explicitOffset)
+        {
+            result = new DateTimeOffset(unspecified, explicitOffset);
+            return true;
+        }
+
         if (!TryResolveTimeZone(timeZoneId, out var timeZone) || timeZone.IsInvalidTime(unspecified))
         {
             result = default;
