@@ -128,6 +128,27 @@ public sealed partial class MainViewModel
             }
         }
 
+        foreach (var createdId in operation.CreatedEventIds)
+        {
+            var current = await _repository.FindMasterByIdAsync(createdId);
+            if (current is null)
+            {
+                continue;
+            }
+
+            if (!current.IsDeleted && !string.IsNullOrWhiteSpace(current.GoogleEventId))
+            {
+                var tombstone = UndoService.Clone(current);
+                tombstone.Id = Guid.NewGuid().ToString("N");
+                tombstone.IsDeleted = true;
+                tombstone.IsDirty = true;
+                tombstone.LastSyncedAt = null;
+                writes.Add(tombstone);
+            }
+
+            hardDeleteIds.Add(createdId);
+        }
+
         await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes, hardDeleteIds);
         if (_undoService.Consume(operation))
         {
@@ -228,9 +249,12 @@ public sealed partial class MainViewModel
             .ToArray();
     }
 
-    private void CaptureUndo(string description, IEnumerable<CalendarEvent?> beforeEvents)
+    private void CaptureUndo(
+        string description,
+        IEnumerable<CalendarEvent?> beforeEvents,
+        IEnumerable<string>? createdEventIds = null)
     {
-        _undoService.Capture(description, beforeEvents);
+        _undoService.Capture(description, beforeEvents, createdEventIds);
         NotifyUndoStateChanged();
     }
 
