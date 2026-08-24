@@ -694,7 +694,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         }
     }
 
-    private SqliteConnection OpenConnection()
+    internal SqliteConnection OpenConnection()
     {
         lock (_maintenanceLock)
         {
