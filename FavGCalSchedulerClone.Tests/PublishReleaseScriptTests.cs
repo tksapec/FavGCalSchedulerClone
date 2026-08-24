@@ -8,12 +8,20 @@ public sealed class PublishReleaseScriptTests
         "scripts", "publish-release.ps1"));
 
     [Fact]
-    public async Task PublishScript_RemovesExistingPublishDirectoryBeforePublishing()
+    public async Task PublishScript_StagesSuccessfulOutputBeforeReplacingPublishedRelease()
     {
         var script = await File.ReadAllTextAsync(ScriptPath);
 
-        Assert.Contains("Test-Path -LiteralPath $publishDirectory", script);
-        Assert.Contains("[System.IO.Directory]::Delete($publishDirectory, $true)", script);
-        Assert.Contains("-o $publishDirectory", script);
+        Assert.Contains("$stagingPublishDirectory", script);
+        Assert.Contains("-o $stagingPublishDirectory", script);
+        Assert.DoesNotContain("-o $publishDirectory", script);
+        Assert.Contains("[System.IO.Directory]::Move($stagingPublishDirectory, $publishDirectory)", script);
+
+        var publishExitCheck = script.IndexOf("Publish failed with exit code", StringComparison.Ordinal);
+        var deletePublished = script.IndexOf("[System.IO.Directory]::Delete($publishDirectory, $true)", StringComparison.Ordinal);
+        var moveStaged = script.IndexOf("[System.IO.Directory]::Move($stagingPublishDirectory, $publishDirectory)", StringComparison.Ordinal);
+        Assert.True(publishExitCheck >= 0);
+        Assert.True(deletePublished > publishExitCheck);
+        Assert.True(moveStaged > deletePublished);
     }
 }
