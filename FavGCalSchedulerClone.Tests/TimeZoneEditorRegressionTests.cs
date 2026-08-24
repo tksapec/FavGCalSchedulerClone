@@ -41,4 +41,25 @@ public sealed class TimeZoneEditorRegressionTests
         Assert.Equal("America/New_York", edited.StartTimeZoneId);
         Assert.Equal("America/New_York", edited.EndTimeZoneId);
     }
+
+    [Fact]
+    public async Task SaveCurrentEventAsync_NewTimedEventStoresLocalIanaTimeZone()
+    {
+        var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
+        await repository.InitializeAsync();
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        await viewModel.InitializeAsync();
+        viewModel.BeginNewEvent(new DateTime(2026, 8, 24), new DateTime(2026, 8, 24, 8, 0, 0));
+        viewModel.Title = "Local timed event";
+        viewModel.StartDate = new DateTime(2026, 8, 24);
+        viewModel.EndDate = new DateTime(2026, 8, 24);
+        viewModel.StartTime = "09:00";
+        viewModel.EndTime = "10:00";
+
+        await viewModel.SaveCurrentEventAsync();
+
+        var stored = Assert.Single(await repository.LoadDirtyEventsAsync());
+        Assert.Equal(GoogleCalendarTimeZone.LocalIanaId, stored.StartTimeZoneId);
+        Assert.Equal(GoogleCalendarTimeZone.LocalIanaId, stored.EndTimeZoneId);
+    }
 }
