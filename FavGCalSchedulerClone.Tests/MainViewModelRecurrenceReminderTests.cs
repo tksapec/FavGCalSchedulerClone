@@ -81,6 +81,42 @@ public sealed class MainViewModelRecurrenceReminderTests
     }
 
     [Fact]
+    public async Task SaveCurrentEventAsync_ThisOccurrence_ReplacesOccurrenceWithoutExcludingItFromMaster()
+    {
+        var repository = await CreateRepositoryAsync();
+        var master = CreateDailyMaster("series-single");
+        await repository.SaveEventAsync(master);
+        var viewModel = await CreateViewModelAsync(repository);
+        var occurrenceDate = new DateTime(2026, 5, 12);
+        var occurrence = await SelectOccurrenceAsync(viewModel, occurrenceDate);
+        Assert.True(occurrence.IsGeneratedOccurrence);
+
+        viewModel.Title = "Moved standup";
+        viewModel.Description = occurrence.Description ?? "";
+        viewModel.Location = occurrence.Location ?? "";
+        viewModel.StartDate = occurrence.Start.Date;
+        viewModel.EndDate = occurrence.End.Date;
+        viewModel.StartTime = "15:00";
+        viewModel.EndTime = "16:00";
+        viewModel.IsAllDay = false;
+
+        await viewModel.SaveCurrentEventAsync(RecurrenceEditScope.ThisOccurrence);
+
+        var storedMaster = await repository.FindMasterByIdAsync(master.Id);
+        Assert.NotNull(storedMaster);
+        Assert.DoesNotContain("EXDATE", storedMaster!.RecurrenceJson ?? "", StringComparison.OrdinalIgnoreCase);
+
+        await viewModel.NavigateToDateAsync(occurrenceDate);
+        var edited = Assert.Single(
+            viewModel.CalendarDays.Single(day => day.Date == occurrenceDate).Segments,
+            segment => segment.Event?.Title == "Moved standup");
+        Assert.Equal(15, edited.Event!.Start.Hour);
+        Assert.DoesNotContain(
+            viewModel.CalendarDays.Single(day => day.Date == occurrenceDate).Segments,
+            segment => segment.Event?.Title == "Daily standup");
+    }
+
+    [Fact]
     public void CloneEventForEditing_DeepCopiesGoogleReminderMetadata()
     {
         var source = CreateDailyMaster("clone-source");
