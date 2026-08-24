@@ -204,9 +204,14 @@ public sealed partial class MainViewModel
         candidate.LastSyncedAt = null;
         if (candidate.IsRecurrenceException)
         {
+            // An occurrence cannot remain a recurrence exception after it is moved to
+            // a different calendar from its parent series. Recreate it as a standalone
+            // event in the destination calendar and delete the old remote occurrence.
+            candidate.IsRecurrenceException = false;
             candidate.RecurringEventId = null;
             candidate.RecurringParentId = null;
             candidate.OriginalStart = null;
+            candidate.RecurrenceJson = null;
         }
 
         return [tombstone, candidate];
