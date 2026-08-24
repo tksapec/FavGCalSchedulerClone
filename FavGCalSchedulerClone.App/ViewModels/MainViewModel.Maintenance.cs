@@ -5,6 +5,7 @@ namespace FavGCalSchedulerClone.App.ViewModels;
 public sealed partial class MainViewModel
 {
     private readonly ReminderNotificationService? _reminderService;
+    private int _databaseMaintenanceInProgress;
 
     public MainViewModel(
         CalendarRepository repository,
