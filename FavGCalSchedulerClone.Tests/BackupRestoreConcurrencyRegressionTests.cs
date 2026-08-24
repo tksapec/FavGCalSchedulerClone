@@ -1,7 +1,10 @@
+using System.IO.Compression;
 using System.Reflection;
+using System.Text.Json;
 using FavGCalSchedulerClone.App.Models;
 using FavGCalSchedulerClone.App.Services;
 using FavGCalSchedulerClone.App.ViewModels;
+using Microsoft.Data.Sqlite;
 
 namespace FavGCalSchedulerClone.Tests;
 
@@ -62,6 +65,56 @@ public sealed class BackupRestoreConcurrencyRegressionTests
     }
 
     [Fact]
+    public async Task RestoreAllCalendarsAsync_WhenPreflightFails_ResumesReminderAndLeavesCurrentDatabaseUsable()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"restore-preflight-failure-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var invalidDatabasePath = Path.Combine(directory, "invalid.db");
+        var targetPath = Path.Combine(directory, "calendar.db");
+        var backupPath = Path.Combine(directory, "backup.zip");
+        var backupService = new BackupService();
+
+        try
+        {
+            await CreateMigrationFailureBackupAsync(invalidDatabasePath, backupPath);
+
+            var targetRepository = new CalendarRepository(targetPath);
+            await targetRepository.InitializeAsync();
+            await targetRepository.SaveSettingsAsync(new AppSettings { StartupTabIndex = 6 });
+            using var reminderService = new ReminderNotificationService(targetRepository, new RecordingNotifier());
+            await reminderService.StartAsync();
+            var viewModel = new MainViewModel(
+                targetRepository,
+                new GoogleCalendarSyncService(targetRepository),
+                backupService,
+                new CalendarCsvService(),
+                new FavGCalSchedulerImportService(targetRepository),
+                logger: null,
+                reminderService: reminderService);
+            await viewModel.InitializeAsync();
+
+            await Assert.ThrowsAnyAsync<Exception>(() => viewModel.RestoreAllCalendarsAsync(backupPath));
+
+            Assert.True(reminderService.IsRunning);
+            Assert.Equal(6, (await targetRepository.LoadSettingsAsync()).StartupTabIndex);
+            var maintenanceField = typeof(MainViewModel).GetField(
+                "_databaseMaintenanceInProgress",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(maintenanceField);
+            Assert.Equal(0, Assert.IsType<int>(maintenanceField!.GetValue(viewModel)));
+            reminderService.Stop();
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RestoreImplementation_UsesReminderPauseAndFinallyResume()
     {
         var sourcePath = Path.GetFullPath(Path.Combine(
@@ -73,6 +126,36 @@ public sealed class BackupRestoreConcurrencyRegressionTests
         Assert.Contains("await _reminderService.PauseForMaintenanceAsync()", source);
         Assert.Contains("finally", source);
         Assert.Contains("await _reminderService!.ResumeAfterMaintenanceAsync(reminderWasRunning)", source);
+    }
+
+    private static async Task CreateMigrationFailureBackupAsync(string databasePath, string backupPath)
+    {
+        await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString()))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE events (id TEXT PRIMARY KEY);
+                CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                CREATE TABLE tags (name TEXT PRIMARY KEY, color TEXT NOT NULL, is_visible INTEGER NOT NULL, priority INTEGER NOT NULL);
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        SqliteConnection.ClearAllPools();
+        using var archive = ZipFile.Open(backupPath, ZipArchiveMode.Create);
+        var databaseEntry = archive.CreateEntry(BackupService.DatabaseEntryName);
+        await using (var source = new FileStream(databasePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+        await using (var destination = databaseEntry.Open())
+        {
+            await source.CopyToAsync(destination);
+        }
+
+        var manifestEntry = archive.CreateEntry(BackupService.ManifestEntryName);
+        await using var manifestStream = manifestEntry.Open();
+        await JsonSerializer.SerializeAsync(
+            manifestStream,
+            new BackupManifest("FavGCalSchedulerClone", BackupService.FormatVersion, DateTimeOffset.Now, Path.GetFileName(databasePath)));
     }
 
     private sealed class RecordingNotifier : IReminderNotifier
