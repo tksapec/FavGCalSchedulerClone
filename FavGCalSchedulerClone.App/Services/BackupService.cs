@@ -84,7 +84,13 @@ public sealed class BackupService
         var backupDirectory = Path.GetDirectoryName(Path.GetFullPath(databasePath))!;
         var rollbackPath = Path.Combine(backupDirectory, $"{Path.GetFileName(databasePath)}.restore-backup-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}");
         var tempRestorePath = Path.Combine(backupDirectory, $"{Path.GetFileName(databasePath)}.restore-{Guid.NewGuid():N}.tmp");
+        var databaseWalPath = databasePath + "-wal";
+        var databaseShmPath = databasePath + "-shm";
+        var rollbackWalPath = rollbackPath + "-wal";
+        var rollbackShmPath = rollbackPath + "-shm";
         var currentMoved = false;
+        var walMoved = false;
+        var shmMoved = false;
 
         try
         {
@@ -106,6 +112,18 @@ public sealed class BackupService
                 currentMoved = true;
             }
 
+            if (File.Exists(databaseWalPath))
+            {
+                await MoveFileWithRetryAsync(databaseWalPath, rollbackWalPath, overwrite: false, cancellationToken);
+                walMoved = true;
+            }
+
+            if (File.Exists(databaseShmPath))
+            {
+                await MoveFileWithRetryAsync(databaseShmPath, rollbackShmPath, overwrite: false, cancellationToken);
+                shmMoved = true;
+            }
+
             await MoveFileWithRetryAsync(tempRestorePath, databasePath, overwrite: true, cancellationToken);
             return new RestoreResult(databasePath, currentMoved ? rollbackPath : null);
         }
@@ -121,6 +139,16 @@ public sealed class BackupService
             if (currentMoved && !File.Exists(databasePath) && File.Exists(rollbackPath))
             {
                 await MoveFileWithRetryAsync(rollbackPath, databasePath, overwrite: false, cancellationToken);
+            }
+
+            if (walMoved && !File.Exists(databaseWalPath) && File.Exists(rollbackWalPath))
+            {
+                await MoveFileWithRetryAsync(rollbackWalPath, databaseWalPath, overwrite: false, cancellationToken);
+            }
+
+            if (shmMoved && !File.Exists(databaseShmPath) && File.Exists(rollbackShmPath))
+            {
+                await MoveFileWithRetryAsync(rollbackShmPath, databaseShmPath, overwrite: false, cancellationToken);
             }
 
             throw;
