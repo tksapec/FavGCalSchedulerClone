@@ -34,6 +34,23 @@ public sealed class RecurrenceSplitRegressionTests
         Assert.Contains("COUNT=4", result);
     }
 
+    [Fact]
+    public void SplitCount_IncludesExcludedRRuleOccurrencesBeforeSplitPoint()
+    {
+        var master = CreateMaster(
+            "[\"RRULE:FREQ=DAILY;COUNT=5\",\"EXDATE:20260102T090000Z\"]",
+            day: 1);
+        var splitStart = new DateTimeOffset(2026, 1, 4, 9, 0, 0, TimeSpan.Zero);
+
+        var source = RecurrenceRuleHelper.BuildSplitSourceRecurrenceJson(master, splitStart);
+        var future = RecurrenceRuleHelper.BuildSplitFutureRecurrenceJson(master, splitStart);
+
+        Assert.Contains("COUNT=3", source);
+        Assert.Contains("EXDATE:20260102T090000Z", source);
+        Assert.Contains("COUNT=2", future);
+        Assert.Contains("EXDATE:20260102T090000Z", future);
+    }
+
     private static CalendarEvent CreateMaster(string recurrenceJson, int day = 5) => new()
     {
         Id = "split-master",
