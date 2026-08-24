@@ -275,14 +275,14 @@ public sealed partial class MainViewModel
         catch (Exception ex) when (reportErrors)
         {
             Debug.WriteLine(ex);
-            await _syncService.RecordFailedSyncAsync(ex.Message, CreateSettingsSnapshot().EnableSyncDiagnostics);
+            await RecordFailedSyncSafelyAsync(ex);
             Status = "同期に失敗しました。Google同期診断を確認してください。";
             throw;
         }
         catch (Exception ex) when (!reportErrors)
         {
             Debug.WriteLine(ex);
-            await _syncService.RecordFailedSyncAsync(ex.Message, CreateSettingsSnapshot().EnableSyncDiagnostics);
+            await RecordFailedSyncSafelyAsync(ex);
             Status = $"同期に失敗しました。Google同期診断を確認してください。未同期の変更は保持されています: {ex.Message}";
             return null;
         }
@@ -290,12 +290,48 @@ public sealed partial class MainViewModel
         {
             Interlocked.Exchange(ref _syncInProgress, 0);
             IsSynchronizing = false;
-            await RefreshOperationalStatusAsync(null);
             var pendingInvocationKind = Interlocked.Exchange(ref _pendingSyncInvocationKind, NoPendingSyncInvocationKind);
+            await RefreshOperationalStatusSafelyAsync();
             if (pendingInvocationKind != NoPendingSyncInvocationKind)
             {
-                await SynchronizeAsync(reportErrors: false, (SyncInvocationKind)pendingInvocationKind);
+                try
+                {
+                    await SynchronizeAsync(reportErrors: false, (SyncInvocationKind)pendingInvocationKind);
+                }
+                catch (Exception rerunEx)
+                {
+                    Debug.WriteLine(rerunEx);
+                    _logger?.LogError(rerunEx, "Queued Google calendar sync rerun failed.");
+                }
             }
+        }
+    }
+
+    private async Task RecordFailedSyncSafelyAsync(Exception sourceException)
+    {
+        try
+        {
+            await _syncService.RecordFailedSyncAsync(
+                sourceException.Message,
+                CreateSettingsSnapshot().EnableSyncDiagnostics);
+        }
+        catch (Exception diagnosticsEx)
+        {
+            Debug.WriteLine(diagnosticsEx);
+            _logger?.LogError(diagnosticsEx, "Failed to persist Google sync diagnostics.");
+        }
+    }
+
+    private async Task RefreshOperationalStatusSafelyAsync()
+    {
+        try
+        {
+            await RefreshOperationalStatusAsync(null);
+        }
+        catch (Exception statusEx)
+        {
+            Debug.WriteLine(statusEx);
+            _logger?.LogError(statusEx, "Failed to refresh operational status after Google sync.");
         }
     }
 
