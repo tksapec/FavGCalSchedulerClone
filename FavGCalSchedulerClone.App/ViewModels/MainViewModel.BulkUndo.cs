@@ -105,6 +105,9 @@ public sealed partial class MainViewModel
 
         foreach (var snapshot in operation.BeforeEvents)
         {
+            var current = await _repository.FindMasterByIdAsync(snapshot.Id);
+            await CreateDestinationDeleteForSyncedMoveAsync(current, snapshot);
+
             var restored = UndoService.Clone(snapshot);
             restored.IsDirty = true;
             restored.LastSyncedAt = null;
@@ -139,6 +142,24 @@ public sealed partial class MainViewModel
         return events;
     }
 
+    private async Task CreateDestinationDeleteForSyncedMoveAsync(CalendarEvent? current, CalendarEvent before)
+    {
+        if (current is null
+            || string.IsNullOrWhiteSpace(current.GoogleEventId)
+            || string.Equals(current.CalendarId, before.CalendarId, StringComparison.Ordinal)
+            || string.Equals(current.GoogleEventId, before.GoogleEventId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var destinationTombstone = UndoService.Clone(current);
+        destinationTombstone.Id = Guid.NewGuid().ToString("N");
+        destinationTombstone.IsDeleted = true;
+        destinationTombstone.IsDirty = true;
+        destinationTombstone.LastSyncedAt = null;
+        await _repository.SaveEventAsync(destinationTombstone);
+    }
+
     private async Task RemoveUndoMoveTombstonesAsync(CalendarEvent restored)
     {
         if (string.IsNullOrWhiteSpace(restored.GoogleEventId))
@@ -146,8 +167,11 @@ public sealed partial class MainViewModel
             return;
         }
 
-        var dirtyEvents = await _repository.LoadDirtyEventsAsync();
-        foreach (var tombstone in dirtyEvents.Where(item =>
+        var candidates = await _repository.LoadEventsAsync(
+            restored.Start.AddDays(-1),
+            restored.End.AddDays(1),
+            includeDeleted: true);
+        foreach (var tombstone in candidates.Where(item =>
                      item.Id != restored.Id
                      && item.IsDeleted
                      && string.Equals(item.CalendarId, restored.CalendarId, StringComparison.Ordinal)
