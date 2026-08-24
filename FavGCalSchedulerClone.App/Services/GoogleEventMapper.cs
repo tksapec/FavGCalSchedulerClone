@@ -267,7 +267,7 @@ public static class GoogleEventMapper
         return new EventDateTime
         {
             DateTimeDateTimeOffset = value,
-            TimeZone = string.IsNullOrWhiteSpace(timeZoneId) ? GoogleCalendarTimeZone.LocalIanaId : timeZoneId
+            TimeZone = string.IsNullOrWhiteSpace(timeZoneId) ? null : timeZoneId
         };
     }
 }
