@@ -15,6 +15,8 @@ public sealed class CalendarEvent
     public string? Location { get; set; }
     public DateTimeOffset Start { get; set; }
     public DateTimeOffset End { get; set; }
+    public string? StartTimeZoneId { get; set; }
+    public string? EndTimeZoneId { get; set; }
     public bool IsAllDay { get; set; }
     public string? ColorId { get; set; }
     public string? RecurrenceJson { get; set; }
