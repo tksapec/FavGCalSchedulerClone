@@ -46,7 +46,7 @@ internal static class SettingsDialog
         appPage.Children.Add(new TextBlock { Text = "新規スケジュールの通知時間の既定値", Margin = new Thickness(0, 10, 0, 4) });
         appPage.Children.Add(defaultReminder);
         var updateHolidays = new Button { Content = "祝日データをオンライン更新", Width = 210, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 12, 0, 0) };
-        updateHolidays.Click += async (_, _) =>
+        updateHolidays.Click += (_, _) => DialogAsyncGuard.Run(window, async () =>
         {
             updateHolidays.IsEnabled = false;
             try
@@ -63,7 +63,7 @@ internal static class SettingsDialog
             {
                 updateHolidays.IsEnabled = true;
             }
-        };
+        }, "祝日データ更新");
         appPage.Children.Add(updateHolidays);
         tabs.Items.Add(Tab("アプリ設定", appPage));
 
@@ -157,20 +157,20 @@ internal static class SettingsDialog
         var historyPage = Page();
         var clearLocation = new Button { Content = "場所入力履歴の削除", Width = 180, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 8, 0, 22) };
         var clearTitle = new Button { Content = "件名入力履歴の削除", Width = 180, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 8, 0, 22) };
-        clearLocation.Click += async (_, _) =>
+        clearLocation.Click += (_, _) => DialogAsyncGuard.Run(window, async () =>
         {
             if (MessageBox.Show(window, "場所入力履歴を削除しますか。", "確認", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
             {
                 await request.ClearLocationHistoryAsync();
             }
-        };
-        clearTitle.Click += async (_, _) =>
+        }, "場所入力履歴削除");
+        clearTitle.Click += (_, _) => DialogAsyncGuard.Run(window, async () =>
         {
             if (MessageBox.Show(window, "件名入力履歴を削除しますか。", "確認", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
             {
                 await request.ClearTitleHistoryAsync();
             }
-        };
+        }, "件名入力履歴削除");
         historyPage.Children.Add(new TextBlock { Text = "場所入力履歴" });
         historyPage.Children.Add(clearLocation);
         historyPage.Children.Add(new TextBlock { Text = "件名入力履歴" });
@@ -197,7 +197,7 @@ internal static class SettingsDialog
         };
         testSound.Click += (_, _) => request.PlayPreviewSound(soundPath.Text, (int)volume.Value);
         stopSound.Click += (_, _) => request.StopPreviewSound();
-        testNotification.Click += async (_, _) =>
+        testNotification.Click += (_, _) => DialogAsyncGuard.Run(window, async () =>
         {
             var testSettings = new ReminderTestSettings(
                 soundEnabled.IsChecked == true,
@@ -210,7 +210,7 @@ internal static class SettingsDialog
                 "通知テスト",
                 MessageBoxButton.OK,
                 result.Succeeded ? MessageBoxImage.Information : MessageBoxImage.Warning);
-        };
+        }, "通知テスト");
         notifyPage.Children.Add(soundEnabled);
         notifyPage.Children.Add(soundPath);
         notifyPage.Children.Add(browseSound);
@@ -288,7 +288,6 @@ internal static class SettingsDialog
         settings.StartupCalendarViewMode = startupView.SelectedItem is CalendarViewMode mode ? mode : CalendarViewMode.Month;
         settings.StartupTodoTabIndex = startupTodo.SelectedIndex;
         settings.ConfirmBeforeDelete = confirmDelete.IsChecked == true;
-        settings.CloseButtonExitsApplication = false;
         settings.HideMainWindowWhileEditingSchedule = hideEditor.IsChecked == true;
         settings.ReuseLastScheduleInput = noReuse.IsChecked != true;
         settings.DefaultScheduleReminderMinutes = defaultReminder.SelectedValue as int?;
