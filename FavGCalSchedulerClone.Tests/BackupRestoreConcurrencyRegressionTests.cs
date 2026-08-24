@@ -51,7 +51,7 @@ public sealed class BackupRestoreConcurrencyRegressionTests
             new CalendarCsvService(),
             new FavGCalSchedulerImportService(targetRepository),
             logger: null,
-            reminderService);
+            reminderService: reminderService);
         await viewModel.InitializeAsync();
 
         await viewModel.RestoreAllCalendarsAsync(backupPath);
