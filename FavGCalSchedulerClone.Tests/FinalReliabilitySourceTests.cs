@@ -29,30 +29,37 @@ public sealed class FinalReliabilitySourceTests
 
         var leaseIndex = source.IndexOf("BeginMaintenanceAsync", StringComparison.Ordinal);
         var restoreIndex = source.IndexOf("RestoreBackupAsync", StringComparison.Ordinal);
+        var endMaintenanceIndex = source.IndexOf("EndMaintenance", restoreIndex, StringComparison.Ordinal);
         var initializeIndex = source.IndexOf("InitializeAsync", restoreIndex, StringComparison.Ordinal);
         Assert.True(leaseIndex >= 0 && restoreIndex > leaseIndex);
-        Assert.True(initializeIndex > restoreIndex);
-        Assert.Contains("EndMaintenance", source, StringComparison.Ordinal);
+        Assert.True(endMaintenanceIndex > restoreIndex);
+        Assert.True(initializeIndex > endMaintenanceIndex);
     }
 
     [Fact]
-    public async Task Repository_RejectsNewConnectionsDuringDatabaseMaintenance()
+    public async Task Repository_RejectsNewConnectionsDuringDatabaseMaintenanceAndAtomicWriterUsesTrackedConnection()
     {
-        var source = await ReadAppFileAsync("Services", "CalendarRepository.cs");
+        var repository = await ReadAppFileAsync("Services", "CalendarRepository.cs");
+        var atomicWriter = await ReadAppFileAsync("Services", "CalendarRepositoryAtomicWriter.cs");
 
-        Assert.Contains("BeginMaintenanceAsync", source, StringComparison.Ordinal);
-        Assert.Contains("_databaseMaintenanceRequested", source, StringComparison.Ordinal);
-        Assert.Contains("Database maintenance is in progress", source, StringComparison.Ordinal);
+        Assert.Contains("BeginMaintenanceAsync", repository, StringComparison.Ordinal);
+        Assert.Contains("_databaseMaintenanceRequested", repository, StringComparison.Ordinal);
+        Assert.Contains("Database maintenance is in progress", repository, StringComparison.Ordinal);
+        Assert.Contains("repository.OpenConnection()", atomicWriter, StringComparison.Ordinal);
+        Assert.DoesNotContain("new SqliteConnection", atomicWriter, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task ReminderLifetime_IsDisposedOnlyByTheDependencyInjectionContainer()
+    public async Task ReminderLifetime_DoubleDisposeRemainsIdempotent()
     {
         var mainWindow = await ReadAppFileAsync("MainWindow.xaml.cs");
+        var service = await ReadAppFileAsync("Services", "ReminderNotificationService.cs");
         var app = await ReadAppFileAsync("App.xaml.cs");
 
         Assert.Contains("_reminderService.Stop();", mainWindow, StringComparison.Ordinal);
-        Assert.DoesNotContain("_reminderService.Dispose();", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_reminderService.Dispose();", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("if (_disposed)", service, StringComparison.Ordinal);
+        Assert.Contains("_disposed = true;", service, StringComparison.Ordinal);
         Assert.Contains("_serviceProvider?.Dispose();", app, StringComparison.Ordinal);
     }
 
