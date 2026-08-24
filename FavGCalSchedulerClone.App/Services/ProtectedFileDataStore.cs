@@ -75,7 +75,7 @@ public sealed class ProtectedFileDataStore : IDataStore
                        FileAccess.Write,
                        FileShare.None,
                        bufferSize: 4096,
-                       FileOptions.WriteThrough))
+                       options: FileOptions.WriteThrough))
             {
                 stream.Write(protectedBytes);
                 stream.Flush(flushToDisk: true);
