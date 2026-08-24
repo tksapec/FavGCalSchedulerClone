@@ -51,16 +51,19 @@ public sealed partial class MainViewModel
         pasted.Start = pasted.Start.AddDays(dayShift);
         pasted.End = pasted.End.AddDays(dayShift);
         NormalizeTimedEventTimeZoneOffsets(pasted);
-        await _repository.SaveEventAsync(pasted);
 
         if (clipboard.Cut)
         {
             var source = clipboard.Event;
             source.IsDeleted = true;
             source.IsDirty = true;
-            await _repository.SaveEventAsync(source);
+            await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, [pasted, source]);
             _labelClipboard = null;
             OnPropertyChanged(nameof(CanPasteEventLabel));
+        }
+        else
+        {
+            await _repository.SaveEventAsync(pasted);
         }
 
         _pendingSelectedDate = targetDate.Date;
@@ -135,29 +138,9 @@ public sealed partial class MainViewModel
     private async Task SaveEventWithCalendarMoveAsync(CalendarEvent candidate, CalendarEvent? original)
     {
         NormalizeTimedEventTimeZoneOffsets(candidate);
-        if (original is not null
-            && !string.IsNullOrWhiteSpace(original.GoogleEventId)
-            && !string.Equals(original.CalendarId, candidate.CalendarId, StringComparison.Ordinal))
-        {
-            var tombstone = CloneEventForEditing(original);
-            tombstone.Id = Guid.NewGuid().ToString("N");
-            tombstone.IsDeleted = true;
-            tombstone.IsDirty = true;
-            tombstone.LastSyncedAt = null;
-            await _repository.SaveEventAsync(tombstone);
-
-            candidate.GoogleEventId = null;
-            candidate.LastSyncedGoogleEtag = null;
-            candidate.LastSyncedAt = null;
-            if (candidate.IsRecurrenceException)
-            {
-                candidate.RecurringEventId = null;
-                candidate.RecurringParentId = null;
-                candidate.OriginalStart = null;
-            }
-        }
-
-        await _repository.SaveEventAsync(candidate);
+        await CalendarRepositoryAtomicWriter.SaveEventsAsync(
+            _repository,
+            PrepareCalendarMoveWrites(candidate, original));
     }
 
     private static void NormalizeTimedEventTimeZoneOffsets(CalendarEvent calendarEvent)
