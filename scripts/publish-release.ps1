@@ -10,13 +10,14 @@ $publishDirectory = Join-Path $repositoryRoot 'publish'
 $intermediateDirectory = Join-Path $env:TEMP 'FavGCalSchedulerClone-publish-intermediate'
 $intermediateOutputDirectory = Join-Path $intermediateDirectory 'bin'
 $intermediateObjectDirectory = Join-Path $intermediateDirectory 'obj'
+$stagingPublishDirectory = Join-Path $intermediateDirectory 'publish'
 $selfContainedValue = $SelfContained.ToString().ToLowerInvariant()
 
 try
 {
-    if (Test-Path -LiteralPath $publishDirectory)
+    if (Test-Path -LiteralPath $intermediateDirectory)
     {
-        [System.IO.Directory]::Delete($publishDirectory, $true)
+        [System.IO.Directory]::Delete($intermediateDirectory, $true)
     }
 
     dotnet restore $projectPath -r win-x64 "-p:BaseIntermediateOutputPath=$intermediateObjectDirectory\"
@@ -30,7 +31,7 @@ try
         -r win-x64 `
         --self-contained:$selfContainedValue `
         --no-restore `
-        -o $publishDirectory `
+        -o $stagingPublishDirectory `
         "-p:BaseOutputPath=$intermediateOutputDirectory\" `
         "-p:BaseIntermediateOutputPath=$intermediateObjectDirectory\"
 
@@ -38,6 +39,12 @@ try
     {
         throw "Publish failed with exit code $LASTEXITCODE."
     }
+
+    if (Test-Path -LiteralPath $publishDirectory)
+    {
+        [System.IO.Directory]::Delete($publishDirectory, $true)
+    }
+    [System.IO.Directory]::Move($stagingPublishDirectory, $publishDirectory)
 }
 finally
 {
