@@ -65,7 +65,6 @@ public sealed class ProtectedFileDataStore : IDataStore
         var bytes = Encoding.UTF8.GetBytes(json);
         var protectedBytes = ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser);
         var path = GetPath(key);
-        DeleteStaleTemporaryFiles(path);
         var tempPath = $"{path}.{Guid.NewGuid():N}.tmp";
         try
         {
