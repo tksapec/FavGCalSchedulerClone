@@ -45,6 +45,8 @@ public static class GoogleEventMapper
             Location = googleEvent.Location,
             Start = start,
             End = end <= start ? start.AddHours(1) : end,
+            StartTimeZoneId = isAllDay ? null : googleEvent.Start?.TimeZone,
+            EndTimeZoneId = isAllDay ? null : googleEvent.End?.TimeZone,
             IsAllDay = isAllDay,
             ColorId = googleEvent.ColorId,
             RecurrenceJson = googleEvent.Recurrence is null ? null : JsonSerializer.Serialize(googleEvent.Recurrence),
@@ -80,8 +82,8 @@ public static class GoogleEventMapper
             Description = localEvent.Description,
             Location = localEvent.Location,
             ColorId = localEvent.ColorId,
-            Start = ToEventDateTime(localEvent.Start, localEvent.IsAllDay),
-            End = ToEventDateTime(localEvent.End, localEvent.IsAllDay),
+            Start = ToEventDateTime(localEvent.Start, localEvent.IsAllDay, localEvent.StartTimeZoneId),
+            End = ToEventDateTime(localEvent.End, localEvent.IsAllDay, localEvent.EndTimeZoneId),
             Status = localEvent.IsDeleted ? "cancelled" : "confirmed",
             Reminders = ToGoogleReminders(localEvent)
         };
@@ -93,7 +95,7 @@ public static class GoogleEventMapper
 
         if (localEvent.OriginalStart is { } originalStart)
         {
-            googleEvent.OriginalStartTime = ToEventDateTime(originalStart, localEvent.IsAllDay);
+            googleEvent.OriginalStartTime = ToEventDateTime(originalStart, localEvent.IsAllDay, localEvent.StartTimeZoneId);
         }
 
         return googleEvent;
@@ -122,7 +124,6 @@ public static class GoogleEventMapper
 
         var useDefault = reminders?.UseDefault == true;
         var popupSource = useDefault ? metadata.DefaultPopupMinutes : metadata.PopupMinutes;
-        var emailSource = useDefault ? metadata.DefaultEmailMinutes : metadata.EmailMinutes;
         if (popupSource.Count > 0)
         {
             metadata.AdoptedReminderMinutes = popupSource.Min();
@@ -158,6 +159,15 @@ public static class GoogleEventMapper
         if (localEvent.IsTodoLike)
         {
             return TodoReminderPolicy.CreateGoogleRemindersDisabled();
+        }
+
+        if (localEvent.GoogleReminderMetadata?.UseDefault == true)
+        {
+            return new Event.RemindersData
+            {
+                UseDefault = true,
+                Overrides = []
+            };
         }
 
         var reminders = new Event.RemindersData
@@ -247,7 +257,7 @@ public static class GoogleEventMapper
         return value.DateTimeDateTimeOffset ?? DateTimeOffset.Now;
     }
 
-    private static EventDateTime ToEventDateTime(DateTimeOffset value, bool isAllDay)
+    private static EventDateTime ToEventDateTime(DateTimeOffset value, bool isAllDay, string? timeZoneId)
     {
         if (isAllDay)
         {
@@ -257,7 +267,7 @@ public static class GoogleEventMapper
         return new EventDateTime
         {
             DateTimeDateTimeOffset = value,
-            TimeZone = GoogleCalendarTimeZone.LocalIanaId
+            TimeZone = string.IsNullOrWhiteSpace(timeZoneId) ? GoogleCalendarTimeZone.LocalIanaId : timeZoneId
         };
     }
 }
