@@ -46,7 +46,7 @@ public static class GoogleEventMapper
             Start = start,
             End = end <= start ? start.AddHours(1) : end,
             StartTimeZoneId = isAllDay ? null : googleEvent.Start?.TimeZone,
-            EndTimeZoneId = isAllDay ? null : googleEvent.End?.TimeZone,
+            EndTimeZoneId = isAllDay ? null : googleEvent.End?.TimeZone ?? googleEvent.Start?.TimeZone,
             IsAllDay = isAllDay,
             ColorId = googleEvent.ColorId,
             RecurrenceJson = googleEvent.Recurrence is null ? null : JsonSerializer.Serialize(googleEvent.Recurrence),
@@ -83,7 +83,7 @@ public static class GoogleEventMapper
             Location = localEvent.Location,
             ColorId = localEvent.ColorId,
             Start = ToEventDateTime(localEvent.Start, localEvent.IsAllDay, localEvent.StartTimeZoneId),
-            End = ToEventDateTime(localEvent.End, localEvent.IsAllDay, localEvent.EndTimeZoneId),
+            End = ToEventDateTime(localEvent.End, localEvent.IsAllDay, localEvent.EndTimeZoneId ?? localEvent.StartTimeZoneId),
             Status = localEvent.IsDeleted ? "cancelled" : "confirmed",
             Reminders = ToGoogleReminders(localEvent)
         };
