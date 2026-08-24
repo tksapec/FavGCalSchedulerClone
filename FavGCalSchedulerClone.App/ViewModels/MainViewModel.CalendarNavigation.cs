@@ -12,6 +12,7 @@ namespace FavGCalSchedulerClone.App.ViewModels;
 public sealed partial class MainViewModel
 {
     internal bool IsCalendarMonthCached(DateTime month) => TryGetCalendarCache(month) is not null;
+    internal TimeSpan CalendarPrefetchDelay { get; set; } = TimeSpan.FromMilliseconds(150);
 
     public async Task GoToTodayAsync()
     {
@@ -802,6 +803,11 @@ public sealed partial class MainViewModel
         var enteredPipeline = false;
         try
         {
+            if (CalendarPrefetchDelay > TimeSpan.Zero)
+            {
+                await Task.Delay(CalendarPrefetchDelay, cancellationToken);
+            }
+
             await _calendarPrefetchPipelineGate.WaitAsync(cancellationToken);
             enteredPipeline = true;
             cancellationToken.ThrowIfCancellationRequested();
@@ -837,22 +843,6 @@ public sealed partial class MainViewModel
                     () => BuildCalendarDataWindow(rangeStart, rangeEnd, context.WeekStartsOnMonday, dataVersion, storedEvents, cancellationToken),
                     cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
-
-                var centerKey = CreateCalendarCacheKey(request.Month, context);
-                CalendarRefreshSnapshot? centerSnapshot = null;
-                lock (_calendarCacheLock)
-                {
-                    if (!_calendarCache.ContainsKey(centerKey))
-                    {
-                        centerSnapshot = null;
-                    }
-                }
-                if (centerSnapshot is not null)
-                {
-                    // Defensive only: the visible refresh normally stores the center snapshot
-                    // before prefetch starts. Kept for clarity if that pipeline changes later.
-                    StoreCalendarCache(centerSnapshot, centerKey);
-                }
 
                 lock (_calendarCacheLock)
                 {
