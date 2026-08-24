@@ -129,9 +129,6 @@ public sealed partial class MainViewModel
         candidate.OriginalStart = SelectedEvent.OriginalStart ?? SelectedEvent.Start;
         candidate.IsRecurrenceException = true;
         candidate.RecurrenceJson = null;
-        master.RecurrenceJson = RecurrenceRuleHelper.AddExDate(master.RecurrenceJson, candidate.OriginalStart.Value, master.IsAllDay);
-        master.IsDirty = true;
-        await _repository.SaveEventAsync(master);
         await _repository.SaveEventAsync(candidate);
         SelectedEvent = candidate;
     }
