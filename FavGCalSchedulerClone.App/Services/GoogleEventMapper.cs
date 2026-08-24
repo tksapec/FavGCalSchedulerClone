@@ -76,14 +76,16 @@ public static class GoogleEventMapper
 
     public static Event ToGoogleEvent(LocalEvent localEvent)
     {
+        var startTimeZoneId = ResolveExportTimeZone(localEvent, localEvent.StartTimeZoneId);
+        var endTimeZoneId = ResolveExportTimeZone(localEvent, localEvent.EndTimeZoneId ?? localEvent.StartTimeZoneId);
         var googleEvent = new Event
         {
             Summary = localEvent.Title,
             Description = localEvent.Description,
             Location = localEvent.Location,
             ColorId = localEvent.ColorId,
-            Start = ToEventDateTime(localEvent.Start, localEvent.IsAllDay, localEvent.StartTimeZoneId),
-            End = ToEventDateTime(localEvent.End, localEvent.IsAllDay, localEvent.EndTimeZoneId ?? localEvent.StartTimeZoneId),
+            Start = ToEventDateTime(localEvent.Start, localEvent.IsAllDay, startTimeZoneId),
+            End = ToEventDateTime(localEvent.End, localEvent.IsAllDay, endTimeZoneId),
             Status = localEvent.IsDeleted ? "cancelled" : "confirmed",
             Reminders = ToGoogleReminders(localEvent)
         };
@@ -95,10 +97,25 @@ public static class GoogleEventMapper
 
         if (localEvent.OriginalStart is { } originalStart)
         {
-            googleEvent.OriginalStartTime = ToEventDateTime(originalStart, localEvent.IsAllDay, localEvent.StartTimeZoneId);
+            googleEvent.OriginalStartTime = ToEventDateTime(originalStart, localEvent.IsAllDay, startTimeZoneId);
         }
 
         return googleEvent;
+    }
+
+    private static string? ResolveExportTimeZone(LocalEvent localEvent, string? timeZoneId)
+    {
+        if (!string.IsNullOrWhiteSpace(timeZoneId))
+        {
+            return timeZoneId;
+        }
+
+        // A Google-sourced event that supplied only an explicit UTC offset must keep
+        // that representation on round-trip. Unsynced local events, however, need a
+        // named zone so Google can preserve wall-clock behavior across DST changes.
+        return string.IsNullOrWhiteSpace(localEvent.GoogleEventId)
+            ? GoogleCalendarTimeZone.LocalIanaId
+            : null;
     }
 
     private static GoogleReminderMetadata CreateReminderMetadata(
