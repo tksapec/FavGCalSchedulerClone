@@ -12,6 +12,7 @@ public sealed class ApplicationStartupService : IApplicationStartupService, IDis
     private readonly ReminderNotificationService _reminderService;
     private readonly DispatcherTimer _automaticSyncTimer;
     private readonly IAppLogger? _logger;
+    private bool _disposed;
 
     public ApplicationStartupService(MainViewModel viewModel, ReminderNotificationService reminderService, IAppLogger? logger = null)
     {
@@ -19,7 +20,7 @@ public sealed class ApplicationStartupService : IApplicationStartupService, IDis
         _reminderService = reminderService;
         _logger = logger;
         _automaticSyncTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
-        _automaticSyncTimer.Tick += async (_, _) => await _viewModel.RunAutomaticSyncIfDueAsync();
+        _automaticSyncTimer.Tick += AutomaticSyncTimer_Tick;
     }
 
     public async Task InitializeAsync(Window owner, Func<IReminderNotifier> notifierFactory)
@@ -64,13 +65,40 @@ public sealed class ApplicationStartupService : IApplicationStartupService, IDis
 
     public void Stop()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
         _automaticSyncTimer.Stop();
         _reminderService.Stop();
     }
 
     public void Dispose()
     {
-        Stop();
-        _reminderService.Dispose();
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _automaticSyncTimer.Stop();
+        _automaticSyncTimer.Tick -= AutomaticSyncTimer_Tick;
+        // ReminderNotificationService is a DI-managed singleton and is disposed by the
+        // service provider. Do not dispose it here as well; MainWindow may also have
+        // already stopped it during an explicit tray exit.
+    }
+
+    private async void AutomaticSyncTimer_Tick(object? sender, EventArgs e)
+    {
+        try
+        {
+            await _viewModel.RunAutomaticSyncIfDueAsync();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(ex);
+            _logger?.LogError(ex, "Automatic Google calendar sync failed.");
+        }
     }
 }
