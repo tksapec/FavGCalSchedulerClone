@@ -11,6 +11,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
 {
     private readonly string _databasePath;
     private readonly object _maintenanceLock = new();
+    private readonly AsyncLocal<int> _maintenanceAccessDepth = new();
     private bool _databaseMaintenanceRequested;
     private int _activeConnectionCount;
     private TaskCompletionSource<bool>? _connectionsDrained;
@@ -62,6 +63,32 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         {
             _databaseMaintenanceRequested = false;
             _connectionsDrained = null;
+        }
+    }
+
+    internal async Task RunWithMaintenanceAccessAsync(Func<Task> action)
+    {
+        _maintenanceAccessDepth.Value++;
+        try
+        {
+            await action();
+        }
+        finally
+        {
+            _maintenanceAccessDepth.Value--;
+        }
+    }
+
+    internal async Task<T> RunWithMaintenanceAccessAsync<T>(Func<Task<T>> action)
+    {
+        _maintenanceAccessDepth.Value++;
+        try
+        {
+            return await action();
+        }
+        finally
+        {
+            _maintenanceAccessDepth.Value--;
         }
     }
 
@@ -698,7 +725,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
     {
         lock (_maintenanceLock)
         {
-            if (_databaseMaintenanceRequested)
+            if (_databaseMaintenanceRequested && _maintenanceAccessDepth.Value == 0)
             {
                 throw new InvalidOperationException("Database maintenance is in progress.");
             }
