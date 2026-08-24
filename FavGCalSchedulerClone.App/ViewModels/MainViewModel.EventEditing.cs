@@ -174,6 +174,12 @@ public sealed partial class MainViewModel
         calendarEvent.Location = string.IsNullOrWhiteSpace(Location) ? null : Location.Trim();
         calendarEvent.CalendarId = ResolveEditorCalendarId();
         calendarEvent.IsAllDay = IsAllDay;
+        if (SelectedEvent is null && !IsAllDay)
+        {
+            calendarEvent.StartTimeZoneId = GoogleCalendarTimeZone.LocalIanaId;
+            calendarEvent.EndTimeZoneId = calendarEvent.StartTimeZoneId;
+        }
+
         var appReminderMinutes = IsAppReminderEnabled
             ? CalendarEvent.NormalizeReminderMinutes(AppReminderMinutesBeforeStart.Count > 0 ? AppReminderMinutesBeforeStart : ReminderMinutesBeforeStart is int appMinutes ? [appMinutes] : [])
             : [];
