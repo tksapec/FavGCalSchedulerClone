@@ -22,21 +22,26 @@ public sealed partial class MainViewModel
 
     public async Task<RestoreResult> RestoreAllCalendarsAsync(string backupZipPath)
     {
-        if (Volatile.Read(ref _syncInProgress) != 0)
+        if (Interlocked.CompareExchange(ref _databaseMaintenanceInProgress, 1, 0) != 0)
         {
-            throw new InvalidOperationException("Google同期中はバックアップをリストアできません。同期完了後に再実行してください。");
+            throw new InvalidOperationException("データベースのメンテナンス処理が既に実行中です。");
         }
 
         var reminderWasRunning = false;
         var reminderPaused = false;
-        if (_reminderService is not null)
-        {
-            reminderWasRunning = await _reminderService.PauseForMaintenanceAsync();
-            reminderPaused = true;
-        }
-
         try
         {
+            if (Volatile.Read(ref _syncInProgress) != 0)
+            {
+                throw new InvalidOperationException("Google同期中はバックアップをリストアできません。同期完了後に再実行してください。");
+            }
+
+            if (_reminderService is not null)
+            {
+                reminderWasRunning = await _reminderService.PauseForMaintenanceAsync();
+                reminderPaused = true;
+            }
+
             var result = await _backupService.RestoreBackupAsync(backupZipPath, _repository.DatabasePath);
             await InitializeAsync();
             Status = "バックアップからリストアしました。Google認証は必要に応じて再実行してください。";
@@ -44,9 +49,16 @@ public sealed partial class MainViewModel
         }
         finally
         {
-            if (reminderPaused)
+            try
             {
-                await _reminderService!.ResumeAfterMaintenanceAsync(reminderWasRunning);
+                if (reminderPaused)
+                {
+                    await _reminderService!.ResumeAfterMaintenanceAsync(reminderWasRunning);
+                }
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _databaseMaintenanceInProgress, 0);
             }
         }
     }
