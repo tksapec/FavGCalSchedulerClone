@@ -66,18 +66,18 @@ public sealed class ReminderMaintenancePauseTests
 
     private sealed class BlockingNotifier : IReminderNotifier
     {
-        private readonly TaskCompletionSource _entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public TaskCompletionSource Entered => _entered;
+        public TaskCompletionSource<bool> Entered => _entered;
 
         public async Task ShowAsync(ReminderNotification notification, CancellationToken cancellationToken = default)
         {
-            _entered.TrySetResult();
+            _entered.TrySetResult(true);
             await _release.Task.WaitAsync(cancellationToken);
         }
 
-        public void Release() => _release.TrySetResult();
+        public void Release() => _release.TrySetResult(true);
     }
 
     private sealed class RecordingNotifier : IReminderNotifier
