@@ -65,6 +65,57 @@ public sealed class BackupRestoreConcurrencyRegressionTests
     }
 
     [Fact]
+    public async Task RestoreAllCalendarsAsync_KeepsUnrelatedRepositoryAccessBlockedDuringViewModelReload()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"restore-reload-gate-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var sourcePath = Path.Combine(directory, "source.db");
+        var targetPath = Path.Combine(directory, "calendar.db");
+        var backupPath = Path.Combine(directory, "backup.zip");
+        var backupService = new BackupService();
+        var continueReload = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        try
+        {
+            var sourceRepository = new CalendarRepository(sourcePath);
+            await sourceRepository.InitializeAsync();
+            await sourceRepository.SaveSettingsAsync(new AppSettings { StartupTabIndex = 4 });
+            await backupService.CreateBackupAsync(sourcePath, backupPath);
+
+            var targetRepository = new CalendarRepository(targetPath);
+            await targetRepository.InitializeAsync();
+            await targetRepository.SaveSettingsAsync(new AppSettings { StartupTabIndex = 1 });
+            var viewModel = new MainViewModel(targetRepository, new GoogleCalendarSyncService(targetRepository));
+            await viewModel.InitializeAsync();
+
+            var reloadStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            viewModel.BeforeLoadCalendarSnapshotAsync = async (_, cancellationToken) =>
+            {
+                reloadStarted.TrySetResult(true);
+                await continueReload.Task.WaitAsync(cancellationToken);
+            };
+
+            var restoreTask = viewModel.RestoreAllCalendarsAsync(backupPath);
+            await reloadStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => targetRepository.LoadSettingsAsync());
+
+            continueReload.TrySetResult(true);
+            await restoreTask;
+            Assert.Equal(4, (await targetRepository.LoadSettingsAsync()).StartupTabIndex);
+        }
+        finally
+        {
+            continueReload.TrySetResult(true);
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RestoreAllCalendarsAsync_WhenPreflightFails_ResumesReminderAndLeavesCurrentDatabaseUsable()
     {
         var directory = Path.Combine(Path.GetTempPath(), $"restore-preflight-failure-{Guid.NewGuid():N}");
