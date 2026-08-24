@@ -181,10 +181,11 @@ public sealed partial class MainViewModel
             return;
         }
 
+        var writes = new List<CalendarEvent>();
         var original = CloneEventForEditing(master);
         original.RecurrenceJson = RecurrenceRuleHelper.BuildSplitSourceRecurrenceJson(master, splitStart);
         original.IsDirty = true;
-        await _repository.SaveEventAsync(original);
+        writes.Add(original);
 
         var future = CloneEventForEditing(master);
         future.Id = Guid.NewGuid().ToString("N");
@@ -204,7 +205,7 @@ public sealed partial class MainViewModel
         ApplySeriesEditValues(future, candidate, SelectedEvent);
         future.RecurrenceJson = RecurrenceRuleHelper.BuildSplitFutureRecurrenceJson(master, splitStart);
         future.IsDirty = true;
-        await _repository.SaveEventAsync(future);
+        writes.Add(future);
 
         foreach (var child in await _repository.LoadSeriesEventsAsync(master.Id, master.GoogleEventId))
         {
@@ -220,9 +221,10 @@ public sealed partial class MainViewModel
             moved.RecurringParentId = future.Id;
             moved.RecurringEventId = future.GoogleEventId;
             moved.IsDirty = true;
-            await _repository.SaveEventAsync(moved);
+            writes.Add(moved);
         }
 
+        await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes);
         SelectedEvent = future;
     }
 
@@ -266,8 +268,7 @@ public sealed partial class MainViewModel
         };
         master.RecurrenceJson = RecurrenceRuleHelper.AddExDate(master.RecurrenceJson, tombstone.OriginalStart.Value, master.IsAllDay);
         master.IsDirty = true;
-        await _repository.SaveEventAsync(master);
-        await _repository.SaveEventAsync(tombstone);
+        await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, [master, tombstone]);
     }
 
     private async Task DeleteEntireSeriesAsync()
@@ -278,15 +279,29 @@ public sealed partial class MainViewModel
         }
 
         var master = await ResolveSeriesMasterAsync(SelectedEvent);
+        var writes = new List<CalendarEvent>();
         if (master is not null)
         {
-            await _repository.DeleteEventAsync(master);
+            master.IsDeleted = true;
+            master.IsDirty = true;
+            writes.Add(master);
         }
 
         foreach (var child in await _repository.LoadSeriesEventsAsync(master?.Id ?? SelectedEvent.RecurringParentId, master?.GoogleEventId ?? SelectedEvent.RecurringEventId))
         {
-            await _repository.DeleteEventAsync(child);
+            child.IsDeleted = true;
+            child.IsDirty = true;
+            writes.Add(child);
         }
+
+        if (master is null && writes.Count == 0)
+        {
+            SelectedEvent.IsDeleted = true;
+            SelectedEvent.IsDirty = true;
+            writes.Add(SelectedEvent);
+        }
+
+        await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes);
     }
 
     private async Task DeleteThisAndFollowingAsync()
@@ -310,17 +325,22 @@ public sealed partial class MainViewModel
             return;
         }
 
+        var writes = new List<CalendarEvent>();
         master.RecurrenceJson = RecurrenceRuleHelper.BuildSplitSourceRecurrenceJson(master, splitStart);
         master.IsDirty = true;
-        await _repository.SaveEventAsync(master);
+        writes.Add(master);
 
         foreach (var child in await _repository.LoadSeriesEventsAsync(master.Id, master.GoogleEventId))
         {
             if (child.OriginalStart is not null && child.OriginalStart >= splitStart)
             {
-                await _repository.DeleteEventAsync(child);
+                child.IsDeleted = true;
+                child.IsDirty = true;
+                writes.Add(child);
             }
         }
+
+        await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes);
     }
 
     private async Task<CalendarEvent?> ResolveSeriesMasterAsync(CalendarEvent selectedEvent)
