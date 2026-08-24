@@ -41,7 +41,43 @@ public sealed class FavGCalSchedulerImportAtomicityTests
         }
     }
 
-    private static string CreateLegacyFolder()
+    [Fact]
+    public async Task ImportAsync_DuplicateGoogleIdsWithinSameImport_LinkToTheStagedEvent()
+    {
+        var sourceFolder = CreateLegacyFolder(recordCount: 2);
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        try
+        {
+            var repository = new CalendarRepository(dbPath);
+            await repository.InitializeAsync();
+            var service = new FavGCalSchedulerImportService(repository);
+
+            var result = await service.ImportAsync(new FavGCalImportOptions(
+                sourceFolder,
+                new Dictionary<string, string> { ["user@example.com"] = "primary" }));
+
+            Assert.Equal(1, result.ImportedCount);
+            Assert.Equal(1, result.LinkedExistingGoogleCount);
+            var events = await repository.LoadEventsAsync(
+                new DateTimeOffset(2026, 5, 16, 0, 0, 0, TimeZoneInfo.Local.BaseUtcOffset),
+                new DateTimeOffset(2026, 5, 17, 0, 0, 0, TimeZoneInfo.Local.BaseUtcOffset),
+                includeDeleted: true);
+            Assert.Single(events);
+        }
+        finally
+        {
+            if (Directory.Exists(sourceFolder))
+            {
+                Directory.Delete(sourceFolder, recursive: true);
+            }
+
+            DeleteIfExists(dbPath);
+            DeleteIfExists(dbPath + "-wal");
+            DeleteIfExists(dbPath + "-shm");
+        }
+    }
+
+    private static string CreateLegacyFolder(int recordCount = 1)
     {
         var folder = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(folder);
@@ -53,11 +89,11 @@ public sealed class FavGCalSchedulerImportAtomicityTests
             item0=.\FavSchedule1.favcal
             disp0=1
             """);
-        File.WriteAllBytes(Path.Combine(folder, "FavSchedule1.favcal"), CreateFavCalBytes());
+        File.WriteAllBytes(Path.Combine(folder, "FavSchedule1.favcal"), CreateFavCalBytes(recordCount));
         return folder;
     }
 
-    private static byte[] CreateFavCalBytes()
+    private static byte[] CreateFavCalBytes(int recordCount)
     {
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.Unicode);
@@ -67,6 +103,16 @@ public sealed class FavGCalSchedulerImportAtomicityTests
         WriteHeaderString(writer, "https://www.google.com/calendar/feeds/user%40example.com/private/full");
         writer.Write(new byte[32]);
 
+        for (var index = 0; index < recordCount; index++)
+        {
+            WriteEventRecord(writer);
+        }
+
+        return stream.ToArray();
+    }
+
+    private static void WriteEventRecord(BinaryWriter writer)
+    {
         writer.Write(new byte[] { 0x08, 0x00, 0x01, 0x00 });
         writer.Write((ushort)1);
         writer.Write((ushort)0);
@@ -80,7 +126,6 @@ public sealed class FavGCalSchedulerImportAtomicityTests
         WriteFavString(writer, "Body");
         writer.Write(0);
         WriteGoogleId(writer, "legacyevent123");
-        return stream.ToArray();
     }
 
     private static void WriteHeaderString(BinaryWriter writer, string value)
