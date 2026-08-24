@@ -23,6 +23,19 @@ public sealed class UndoService
         _lastOperation = new UndoOperation(description, snapshots);
     }
 
+    public UndoOperation? Peek() => _lastOperation;
+
+    public bool Consume(UndoOperation operation)
+    {
+        if (!ReferenceEquals(_lastOperation, operation))
+        {
+            return false;
+        }
+
+        _lastOperation = null;
+        return true;
+    }
+
     public UndoOperation? Pop()
     {
         var operation = _lastOperation;
