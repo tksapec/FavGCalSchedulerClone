@@ -47,10 +47,13 @@ public sealed partial class MainViewModel
             repositoryMaintenanceStarted = true;
             var result = await _backupService.RestoreBackupAsync(backupZipPath, _repository.DatabasePath);
 
-            // The file replacement has completed. Release the repository gate before
-            // re-initializing the restored database because InitializeAsync opens its
-            // own SQLite connection. The MainViewModel maintenance flag remains set,
-            // so Google sync still cannot restart during reinitialization.
+            // Keep the application's repository gate closed while migrations are applied
+            // to an older-but-valid backup. A temporary repository has an independent
+            // maintenance gate, so it can safely open the replaced file while all normal
+            // application repository access is still rejected.
+            var migrationRepository = new CalendarRepository(_repository.DatabasePath);
+            await migrationRepository.InitializeAsync();
+
             _repository.EndMaintenance();
             repositoryMaintenanceStarted = false;
 
