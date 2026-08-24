@@ -186,9 +186,30 @@ public sealed partial class MainViewModel
 
     private async Task<SyncResult?> SynchronizeAsync(bool reportErrors, SyncInvocationKind invocationKind)
     {
+        if (Volatile.Read(ref _databaseMaintenanceInProgress) != 0)
+        {
+            if (reportErrors)
+            {
+                Status = "データベースのリストア中はGoogle同期を開始できません。";
+            }
+            return null;
+        }
+
         if (Interlocked.Exchange(ref _syncInProgress, 1) != 0)
         {
             RequestSyncRerun(invocationKind);
+            return null;
+        }
+
+        // Close the race where restore starts after the first maintenance check but
+        // before this invocation acquires the sync-in-progress flag.
+        if (Volatile.Read(ref _databaseMaintenanceInProgress) != 0)
+        {
+            Interlocked.Exchange(ref _syncInProgress, 0);
+            if (reportErrors)
+            {
+                Status = "データベースのリストア中はGoogle同期を開始できません。";
+            }
             return null;
         }
 
