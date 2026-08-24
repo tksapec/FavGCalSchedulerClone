@@ -1,5 +1,6 @@
 using FavGCalSchedulerClone.App.Models;
 using FavGCalSchedulerClone.App.Services;
+using FavGCalSchedulerClone.App.ViewModels;
 using Google.Apis.Calendar.v3.Data;
 
 namespace FavGCalSchedulerClone.Tests;
@@ -7,11 +8,12 @@ namespace FavGCalSchedulerClone.Tests;
 public sealed class GoogleCalendarIdentityRegressionTests
 {
     [Fact]
-    public async Task SyncAsync_PreviouslySyncedEventWithMissingGoogleId_DoesNotInsertDuplicate()
+    public async Task SynchronizeDirtyOnlyAsync_PreviouslySyncedEventWithMissingGoogleId_DoesNotInsertDuplicate()
     {
         var repository = await CreateRepositoryAsync();
         var api = new RecordingGoogleCalendarApi();
         var settings = CreateSettings("work");
+        await repository.SaveSettingsAsync(settings);
         var local = new CalendarEvent
         {
             Id = "broken-link",
@@ -25,22 +27,25 @@ public sealed class GoogleCalendarIdentityRegressionTests
             DirtyFields = "Title"
         };
         await repository.SaveEventAsync(local);
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository, api));
+        await viewModel.InitializeAsync();
 
-        var result = await new GoogleCalendarSyncService(repository, api).SyncAsync(settings);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => viewModel.SynchronizeDirtyOnlyAsync());
 
+        Assert.Contains("Google Event ID", error.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(0, api.InsertCount);
-        Assert.Equal(1, result.Failed);
         var stored = Assert.IsType<CalendarEvent>(await repository.FindEventByIdAsync(local.Id));
         Assert.True(stored.IsDirty);
         Assert.Null(stored.GoogleEventId);
     }
 
     [Fact]
-    public async Task SyncAsync_GenuinelyNewLocalEvent_StillInsertsOnce()
+    public async Task SynchronizeDirtyOnlyAsync_GenuinelyNewLocalEvent_StillInsertsOnce()
     {
         var repository = await CreateRepositoryAsync();
         var api = new RecordingGoogleCalendarApi();
         var settings = CreateSettings("work");
+        await repository.SaveSettingsAsync(settings);
         var local = new CalendarEvent
         {
             Id = "new-local",
@@ -51,8 +56,10 @@ public sealed class GoogleCalendarIdentityRegressionTests
             IsDirty = true
         };
         await repository.SaveEventAsync(local);
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository, api));
+        await viewModel.InitializeAsync();
 
-        var result = await new GoogleCalendarSyncService(repository, api).SyncAsync(settings);
+        var result = await viewModel.SynchronizeDirtyOnlyAsync();
 
         Assert.Equal(1, api.InsertCount);
         Assert.Equal(0, result.Failed);
