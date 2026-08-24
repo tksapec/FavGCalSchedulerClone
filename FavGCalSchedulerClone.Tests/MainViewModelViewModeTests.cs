@@ -875,7 +875,6 @@ public sealed class MainViewModelViewModeTests
             loadCount++;
             return Task.CompletedTask;
         };
-        viewModel.BeforeRefreshTodos = () => { };
 
         await viewModel.SaveTagsAsync();
 
