@@ -50,6 +50,7 @@ public sealed partial class MainViewModel
         var dayShift = (targetDate.Date - clipboard.Event.Start.Date).Days;
         pasted.Start = pasted.Start.AddDays(dayShift);
         pasted.End = pasted.End.AddDays(dayShift);
+        NormalizeTimedEventTimeZoneOffsets(pasted);
         await _repository.SaveEventAsync(pasted);
 
         if (clipboard.Cut)
@@ -133,6 +134,7 @@ public sealed partial class MainViewModel
 
     private async Task SaveEventWithCalendarMoveAsync(CalendarEvent candidate, CalendarEvent? original)
     {
+        NormalizeTimedEventTimeZoneOffsets(candidate);
         if (original is not null
             && !string.IsNullOrWhiteSpace(original.GoogleEventId)
             && !string.Equals(original.CalendarId, candidate.CalendarId, StringComparison.Ordinal))
@@ -156,6 +158,31 @@ public sealed partial class MainViewModel
         }
 
         await _repository.SaveEventAsync(candidate);
+    }
+
+    private static void NormalizeTimedEventTimeZoneOffsets(CalendarEvent calendarEvent)
+    {
+        if (calendarEvent.IsAllDay)
+        {
+            return;
+        }
+
+        if (!GoogleCalendarTimeZone.TryCreateDateTimeOffset(
+                calendarEvent.Start.DateTime,
+                calendarEvent.StartTimeZoneId,
+                calendarEvent.Start.Offset,
+                out var normalizedStart)
+            || !GoogleCalendarTimeZone.TryCreateDateTimeOffset(
+                calendarEvent.End.DateTime,
+                calendarEvent.EndTimeZoneId ?? calendarEvent.StartTimeZoneId,
+                calendarEvent.End.Offset,
+                out var normalizedEnd))
+        {
+            throw new InvalidOperationException("予定のタイムゾーンで移動後の日時を解釈できません。DST切替時刻を確認してください。");
+        }
+
+        calendarEvent.Start = normalizedStart;
+        calendarEvent.End = normalizedEnd;
     }
 
     private CalendarEvent? BuildEditedEventAsync()
