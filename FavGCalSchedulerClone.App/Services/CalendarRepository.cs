@@ -343,16 +343,16 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
             FROM events
             WHERE calendar_id = $calendar_id
               AND title = $title
-              AND start_utc_ticks = $start_utc_ticks
-              AND end_utc_ticks = $end_utc_ticks
+              AND start = $start
+              AND end = $end
               AND COALESCE(location, '') = COALESCE($location, '')
               AND is_deleted = 0
             LIMIT 1
             """;
         command.Parameters.AddWithValue("$calendar_id", calendarEvent.CalendarId);
         command.Parameters.AddWithValue("$title", calendarEvent.Title);
-        command.Parameters.AddWithValue("$start_utc_ticks", calendarEvent.Start.UtcTicks);
-        command.Parameters.AddWithValue("$end_utc_ticks", calendarEvent.End.UtcTicks);
+        command.Parameters.AddWithValue("$start", calendarEvent.Start.ToString("O"));
+        command.Parameters.AddWithValue("$end", calendarEvent.End.ToString("O"));
         command.Parameters.AddWithValue("$location", (object?)calendarEvent.Location ?? DBNull.Value);
         return (await ReadEventsAsync(command)).FirstOrDefault();
     }
@@ -845,57 +845,27 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         await ExecuteAsync(connection, transaction, "CREATE INDEX IF NOT EXISTS ix_events_utc_recurring_event ON events(recurring_event_id, original_start_utc_ticks);");
         await ExecuteAsync(connection, transaction, "CREATE INDEX IF NOT EXISTS ix_events_recurring_master_start ON events(start) WHERE recurrence_json IS NOT NULL AND is_recurrence_exception = 0;");
         await ExecuteAsync(connection, transaction, "CREATE INDEX IF NOT EXISTS ix_events_utc_recurring_master_start ON events(start_utc_ticks) WHERE recurrence_json IS NOT NULL AND is_recurrence_exception = 0;");
-        await ExecuteAsync(connection, transaction, "CREATE INDEX IF NOT EXISTS ix_events_updated_at ON events(updated_at);");
-        await ExecuteAsync(connection, transaction, "CREATE INDEX IF NOT EXISTS ix_events_utc_updated_at ON events(updated_at_utc_ticks);");
-        await ExecuteAsync(connection, transaction, "CREATE INDEX IF NOT EXISTS ix_events_last_synced_at ON events(last_synced_at);");
-        await ExecuteAsync(connection, transaction, "CREATE INDEX IF NOT EXISTS ix_events_utc_last_synced_at ON events(last_synced_at_utc_ticks);");
+        await ExecuteAsync(connection, transaction, "CREATE INDEX IF NOT EXISTS ix_events_exception_original_start ON events(original_start) WHERE is_recurrence_exception = 1;");
+        await ExecuteAsync(connection, transaction, "CREATE INDEX IF NOT EXISTS ix_events_utc_exception_original_start ON events(original_start_utc_ticks) WHERE is_recurrence_exception = 1;");
+        await ExecuteAsync(connection, transaction, "CREATE INDEX IF NOT EXISTS ix_events_utc_dirty_updated ON events(updated_at_utc_ticks) WHERE is_dirty = 1;");
     }
 
-    private static async Task EnsureColumnAsync(
-        SqliteConnection connection,
-        SqliteTransaction transaction,
-        string table,
-        string column,
-        string definition)
+    private static bool HasGooglePopupReminder(GoogleReminderMetadata? metadata)
     {
-        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        await using (var command = connection.CreateCommand())
-        {
-            command.Transaction = transaction;
-            command.CommandText = $"PRAGMA table_info({table})";
-            await using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
-            {
-                columns.Add(reader.GetString(1));
-            }
-        }
-
-        if (columns.Contains(column))
-        {
-            return;
-        }
-
-        await using var alter = connection.CreateCommand();
-        alter.Transaction = transaction;
-        alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {definition}";
-        await alter.ExecuteNonQueryAsync();
+        return metadata is not null
+            && (metadata.PopupMinutes.Count > 0 || metadata.DefaultPopupMinutes.Count > 0);
     }
 
-    private static string SerializeReminderMinutes(IEnumerable<int> minutes)
+    private static bool HasGoogleEmailReminder(GoogleReminderMetadata? metadata)
     {
-        return JsonSerializer.Serialize(CalendarEvent.NormalizeReminderMinutes(minutes));
+        return metadata is not null
+            && (metadata.EmailMinutes.Count > 0 || metadata.DefaultEmailMinutes.Count > 0);
     }
 
-    private static IReadOnlyList<int> DeserializeReminderMinutes(string json)
+    private static object SerializeReminderMinutes(IEnumerable<int> minutes)
     {
-        try
-        {
-            return JsonSerializer.Deserialize<List<int>>(json) ?? [];
-        }
-        catch (JsonException)
-        {
-            return [];
-        }
+        var normalized = CalendarEvent.NormalizeReminderMinutes(minutes);
+        return normalized.Count == 0 ? DBNull.Value : JsonSerializer.Serialize(normalized);
     }
 
     private static IReadOnlyList<int> GetStoredGoogleEmailReminderMinutes(CalendarEvent calendarEvent)
@@ -906,20 +876,42 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
             return configured;
         }
 
-        if (calendarEvent.GoogleReminderMetadata is not null)
+        return calendarEvent.GoogleEmailReminderEnabled == true && calendarEvent.ReminderMinutesBeforeStart is int minutes
+            ? [minutes]
+            : [];
+    }
+
+    private static List<int> DeserializeReminderMinutes(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
         {
-            var source = calendarEvent.GoogleReminderMetadata.UseDefault == true
-                ? calendarEvent.GoogleReminderMetadata.DefaultEmailMinutes
-                : calendarEvent.GoogleReminderMetadata.EmailMinutes;
-            var fromMetadata = CalendarEvent.NormalizeReminderMinutes(source);
-            if (fromMetadata.Count > 0)
+            return [];
+        }
+
+        try
+        {
+            return CalendarEvent.NormalizeReminderMinutes(JsonSerializer.Deserialize<List<int>>(json)).ToList();
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static async Task EnsureColumnAsync(SqliteConnection connection, SqliteTransaction transaction, string tableName, string columnName, string sqlDefinition)
+    {
+        await using var pragma = connection.CreateCommand();
+        pragma.Transaction = transaction;
+        pragma.CommandText = $"PRAGMA table_info({tableName})";
+        await using var reader = await pragma.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            if (string.Equals(reader.GetString(1), columnName, StringComparison.OrdinalIgnoreCase))
             {
-                return fromMetadata;
+                return;
             }
         }
 
-        return calendarEvent.IsGoogleEmailReminderEnabled && calendarEvent.ReminderMinutesBeforeStart is int minutes
-            ? [minutes]
-            : [];
+        await ExecuteAsync(connection, transaction, $"ALTER TABLE {tableName} ADD COLUMN {columnName} {sqlDefinition};");
     }
 }
