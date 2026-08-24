@@ -13,6 +13,7 @@ internal static class CalendarRepositoryAtomicWriter
         IEnumerable<string>? hardDeleteIds = null,
         CancellationToken cancellationToken = default)
     {
+        await repository.InitializeAsync();
         var items = events.ToArray();
         var deleteIds = hardDeleteIds?
             .Where(id => !string.IsNullOrWhiteSpace(id))
@@ -92,7 +93,7 @@ internal static class CalendarRepositoryAtomicWriter
             SELECT google_event_id, last_synced_google_etag, calendar_id, title, description, location,
                    start, end, is_all_day, color_id, reminder_minutes_before_start,
                    app_reminder_enabled, google_email_reminder_enabled, recurrence_json,
-                   is_deleted, last_synced_at, is_dirty, dirty_fields,
+                   is_deleted, last_synced_at, is_dirty, dirty_fields, google_reminder_metadata_json,
                    app_reminder_minutes_json, google_email_reminder_minutes_json
             FROM events WHERE id = $id LIMIT 1
             """;
@@ -124,8 +125,9 @@ internal static class CalendarRepositoryAtomicWriter
             LastSyncedAt = reader.IsDBNull(15) ? null : ParseDateTimeOffset(reader.GetString(15)),
             IsDirty = reader.GetInt32(16) != 0,
             DirtyFields = reader.IsDBNull(17) ? null : reader.GetString(17),
-            AppReminderMinutesBeforeStart = reader.IsDBNull(18) ? [] : DeserializeReminderMinutes(reader.GetString(18)),
-            GoogleEmailReminderMinutesBeforeStart = reader.IsDBNull(19) ? [] : DeserializeReminderMinutes(reader.GetString(19))
+            GoogleReminderMetadata = reader.IsDBNull(18) ? null : DeserializeGoogleReminderMetadata(reader.GetString(18)),
+            AppReminderMinutesBeforeStart = reader.IsDBNull(19) ? [] : DeserializeReminderMinutes(reader.GetString(19)),
+            GoogleEmailReminderMinutesBeforeStart = reader.IsDBNull(20) ? [] : DeserializeReminderMinutes(reader.GetString(20))
         };
     }
 
@@ -211,6 +213,18 @@ internal static class CalendarRepositoryAtomicWriter
 
     private static DateTimeOffset ParseDateTimeOffset(string value)
         => DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+
+    private static GoogleReminderMetadata? DeserializeGoogleReminderMetadata(string json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<GoogleReminderMetadata>(json);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     private static List<int> DeserializeReminderMinutes(string json)
     {
