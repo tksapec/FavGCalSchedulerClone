@@ -10,7 +10,9 @@ $publishDirectory = Join-Path $repositoryRoot 'publish'
 $intermediateDirectory = Join-Path $env:TEMP 'FavGCalSchedulerClone-publish-intermediate'
 $intermediateOutputDirectory = Join-Path $intermediateDirectory 'bin'
 $intermediateObjectDirectory = Join-Path $intermediateDirectory 'obj'
-$stagingPublishDirectory = Join-Path $intermediateDirectory 'publish'
+# Keep staged release output on the same volume as the final publish directory so
+# Directory.Move remains a same-volume rename even when the repository is not on C:.
+$stagingPublishDirectory = Join-Path $repositoryRoot ("publish.staging." + [Guid]::NewGuid().ToString('N'))
 $selfContainedValue = $SelfContained.ToString().ToLowerInvariant()
 
 try
@@ -48,6 +50,10 @@ try
 }
 finally
 {
+    if (Test-Path -LiteralPath $stagingPublishDirectory)
+    {
+        [System.IO.Directory]::Delete($stagingPublishDirectory, $true)
+    }
     if (Test-Path -LiteralPath $intermediateDirectory)
     {
         [System.IO.Directory]::Delete($intermediateDirectory, $true)
