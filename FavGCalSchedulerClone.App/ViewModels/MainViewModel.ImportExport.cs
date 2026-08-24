@@ -23,10 +23,7 @@ public sealed partial class MainViewModel
     public async Task<CalendarCsvImportResult> ImportCsvAsync(string csvPath)
     {
         var result = await _csvService.ImportAsync(csvPath);
-        foreach (var calendarEvent in result.Events)
-        {
-            await _repository.SaveEventAsync(calendarEvent);
-        }
+        await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, result.Events);
 
         await RefreshCalendarAsync();
         Status = result.Errors.Count == 0
