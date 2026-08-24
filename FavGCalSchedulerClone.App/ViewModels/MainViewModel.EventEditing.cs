@@ -181,12 +181,20 @@ public sealed partial class MainViewModel
             ? CalendarEvent.NormalizeReminderMinutes(GoogleEmailReminderMinutesBeforeStart.Count > 0 ? GoogleEmailReminderMinutesBeforeStart : ReminderMinutesBeforeStart is int emailMinutes ? [emailMinutes] : [])
             : [];
         var reminderMinutes = appReminderMinutes.Count == 0 ? null : (int?)appReminderMinutes[0];
+        var reminderSettingsChanged = SelectedEvent is null
+            || !SelectedEvent.EffectiveAppReminderMinutesBeforeStart.SequenceEqual(appReminderMinutes)
+            || !SelectedEvent.EffectiveGoogleEmailReminderMinutesBeforeStart.SequenceEqual(googleEmailReminderMinutes)
+            || SelectedEvent.IsAppReminderEnabled != (appReminderMinutes.Count > 0)
+            || SelectedEvent.IsGoogleEmailReminderEnabled != (googleEmailReminderMinutes.Count > 0);
         calendarEvent.ReminderMinutesBeforeStart = reminderMinutes;
         calendarEvent.AppReminderMinutesBeforeStart = appReminderMinutes.ToList();
         calendarEvent.GoogleEmailReminderMinutesBeforeStart = googleEmailReminderMinutes.ToList();
         calendarEvent.IsAppReminderEnabled = appReminderMinutes.Count > 0;
         calendarEvent.IsGoogleEmailReminderEnabled = googleEmailReminderMinutes.Count > 0;
-        calendarEvent.GoogleReminderMetadata = CreateCommonGoogleReminderMetadata(calendarEvent.GoogleReminderMetadata, appReminderMinutes, googleEmailReminderMinutes);
+        if (reminderSettingsChanged)
+        {
+            calendarEvent.GoogleReminderMetadata = CreateCommonGoogleReminderMetadata(calendarEvent.GoogleReminderMetadata, appReminderMinutes, googleEmailReminderMinutes);
+        }
         calendarEvent.ColorId = EditorColorId;
         calendarEvent.IsDirty = true;
         calendarEvent.IsDeleted = false;
@@ -263,6 +271,8 @@ public sealed partial class MainViewModel
             Location = source.Location,
             Start = source.Start,
             End = source.End,
+            StartTimeZoneId = source.StartTimeZoneId,
+            EndTimeZoneId = source.EndTimeZoneId,
             IsAllDay = source.IsAllDay,
             ColorId = source.ColorId,
             ReminderMinutesBeforeStart = source.ReminderMinutesBeforeStart,
