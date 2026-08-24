@@ -105,7 +105,19 @@ public sealed class ReliabilityHardeningSourceTests
     }
 
     [Fact]
-    public async Task RecurrenceMutations_RecordCreatedRowsForUndo()
+    public async Task SyncedCreatedOccurrenceUndo_RestoresMasterValuesInsteadOfDeletingTheOccurrence()
+    {
+        var source = await ReadAppFileAsync("ViewModels", "MainViewModel.BulkUndo.cs");
+
+        Assert.Contains("IsSyncedEditedOccurrence", source);
+        Assert.Contains("CreateRestoredOccurrenceFromMaster", source);
+        Assert.Contains("restored.GoogleEventId = current.GoogleEventId", source);
+        Assert.Contains("restored.Start = originalStart", source);
+        Assert.Contains("restored.IsDeleted = false", source);
+    }
+
+    [Fact]
+    public async Task RecurrenceMutations_RecordCreatedRowsForUndoAndKeepCalendarsAligned()
     {
         var source = await ReadAppFileAsync("ViewModels", "MainViewModel.Recurrence.cs");
 
@@ -114,6 +126,9 @@ public sealed class ReliabilityHardeningSourceTests
         Assert.Contains("return created ? [candidate.Id] : []", source);
         Assert.Contains("return [tombstone.Id]", source);
         Assert.Contains("LoadRecurrenceUndoSnapshotsAsync", source);
+        Assert.Contains("moved.CalendarId = future.CalendarId", source);
+        Assert.Contains("movedChild.CalendarId = target.CalendarId", source);
+        Assert.Contains("targetCalendarId: candidate.CalendarId", source);
     }
 
     [Fact]
