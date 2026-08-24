@@ -14,6 +14,11 @@ $selfContainedValue = $SelfContained.ToString().ToLowerInvariant()
 
 try
 {
+    if (Test-Path -LiteralPath $publishDirectory)
+    {
+        [System.IO.Directory]::Delete($publishDirectory, $true)
+    }
+
     dotnet restore $projectPath -r win-x64 "-p:BaseIntermediateOutputPath=$intermediateObjectDirectory\"
     if ($LASTEXITCODE -ne 0)
     {
