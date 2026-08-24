@@ -95,8 +95,8 @@ public sealed class GoogleEventMapperTests
         Assert.Equal("Meeting #work", googleEvent.Summary);
         Assert.NotNull(googleEvent.Start.DateTimeDateTimeOffset);
         Assert.NotNull(googleEvent.End.DateTimeDateTimeOffset);
-        Assert.Equal(GoogleCalendarTimeZone.TokyoIanaId, googleEvent.Start.TimeZone);
-        Assert.Equal(GoogleCalendarTimeZone.TokyoIanaId, googleEvent.End.TimeZone);
+        Assert.Equal(GoogleCalendarTimeZone.LocalIanaId, googleEvent.Start.TimeZone);
+        Assert.Equal(GoogleCalendarTimeZone.LocalIanaId, googleEvent.End.TimeZone);
     }
 
     [Fact]
@@ -113,7 +113,7 @@ public sealed class GoogleEventMapperTests
 
         var googleEvent = GoogleEventMapper.ToGoogleEvent(local);
 
-        Assert.Equal(GoogleCalendarTimeZone.TokyoIanaId, googleEvent.OriginalStartTime?.TimeZone);
+        Assert.Equal(GoogleCalendarTimeZone.LocalIanaId, googleEvent.OriginalStartTime?.TimeZone);
     }
 
     [Fact]
