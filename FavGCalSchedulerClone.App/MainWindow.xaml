@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:controls="clr-namespace:FavGCalSchedulerClone.App.Controls"
         mc:Ignorable="d"
         Title="FavGCalSchedulerClone" Height="720" Width="1180" MinHeight="600" MinWidth="960"
         WindowStartupLocation="CenterScreen"
@@ -442,7 +443,7 @@
 
                             <ListBox x:Name="DayList" Grid.Row="1" Grid.Column="1" ItemsSource="{Binding VisibleCalendarDays}" SelectedItem="{Binding SelectedDay, Mode=TwoWay}"
                                      BorderThickness="0" Background="Transparent" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                                     MouseDoubleClick="DayList_MouseDoubleClick">
+                                     MouseDoubleClick="MonthDayList_MouseDoubleClick">
                                 <ListBox.ItemsPanel>
                                     <ItemsPanelTemplate>
                                         <UniformGrid Columns="7" Rows="6" />
@@ -472,27 +473,13 @@
                                                 MouseLeftButtonDown="DayCell_MouseLeftButtonDown" MouseRightButtonDown="DayCell_MouseRightButtonDown"
                                                 DragEnter="DayCell_DragOver" DragOver="DayCell_DragOver" DragLeave="DayCell_DragLeave" Drop="DayCell_Drop">
                                             <Grid x:Name="MonthDayCellLayout">
-                                                <ItemsControl ItemsSource="{Binding Segments}" Margin="0" HorizontalAlignment="Stretch" ClipToBounds="True">
-                                                    <ItemsControl.ItemTemplate>
-                                                        <DataTemplate>
-                                                            <Border Style="{StaticResource EventSegmentBar}"
-                                                                    PreviewMouseLeftButtonDown="EventSegment_PreviewMouseLeftButtonDown"
-                                                                    PreviewMouseMove="EventSegment_PreviewMouseMove"
-                                                                    MouseLeftButtonDown="EventSegment_MouseLeftButtonDown"
-                                                                    MouseRightButtonDown="EventSegment_MouseRightButtonDown">
-                                                                <DockPanel LastChildFill="True" VerticalAlignment="Center">
-                                                                    <Border DockPanel.Dock="Left" Width="12" Height="12" Background="White" BorderBrush="#475569" BorderThickness="1"
-                                                                            Margin="0,0,3,0" Visibility="{Binding ShowTodoIndicator, Converter={StaticResource BoolToVisibilityConverter}}">
-                                                                        <TextBlock Text="{Binding TodoCheckGlyph}" Foreground="#DC2626" FontSize="11" FontWeight="Bold"
-                                                                                   Margin="-1,-3,0,0" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                                                    </Border>
-                                                                    <TextBlock Text="{Binding DisplayText}" FontSize="{Binding DataContext.CalendarLabelFontSize, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{Binding DisplayForegroundColor}"
-                                                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                                                                </DockPanel>
-                                                            </Border>
-                                                        </DataTemplate>
-                                                    </ItemsControl.ItemTemplate>
-                                                </ItemsControl>
+                                                <controls:MonthEventLayer Segments="{Binding Segments}"
+                                                                          EventFontSize="{Binding DataContext.CalendarLabelFontSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                          HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ClipToBounds="True"
+                                                                          PreviewMouseLeftButtonDown="MonthEventLayer_PreviewMouseLeftButtonDown"
+                                                                          PreviewMouseMove="MonthEventLayer_PreviewMouseMove"
+                                                                          MouseLeftButtonDown="MonthEventLayer_MouseLeftButtonDown"
+                                                                          MouseRightButtonDown="MonthEventLayer_MouseRightButtonDown" />
                                                 <Border Panel.ZIndex="10" HorizontalAlignment="Left" VerticalAlignment="Top" MinWidth="24" Height="16"
                                                         Background="#CCFFFFFF" IsHitTestVisible="False" Margin="2,1,0,0">
                                                     <TextBlock Text="{Binding Date.Day}" ToolTip="{Binding DayToolTipText}" Foreground="#334155"
