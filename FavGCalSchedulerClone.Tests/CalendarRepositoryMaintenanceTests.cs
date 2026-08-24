@@ -60,8 +60,28 @@ public sealed class CalendarRepositoryMaintenanceTests
             {
                 await Assert.ThrowsAsync<InvalidOperationException>(() => repository.LoadSettingsAsync());
 
-                var loaded = await repository.RunWithMaintenanceAccessAsync(repository.LoadSettingsAsync);
-                Assert.Equal(3, loaded.StartupTabIndex);
+                var releaseUnrelatedFlow = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var unrelatedFlow = Task.Run(async () =>
+                {
+                    await releaseUnrelatedFlow.Task;
+                    try
+                    {
+                        _ = await repository.LoadSettingsAsync();
+                        return (Exception?)null;
+                    }
+                    catch (Exception ex)
+                    {
+                        return ex;
+                    }
+                });
+
+                await repository.RunWithMaintenanceAccessAsync(async () =>
+                {
+                    releaseUnrelatedFlow.TrySetResult(true);
+                    var loaded = await repository.LoadSettingsAsync();
+                    Assert.Equal(3, loaded.StartupTabIndex);
+                    Assert.IsType<InvalidOperationException>(await unrelatedFlow);
+                });
 
                 await Assert.ThrowsAsync<InvalidOperationException>(() => repository.LoadSettingsAsync());
             }
