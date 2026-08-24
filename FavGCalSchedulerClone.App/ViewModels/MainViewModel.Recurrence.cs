@@ -37,7 +37,11 @@ public sealed partial class MainViewModel
             return;
         }
 
-        var undoSnapshots = await LoadRecurrenceUndoSnapshotsAsync(SelectedEvent, recurrenceScope.Value, isDelete: false);
+        var undoSnapshots = await LoadRecurrenceUndoSnapshotsAsync(
+            SelectedEvent,
+            recurrenceScope.Value,
+            isDelete: false,
+            targetCalendarId: candidate.CalendarId);
         IReadOnlyList<string> createdEventIds = recurrenceScope.Value switch
         {
             RecurrenceEditScope.ThisOccurrence => await SaveSingleOccurrenceAsync(candidate),
@@ -151,7 +155,33 @@ public sealed partial class MainViewModel
         var target = CloneEventForEditing(master);
         ApplySeriesEditValues(target, candidate, SelectedEvent);
         target.IsDirty = true;
-        await SaveEventWithCalendarMoveAsync(target, master);
+        if (string.Equals(master.CalendarId, target.CalendarId, StringComparison.Ordinal))
+        {
+            await SaveEventWithCalendarMoveAsync(target, master);
+            SelectedEvent = target;
+            return [];
+        }
+
+        var writes = PrepareCalendarMoveWrites(target, master).ToList();
+        foreach (var child in await _repository.LoadSeriesEventsAsync(master.Id, master.GoogleEventId))
+        {
+            if (!child.IsRecurrenceException)
+            {
+                continue;
+            }
+
+            var movedChild = CloneEventForEditing(child);
+            movedChild.CalendarId = target.CalendarId;
+            movedChild.GoogleEventId = null;
+            movedChild.LastSyncedGoogleEtag = null;
+            movedChild.LastSyncedAt = null;
+            movedChild.RecurringParentId = target.Id;
+            movedChild.RecurringEventId = null;
+            movedChild.IsDirty = true;
+            writes.Add(movedChild);
+        }
+
+        await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes);
         SelectedEvent = target;
         return [];
     }
@@ -216,10 +246,12 @@ public sealed partial class MainViewModel
 
             var moved = CloneEventForEditing(child);
             moved.Id = Guid.NewGuid().ToString("N");
+            moved.CalendarId = future.CalendarId;
             moved.GoogleEventId = null;
             moved.LastSyncedGoogleEtag = null;
+            moved.LastSyncedAt = null;
             moved.RecurringParentId = future.Id;
-            moved.RecurringEventId = future.GoogleEventId;
+            moved.RecurringEventId = null;
             moved.IsDirty = true;
             writes.Add(moved);
             createdIds.Add(moved.Id);
@@ -365,7 +397,8 @@ public sealed partial class MainViewModel
     private async Task<IReadOnlyList<CalendarEvent>> LoadRecurrenceUndoSnapshotsAsync(
         CalendarEvent selectedEvent,
         RecurrenceEditScope recurrenceScope,
-        bool isDelete)
+        bool isDelete,
+        string? targetCalendarId = null)
     {
         var master = await ResolveSeriesMasterAsync(selectedEvent);
         if (master is null)
@@ -394,7 +427,11 @@ public sealed partial class MainViewModel
 
         var splitStart = selectedEvent.OriginalStart ?? selectedEvent.Start;
         var affectsEntireSeries = recurrenceScope == RecurrenceEditScope.AllEvents || splitStart <= master.Start;
-        if (!isDelete)
+        var movesEntireSeriesToAnotherCalendar = !isDelete
+            && affectsEntireSeries
+            && !string.IsNullOrWhiteSpace(targetCalendarId)
+            && !string.Equals(master.CalendarId, targetCalendarId, StringComparison.Ordinal);
+        if (!isDelete && !movesEntireSeriesToAnotherCalendar)
         {
             return [UndoService.Clone(master)];
         }
@@ -402,7 +439,9 @@ public sealed partial class MainViewModel
         var snapshots = new List<CalendarEvent> { UndoService.Clone(master) };
         foreach (var child in await _repository.LoadSeriesEventsAsync(master.Id, master.GoogleEventId))
         {
-            if (affectsEntireSeries || child.OriginalStart is not null && child.OriginalStart >= splitStart)
+            if (movesEntireSeriesToAnotherCalendar
+                || affectsEntireSeries
+                || child.OriginalStart is not null && child.OriginalStart >= splitStart)
             {
                 snapshots.Add(UndoService.Clone(child));
             }
