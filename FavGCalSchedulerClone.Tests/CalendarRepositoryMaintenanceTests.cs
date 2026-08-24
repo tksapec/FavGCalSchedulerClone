@@ -100,6 +100,58 @@ public sealed class CalendarRepositoryMaintenanceTests
     }
 
     [Fact]
+    public async Task MaintenanceAccessScope_ExpiresForChildFlowsThatOutliveTheOwnerScope()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        try
+        {
+            var repository = new CalendarRepository(dbPath);
+            await repository.InitializeAsync();
+            await repository.BeginMaintenanceAsync();
+            try
+            {
+                var childCreated = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var releaseChild = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                Task<Exception?>? child = null;
+
+                await repository.RunWithMaintenanceAccessAsync(() =>
+                {
+                    child = Task.Run(async () =>
+                    {
+                        childCreated.TrySetResult(true);
+                        await releaseChild.Task;
+                        try
+                        {
+                            _ = await repository.LoadSettingsAsync();
+                            return (Exception?)null;
+                        }
+                        catch (Exception ex)
+                        {
+                            return ex;
+                        }
+                    });
+                    return childCreated.Task;
+                });
+
+                releaseChild.TrySetResult(true);
+                Assert.NotNull(child);
+                Assert.IsType<InvalidOperationException>(await child!);
+            }
+            finally
+            {
+                repository.EndMaintenance();
+            }
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            DeleteIfExists(dbPath);
+            DeleteIfExists(dbPath + "-wal");
+            DeleteIfExists(dbPath + "-shm");
+        }
+    }
+
+    [Fact]
     public async Task FailedOpen_DoesNotLeakMaintenanceConnectionCount()
     {
         var directory = Path.Combine(Path.GetTempPath(), $"repository-open-failure-{Guid.NewGuid():N}");
