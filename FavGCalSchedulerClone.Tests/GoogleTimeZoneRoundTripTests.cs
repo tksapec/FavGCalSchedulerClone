@@ -85,4 +85,30 @@ public sealed class GoogleTimeZoneRoundTripTests
         generated[0].GoogleReminderMetadata!.Source = "changed";
         Assert.Equal("default", master.GoogleReminderMetadata!.Source);
     }
+
+    [Fact]
+    public void RecurrenceExpansion_RecalculatesOffsetAcrossDaylightSavingBoundary()
+    {
+        var master = new CalendarEvent
+        {
+            Id = "dst-series",
+            CalendarId = "work",
+            Title = "DST series",
+            Start = new DateTimeOffset(2026, 3, 2, 9, 0, 0, TimeSpan.FromHours(-5)),
+            End = new DateTimeOffset(2026, 3, 2, 10, 0, 0, TimeSpan.FromHours(-5)),
+            StartTimeZoneId = "America/New_York",
+            EndTimeZoneId = "America/New_York",
+            RecurrenceJson = "[\"RRULE:FREQ=WEEKLY;COUNT=2\"]"
+        };
+
+        var generated = RecurrenceExpansionService.ExpandForRange(
+            [master],
+            new DateTimeOffset(2026, 3, 1, 0, 0, 0, TimeSpan.FromHours(-5)),
+            new DateTimeOffset(2026, 3, 16, 0, 0, 0, TimeSpan.FromHours(-4)));
+
+        Assert.Equal(2, generated.Count);
+        Assert.Equal(TimeSpan.FromHours(-5), generated[0].Start.Offset);
+        Assert.Equal(TimeSpan.FromHours(-4), generated[1].Start.Offset);
+        Assert.All(generated, item => Assert.Equal(9, item.Start.Hour));
+    }
 }
