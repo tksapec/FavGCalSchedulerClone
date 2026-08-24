@@ -1,5 +1,6 @@
 using FavGCalSchedulerClone.App.Models;
 using FavGCalSchedulerClone.App.Services;
+using FavGCalSchedulerClone.App.ViewModels;
 using Microsoft.Data.Sqlite;
 
 namespace FavGCalSchedulerClone.Tests;
@@ -37,6 +38,109 @@ public sealed class ReliabilityHardeningBehaviorTests
 
             Assert.Null(await repository.FindEventByIdAsync("first"));
             Assert.Null(await repository.FindEventByIdAsync("fail-second"));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            DeleteIfExists(dbPath);
+            DeleteIfExists(dbPath + "-wal");
+            DeleteIfExists(dbPath + "-shm");
+        }
+    }
+
+    [Fact]
+    public async Task UndoLastChangeAsync_WhenDatabaseWriteFails_KeepsUndoAvailable()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        try
+        {
+            var repository = new CalendarRepository(dbPath);
+            await repository.InitializeAsync();
+            await repository.SaveEventAsync(CreateEvent("undo-target"));
+            var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+            await viewModel.InitializeAsync();
+            await viewModel.BulkUpdateEventsAsync(
+                ["undo-target"],
+                new BulkEventUpdateRequest(ColorId: "5"));
+            Assert.True(viewModel.CanUndoLastChange);
+
+            await using (var connection = new SqliteConnection($"Data Source={dbPath}"))
+            {
+                await connection.OpenAsync();
+                await using var trigger = connection.CreateCommand();
+                trigger.CommandText = """
+                    CREATE TRIGGER fail_undo_event
+                    BEFORE INSERT ON events
+                    WHEN NEW.id = 'undo-target'
+                    BEGIN
+                        SELECT RAISE(ABORT, 'intentional undo failure');
+                    END;
+                    """;
+                await trigger.ExecuteNonQueryAsync();
+            }
+
+            await Assert.ThrowsAsync<SqliteException>(() => viewModel.UndoLastChangeAsync());
+
+            Assert.True(viewModel.CanUndoLastChange);
+            Assert.Equal("5", (await repository.FindEventByIdAsync("undo-target"))?.ColorId);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            DeleteIfExists(dbPath);
+            DeleteIfExists(dbPath + "-wal");
+            DeleteIfExists(dbPath + "-shm");
+        }
+    }
+
+    [Fact]
+    public async Task UndoLastChangeAsync_AfterRecurrenceSplit_RemovesFutureSeriesAndRestoresMaster()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        try
+        {
+            var repository = new CalendarRepository(dbPath);
+            await repository.InitializeAsync();
+            var master = new CalendarEvent
+            {
+                Id = "undo-series",
+                CalendarId = "primary",
+                Title = "Daily standup",
+                Start = new DateTimeOffset(2026, 5, 10, 9, 0, 0, TimeSpan.FromHours(9)),
+                End = new DateTimeOffset(2026, 5, 10, 10, 0, 0, TimeSpan.FromHours(9)),
+                RecurrenceJson = "[\"RRULE:FREQ=DAILY;COUNT=5\"]"
+            };
+            await repository.SaveEventAsync(master);
+            var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+            await viewModel.InitializeAsync();
+            await viewModel.NavigateToDateAsync(new DateTime(2026, 5, 12));
+            var occurrence = viewModel.CalendarDays
+                .Single(day => day.Date == new DateTime(2026, 5, 12))
+                .Segments
+                .Single(segment => segment.Event?.Title == "Daily standup")
+                .Event!;
+            viewModel.SelectEvent(occurrence);
+            viewModel.Title = "Changed future";
+
+            await viewModel.SaveCurrentEventAsync(RecurrenceEditScope.ThisAndFollowing);
+
+            var splitEvents = await repository.LoadEventsAsync(
+                new DateTimeOffset(2026, 5, 1, 0, 0, 0, TimeSpan.FromHours(9)),
+                new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.FromHours(9)),
+                includeDeleted: true);
+            Assert.Equal(2, splitEvents.Count(item => item.IsRecurringMaster && !item.IsDeleted));
+            Assert.True(viewModel.CanUndoLastChange);
+
+            Assert.True(await viewModel.UndoLastChangeAsync());
+
+            var restoredEvents = await repository.LoadEventsAsync(
+                new DateTimeOffset(2026, 5, 1, 0, 0, 0, TimeSpan.FromHours(9)),
+                new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.FromHours(9)),
+                includeDeleted: true);
+            var restoredMaster = Assert.Single(restoredEvents, item => item.IsRecurringMaster && !item.IsDeleted);
+            Assert.Equal(master.Id, restoredMaster.Id);
+            Assert.Contains("COUNT=5", restoredMaster.RecurrenceJson ?? "");
+            Assert.False(viewModel.CanUndoLastChange);
         }
         finally
         {
@@ -91,6 +195,10 @@ public sealed class ReliabilityHardeningBehaviorTests
     [InlineData("+SUM(A1:A2)")]
     [InlineData("-2+3")]
     [InlineData("@SUM(A1:A2)")]
+    [InlineData("＝1+1")]
+    [InlineData("＋SUM(A1:A2)")]
+    [InlineData("－2+3")]
+    [InlineData("＠SUM(A1:A2)")]
     public void CsvCellSanitizer_NeutralizesAndRestoresFormulaPrefixes(string value)
     {
         var neutralized = CsvCellSanitizer.NeutralizeForSpreadsheet(value);
