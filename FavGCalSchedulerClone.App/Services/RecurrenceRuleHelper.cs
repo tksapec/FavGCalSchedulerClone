@@ -419,8 +419,26 @@ internal static class RecurrenceRuleHelper
             return 0;
         }
 
-        return ExpandOccurrences(masterEvent, masterEvent.Start, occurrenceStart)
-            .Count(item => item < occurrenceStart);
+        var ruleLine = ParseLines(masterEvent.RecurrenceJson)
+            .FirstOrDefault(line => line.StartsWith("RRULE:", StringComparison.OrdinalIgnoreCase));
+        if (ruleLine is null)
+        {
+            return 0;
+        }
+
+        var recurrenceEvent = new IcalCalendarEvent
+        {
+            DtStart = ToCalDateTime(masterEvent.Start, masterEvent.IsAllDay, masterEvent.StartTimeZoneId),
+            RecurrenceRule = new RecurrenceRule(ruleLine[6..])
+        };
+
+        // COUNT applies to the RRULE-generated set before EXDATE exclusions are removed.
+        // Splitting a finite series therefore has to count excluded occurrences too.
+        return recurrenceEvent
+            .GetOccurrences()
+            .Select(item => FromCalDateTime(item.Period.StartTime, masterEvent.Start.Offset))
+            .TakeWhile(candidate => candidate < occurrenceStart)
+            .Count();
     }
 
     private static IEnumerable<DateTimeOffset> ExpandDaily(
