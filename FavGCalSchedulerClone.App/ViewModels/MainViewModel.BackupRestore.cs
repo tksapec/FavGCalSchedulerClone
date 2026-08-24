@@ -47,12 +47,14 @@ public sealed partial class MainViewModel
             repositoryMaintenanceStarted = true;
             var result = await _backupService.RestoreBackupAsync(backupZipPath, _repository.DatabasePath);
 
-            // RestoreBackupAsync validates and migrates the extracted database before
-            // replacing the live file, so normal repository access can resume here.
+            // Keep normal repository callers blocked until every view-model collection,
+            // cache and setting has been reloaded from the restored database. Only this
+            // asynchronous restore flow receives temporary maintenance access.
+            await _repository.RunWithMaintenanceAccessAsync(InitializeAsync);
+
             _repository.EndMaintenance();
             repositoryMaintenanceStarted = false;
 
-            await InitializeAsync();
             Status = "バックアップからリストアしました。Google認証は必要に応じて再実行してください。";
             return result;
         }
