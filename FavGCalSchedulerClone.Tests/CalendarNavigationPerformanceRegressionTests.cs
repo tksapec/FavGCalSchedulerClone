@@ -50,6 +50,28 @@ public sealed class CalendarNavigationPerformanceRegressionTests
         Assert.Equal(MainViewModel.CalendarSnapshotCacheCapacity, viewModel.CalendarCacheCount);
     }
 
+    [Fact]
+    public async Task RapidYearNavigation_CancelsIdlePrefetchBeforeWideDatabaseLoad()
+    {
+        var viewModel = await CreateViewModelAsync();
+        await WaitUntilAsync(() => viewModel.GetCalendarPrefetchRequirement(viewModel.CurrentMonth) == CalendarPrefetchRequirement.None);
+        viewModel.NavigationRefreshDelay = TimeSpan.Zero;
+        viewModel.CalendarPrefetchDelay = TimeSpan.FromMilliseconds(200);
+        var wideLoads = 0;
+        viewModel.BeforeLoadCalendarPrefetchDataAsync = (_, _) =>
+        {
+            Interlocked.Increment(ref wideLoads);
+            return Task.CompletedTask;
+        };
+
+        viewModel.NextYearCommand.Execute(null);
+        await Task.Delay(50);
+        viewModel.NextYearCommand.Execute(null);
+        await WaitUntilAsync(() => viewModel.GetCalendarPrefetchRequirement(viewModel.CurrentMonth) == CalendarPrefetchRequirement.None);
+
+        Assert.Equal(1, wideLoads);
+    }
+
     private static int IsReset(NotifyCollectionChangedEventArgs args) =>
         args.Action == NotifyCollectionChangedAction.Reset ? 1 : 0;
 
