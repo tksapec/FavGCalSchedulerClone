@@ -128,13 +128,27 @@ public sealed partial class MainViewModel
             }
         }
 
-        // Recurrence splits record the new parent before its children. Delete in reverse
-        // order so a synced occurrence is removed before its newly-created remote master.
+        var createdIdSet = operation.CreatedEventIds.ToHashSet(StringComparer.Ordinal);
+        // Recurrence splits record the new parent before its children. Process in reverse
+        // order so a synced occurrence is handled before its newly-created remote master.
         foreach (var createdId in operation.CreatedEventIds.Reverse())
         {
             var current = await _repository.FindMasterByIdAsync(createdId);
             if (current is null)
             {
+                continue;
+            }
+
+            if (IsSyncedEditedOccurrence(current, createdIdSet))
+            {
+                var parent = await _repository.FindMasterByIdAsync(current.RecurringParentId);
+                if (parent is null || current.OriginalStart is null)
+                {
+                    throw new InvalidOperationException(
+                        "同期済みの繰り返し予定を安全に元へ戻せません。親系列を確認してから再実行してください。");
+                }
+
+                writes.Add(CreateRestoredOccurrenceFromMaster(current, parent));
                 continue;
             }
 
@@ -233,6 +247,36 @@ public sealed partial class MainViewModel
         destinationTombstone.IsDirty = true;
         destinationTombstone.LastSyncedAt = null;
         return destinationTombstone;
+    }
+
+    private static bool IsSyncedEditedOccurrence(CalendarEvent current, IReadOnlySet<string> createdIds)
+    {
+        return current.IsRecurrenceException
+            && !current.IsDeleted
+            && !string.IsNullOrWhiteSpace(current.GoogleEventId)
+            && !string.IsNullOrWhiteSpace(current.RecurringParentId)
+            && !createdIds.Contains(current.RecurringParentId);
+    }
+
+    private static CalendarEvent CreateRestoredOccurrenceFromMaster(CalendarEvent current, CalendarEvent parent)
+    {
+        var originalStart = current.OriginalStart!.Value;
+        var restored = UndoService.Clone(parent);
+        restored.Id = current.Id;
+        restored.GoogleEventId = current.GoogleEventId;
+        restored.LastSyncedGoogleEtag = current.LastSyncedGoogleEtag;
+        restored.RecurringEventId = parent.GoogleEventId;
+        restored.RecurringParentId = parent.Id;
+        restored.OriginalStart = originalStart;
+        restored.IsRecurrenceException = true;
+        restored.IsGeneratedOccurrence = false;
+        restored.RecurrenceJson = null;
+        restored.Start = originalStart;
+        restored.End = originalStart + (parent.End - parent.Start);
+        restored.IsDeleted = false;
+        restored.IsDirty = true;
+        restored.LastSyncedAt = null;
+        return restored;
     }
 
     private async Task<IReadOnlyList<string>> FindUndoMoveTombstoneIdsAsync(CalendarEvent restored)
