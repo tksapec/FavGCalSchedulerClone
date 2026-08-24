@@ -21,6 +21,7 @@ public sealed class ReminderNotificationService : IDisposable
     private IReminderNotifier? _notifier;
     private bool _disposed;
     private bool _isRunning;
+    private bool _maintenancePaused;
     private DateTimeOffset? _startedAt;
     private DateTimeOffset? _lastDiagnosticsSavedAt;
     private string? _lastPersistedDiagnosticsSignature;
@@ -63,6 +64,40 @@ public sealed class ReminderNotificationService : IDisposable
         _isRunning = false;
         UpdateRuntimeState(null);
         _ = SaveDiagnosticsAsync(force: true);
+    }
+
+    public async Task<bool> PauseForMaintenanceAsync(CancellationToken cancellationToken = default)
+    {
+        var wasRunning = _isRunning;
+        _timer.Change(Timeout.Infinite, Timeout.Infinite);
+        _isRunning = false;
+        Volatile.Write(ref _maintenancePaused, true);
+        UpdateRuntimeState(null);
+
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            await SaveDiagnosticsAsync(force: true);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        return wasRunning;
+    }
+
+    public async Task ResumeAfterMaintenanceAsync(bool resumeMonitoring, CancellationToken cancellationToken = default)
+    {
+        Volatile.Write(ref _maintenancePaused, false);
+        if (resumeMonitoring)
+        {
+            await StartAsync(cancellationToken);
+        }
+        else
+        {
+            UpdateRuntimeState(null);
+        }
     }
 
     public async Task<ReminderMonitoringSnapshot> LoadDiagnosticsAsync()
@@ -144,6 +179,11 @@ public sealed class ReminderNotificationService : IDisposable
         await _gate.WaitAsync(cancellationToken);
         try
         {
+            if (_disposed || Volatile.Read(ref _maintenancePaused))
+            {
+                return;
+            }
+
             var fired = await LoadFiredStateAsync();
             var snoozed = await LoadSnoozeStateAsync();
             PruneFiredState(fired, current);
@@ -421,6 +461,11 @@ public sealed class ReminderNotificationService : IDisposable
         await _gate.WaitAsync();
         try
         {
+            if (Volatile.Read(ref _maintenancePaused))
+            {
+                return;
+            }
+
             var snoozed = await LoadSnoozeStateAsync();
             var snoozeUntil = current.AddMinutes(minutes);
             snoozed[occurrenceKey] = snoozeUntil.ToString("O");
