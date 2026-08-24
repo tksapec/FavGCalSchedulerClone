@@ -13,6 +13,7 @@ public sealed class PublishReleaseScriptTests
         var script = await File.ReadAllTextAsync(ScriptPath);
 
         Assert.Contains("$stagingPublishDirectory", script);
+        Assert.Contains("$stagingPublishDirectory = Join-Path $repositoryRoot", script);
         Assert.Contains("-o $stagingPublishDirectory", script);
         Assert.DoesNotContain("-o $publishDirectory", script);
         Assert.Contains("[System.IO.Directory]::Move($stagingPublishDirectory, $publishDirectory)", script);
