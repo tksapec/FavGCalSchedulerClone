@@ -15,6 +15,7 @@ public sealed partial class MainViewModel
     public async Task<SyncPreview> CreateSyncPreviewAsync()
     {
         await SaveOAuthPathAsync();
+        await EnsureGoogleIdentityIntegrityAsync();
         return await _syncService.PreviewAsync(CreateSettingsSnapshot());
     }
 
@@ -85,7 +86,9 @@ public sealed partial class MainViewModel
     public async Task<SyncResult> ResyncDirtyItemsAsync(IReadOnlyCollection<string> localIds)
     {
         await SaveOAuthPathAsync();
-        var result = await _syncService.SyncDirtyEventsAsync(CreateSettingsSnapshot(), localIds.ToHashSet(StringComparer.Ordinal));
+        var targetIds = localIds.ToHashSet(StringComparer.Ordinal);
+        await EnsureGoogleIdentityIntegrityAsync(targetIds);
+        var result = await _syncService.SyncDirtyEventsAsync(CreateSettingsSnapshot(), targetIds);
         await RefreshCalendarAsync();
         Status = $"{result.Message} / 未同期残数 {(await _repository.LoadDirtyEventsAsync()).Count}";
         return result;
@@ -162,6 +165,25 @@ public sealed partial class MainViewModel
             && File.Exists(settings.OAuthClientJsonPath);
     }
 
+    private async Task EnsureGoogleIdentityIntegrityAsync(IReadOnlySet<string>? localIds = null)
+    {
+        var broken = (await _repository.LoadDirtyEventsAsync())
+            .Where(item => localIds is null || localIds.Contains(item.Id))
+            .Where(item => string.IsNullOrWhiteSpace(item.GoogleEventId))
+            .Where(item => item.LastSyncedAt is not null || !string.IsNullOrWhiteSpace(item.LastSyncedGoogleEtag))
+            .ToArray();
+        if (broken.Length == 0)
+        {
+            return;
+        }
+
+        var sample = broken[0];
+        throw new InvalidOperationException(
+            $"Google Event ID が失われた同期済み予定を {broken.Length} 件検出しました。"
+            + $" 重複作成を防ぐため同期を中止しました。対象例: {sample.Title} ({sample.Start:g})。"
+            + " Google同期診断またはバックアップから紐付けを確認してください。");
+    }
+
     private async Task<SyncResult?> SynchronizeAsync(bool reportErrors, SyncInvocationKind invocationKind)
     {
         if (Interlocked.Exchange(ref _syncInProgress, 1) != 0)
@@ -184,6 +206,7 @@ public sealed partial class MainViewModel
                 return null;
             }
 
+            await EnsureGoogleIdentityIntegrityAsync();
             Status = "Googleカレンダーと同期中...";
             IsSynchronizing = true;
             var result = await _syncService.SyncAsync(
