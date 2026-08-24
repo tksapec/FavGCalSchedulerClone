@@ -23,6 +23,11 @@ public sealed class ProtectedFileDataStore : IDataStore
             {
                 File.Delete(file);
             }
+
+            foreach (var file in Directory.EnumerateFiles(_folderPath, "*.tmp"))
+            {
+                File.Delete(file);
+            }
         }
 
         return Task.CompletedTask;
@@ -36,6 +41,7 @@ public sealed class ProtectedFileDataStore : IDataStore
             File.Delete(path);
         }
 
+        DeleteStaleTemporaryFiles(path);
         return Task.CompletedTask;
     }
 
@@ -58,8 +64,46 @@ public sealed class ProtectedFileDataStore : IDataStore
         var json = JsonConvert.SerializeObject(value);
         var bytes = Encoding.UTF8.GetBytes(json);
         var protectedBytes = ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser);
-        File.WriteAllBytes(GetPath(key), protectedBytes);
+        var path = GetPath(key);
+        DeleteStaleTemporaryFiles(path);
+        var tempPath = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            using (var stream = new FileStream(
+                       tempPath,
+                       FileMode.CreateNew,
+                       FileAccess.Write,
+                       FileShare.None,
+                       bufferSize: 4096,
+                       FileOptions.WriteThrough))
+            {
+                stream.Write(protectedBytes);
+                stream.Flush(flushToDisk: true);
+            }
+
+            File.Move(tempPath, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
+
         return Task.CompletedTask;
+    }
+
+    private void DeleteStaleTemporaryFiles(string path)
+    {
+        var prefix = $"{Path.GetFileName(path)}.";
+        foreach (var file in Directory.EnumerateFiles(_folderPath, $"{Path.GetFileName(path)}.*.tmp"))
+        {
+            if (Path.GetFileName(file).StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                File.Delete(file);
+            }
+        }
     }
 
     private string GetPath(string key)
