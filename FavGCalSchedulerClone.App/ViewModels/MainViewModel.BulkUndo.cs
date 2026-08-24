@@ -128,7 +128,9 @@ public sealed partial class MainViewModel
             }
         }
 
-        foreach (var createdId in operation.CreatedEventIds)
+        // Recurrence splits record the new parent before its children. Delete in reverse
+        // order so a synced occurrence is removed before its newly-created remote master.
+        foreach (var createdId in operation.CreatedEventIds.Reverse())
         {
             var current = await _repository.FindMasterByIdAsync(createdId);
             if (current is null)
