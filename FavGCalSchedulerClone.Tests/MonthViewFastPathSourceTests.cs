@@ -8,57 +8,53 @@ public sealed class MonthViewFastPathSourceTests
         "FavGCalSchedulerClone.App"));
 
     private static readonly string MainWindowXamlPath = Path.Combine(AppDirectory, "MainWindow.xaml");
-    private static readonly string FastPathPath = Path.Combine(AppDirectory, "MainWindow.MonthViewFastPath.cs");
+    private static readonly string LegacyFastPathPath = Path.Combine(AppDirectory, "MainWindow.MonthViewFastPath.cs");
     private static readonly string HandlerPath = Path.Combine(AppDirectory, "MainWindow.MonthEventLayer.cs");
     private static readonly string LayerPath = Path.Combine(AppDirectory, "Controls", "MonthEventLayer.cs");
 
     [Fact]
-    public async Task MonthView_InstallsLightweightTemplateWhenTheMainViewModelIsAssigned()
+    public async Task MonthView_DefinesTheLightweightRendererDirectlyInXaml()
     {
-        var source = await File.ReadAllTextAsync(FastPathPath);
+        var xaml = await File.ReadAllTextAsync(MainWindowXamlPath);
+        var monthRegion = GetMonthRegion(xaml);
 
-        Assert.Contains("protected override void OnPropertyChanged(DependencyPropertyChangedEventArgs e)", source);
-        Assert.Contains("e.Property != DataContextProperty", source);
-        Assert.Contains("e.NewValue is not MainViewModel", source);
-        Assert.Contains("DayList.ItemTemplate = CreateFastMonthDayTemplate();", source);
-        Assert.Contains("new FrameworkElementFactory(typeof(MonthEventLayer))", source);
+        Assert.Contains("xmlns:controls=\"clr-namespace:FavGCalSchedulerClone.App.Controls\"", xaml);
+        Assert.Contains("<controls:MonthEventLayer Segments=\"{Binding Segments}\"", monthRegion);
+        Assert.Contains("EventFontSize=\"{Binding DataContext.CalendarLabelFontSize", monthRegion);
+        Assert.DoesNotContain("<ItemsControl ItemsSource=\"{Binding Segments}\"", monthRegion);
+        Assert.False(File.Exists(LegacyFastPathPath), "The deprecated runtime FrameworkElementFactory template must not be restored.");
     }
 
     [Fact]
-    public async Task MonthViewFastTemplate_DoesNotExpandSegmentsIntoAnItemsControl()
+    public async Task MonthView_PreservesDayChromeAndInteractionHandlersInXaml()
     {
-        var source = await File.ReadAllTextAsync(FastPathPath);
+        var xaml = await File.ReadAllTextAsync(MainWindowXamlPath);
+        var monthRegion = GetMonthRegion(xaml);
 
-        Assert.DoesNotContain("new FrameworkElementFactory(typeof(ItemsControl))", source);
-        Assert.Contains("MonthEventLayer.SegmentsProperty", source);
-        Assert.Contains("MonthEventLayer.EventFontSizeProperty", source);
+        Assert.Contains("Style=\"{StaticResource DayCell}\"", monthRegion);
+        Assert.Contains("ToolTip=\"{Binding DayToolTipText}\"", monthRegion);
+        Assert.Contains("DayCell_MouseLeftButtonDown", monthRegion);
+        Assert.Contains("DayCell_MouseRightButtonDown", monthRegion);
+        Assert.Contains("DayCell_DragOver", monthRegion);
+        Assert.Contains("DayCell_DragLeave", monthRegion);
+        Assert.Contains("DayCell_Drop", monthRegion);
+        Assert.Contains("MonthEventLayer_PreviewMouseLeftButtonDown", monthRegion);
+        Assert.Contains("MonthEventLayer_PreviewMouseMove", monthRegion);
+        Assert.Contains("MonthEventLayer_MouseLeftButtonDown", monthRegion);
+        Assert.Contains("MonthEventLayer_MouseRightButtonDown", monthRegion);
+        Assert.Contains("Panel.ZIndex=\"10\"", monthRegion);
+        Assert.Contains("Panel.ZIndex=\"20\"", monthRegion);
+        Assert.Contains("Panel.ZIndex=\"30\"", monthRegion);
     }
 
     [Fact]
-    public async Task MonthViewFastTemplate_PreservesDayChromeAndInteractionHandlers()
+    public async Task MonthView_UsesMonthAwareDoubleClickDirectlyWithoutRuntimeHandlerSwapping()
     {
-        var source = await File.ReadAllTextAsync(FastPathPath);
-
-        Assert.Contains("SetResourceReference(FrameworkElement.StyleProperty, \"DayCell\")", source);
-        Assert.Contains("CreateDateBadgeFactory()", source);
-        Assert.Contains("CreateHiddenEventBadgeFactory()", source);
-        Assert.Contains("CreateSelectionOverlayFactory()", source);
-        Assert.Contains("DayCell_MouseLeftButtonDown", source);
-        Assert.Contains("DayCell_MouseRightButtonDown", source);
-        Assert.Contains("DayCell_DragOver", source);
-        Assert.Contains("DayCell_Drop", source);
-        Assert.Contains("MonthEventLayer_PreviewMouseLeftButtonDown", source);
-        Assert.Contains("MonthEventLayer_MouseRightButtonDown", source);
-    }
-
-    [Fact]
-    public async Task MonthView_ReplacesTheOriginalDayListDoubleClickHandlerWithMonthAwareHandling()
-    {
-        var fastPath = await File.ReadAllTextAsync(FastPathPath);
+        var xaml = await File.ReadAllTextAsync(MainWindowXamlPath);
+        var monthRegion = GetMonthRegion(xaml);
         var handlers = await File.ReadAllTextAsync(HandlerPath);
 
-        Assert.Contains("DayList.MouseDoubleClick -= DayList_MouseDoubleClick", fastPath);
-        Assert.Contains("DayList.MouseDoubleClick += MonthDayList_MouseDoubleClick", fastPath);
+        Assert.Contains("MouseDoubleClick=\"MonthDayList_MouseDoubleClick\"", monthRegion);
         Assert.Contains("FindMonthEventLayer(e.OriginalSource)", handlers);
         Assert.Contains("layer.HitTestSegment(e.GetPosition(layer))", handlers);
         Assert.Contains("e.Handled = true", handlers);
@@ -66,7 +62,7 @@ public sealed class MonthViewFastPathSourceTests
     }
 
     [Fact]
-    public async Task WeekView_KeepsExistingPerSegmentControls()
+    public async Task WeekView_KeepsExistingPerSegmentControlsAndDoubleClickHandler()
     {
         var xaml = await File.ReadAllTextAsync(MainWindowXamlPath);
 
@@ -85,6 +81,8 @@ public sealed class MonthViewFastPathSourceTests
         Assert.Contains("<ItemsControl ItemsSource=\"{Binding Segments}\"", weekRegion);
         Assert.Contains("EventSegment_PreviewMouseLeftButtonDown", weekRegion);
         Assert.Contains("EventSegment_MouseRightButtonDown", weekRegion);
+        Assert.Contains("MouseDoubleClick=\"DayList_MouseDoubleClick\"", weekRegion);
+        Assert.DoesNotContain("controls:MonthEventLayer", weekRegion);
     }
 
     [Fact]
@@ -116,5 +114,20 @@ public sealed class MonthViewFastPathSourceTests
         Assert.Contains("ShowCalendarContextMenu(layer)", source);
         Assert.Contains("await OpenSelectedEventEditorAsync()", source);
         Assert.Contains("ReferenceEquals(layer.HitTestSegment(e.GetPosition(layer)), segment)", source);
+    }
+
+    private static string GetMonthRegion(string xaml)
+    {
+        var monthViewStart = xaml.IndexOf(
+            "Visibility=\"{Binding IsMonthView, Converter={StaticResource BoolToVisibilityConverter}}\"",
+            StringComparison.Ordinal);
+        Assert.True(monthViewStart >= 0, "Month view was not found.");
+
+        var weekViewStart = xaml.IndexOf(
+            "Visibility=\"{Binding IsWeekView, Converter={StaticResource BoolToVisibilityConverter}}\"",
+            monthViewStart,
+            StringComparison.Ordinal);
+        Assert.True(weekViewStart > monthViewStart, "Week view was not found after month view.");
+        return xaml[monthViewStart..weekViewStart];
     }
 }
