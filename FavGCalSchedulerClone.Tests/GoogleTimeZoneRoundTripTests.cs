@@ -37,6 +37,33 @@ public sealed class GoogleTimeZoneRoundTripTests
     }
 
     [Fact]
+    public void Mapper_InheritsStartTimeZoneWhenGoogleEndOmitsTimeZone()
+    {
+        var google = new Event
+        {
+            Id = "ny-end-zone-omitted",
+            Summary = "New York meeting",
+            Start = new EventDateTime
+            {
+                DateTimeDateTimeOffset = new DateTimeOffset(2026, 7, 15, 9, 0, 0, TimeSpan.FromHours(-4)),
+                TimeZone = "America/New_York"
+            },
+            End = new EventDateTime
+            {
+                DateTimeDateTimeOffset = new DateTimeOffset(2026, 7, 15, 10, 0, 0, TimeSpan.FromHours(-4))
+            },
+            Status = "confirmed"
+        };
+
+        var local = GoogleEventMapper.FromGoogleEvent(google, "work");
+        var roundTripped = GoogleEventMapper.ToGoogleEvent(local);
+
+        Assert.Equal("America/New_York", local.StartTimeZoneId);
+        Assert.Equal("America/New_York", local.EndTimeZoneId);
+        Assert.Equal("America/New_York", roundTripped.End.TimeZone);
+    }
+
+    [Fact]
     public async Task Repository_PersistsEventTimeZoneIds()
     {
         var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
