@@ -35,7 +35,8 @@ try
         --no-restore `
         -o $stagingPublishDirectory `
         "-p:BaseOutputPath=$intermediateOutputDirectory\" `
-        "-p:BaseIntermediateOutputPath=$intermediateObjectDirectory\"
+        "-p:BaseIntermediateOutputPath=$intermediateObjectDirectory\" `
+        '-p:DefaultItemExcludes=**/obj/**'
 
     if ($LASTEXITCODE -ne 0)
     {

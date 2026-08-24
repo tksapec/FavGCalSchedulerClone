@@ -25,4 +25,12 @@ public sealed class PublishReleaseScriptTests
         Assert.True(deletePublished > publishExitCheck);
         Assert.True(moveStaged > deletePublished);
     }
+
+    [Fact]
+    public async Task PublishScript_ExcludesProjectBinAndObjWhenIntermediateOutputIsRedirected()
+    {
+        var script = await File.ReadAllTextAsync(ScriptPath);
+
+        Assert.Contains("'-p:DefaultItemExcludes=**/obj/**'", script);
+    }
 }
