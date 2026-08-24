@@ -9,18 +9,25 @@ public sealed class UndoService
     public bool CanUndo => _lastOperation is not null;
     public string StatusText => _lastOperation?.Description ?? "";
 
-    public void Capture(string description, IEnumerable<CalendarEvent?> beforeEvents)
+    public void Capture(
+        string description,
+        IEnumerable<CalendarEvent?> beforeEvents,
+        IEnumerable<string>? createdEventIds = null)
     {
         var snapshots = beforeEvents
             .Where(item => item is not null)
             .Select(item => Clone(item!))
             .ToArray();
-        if (snapshots.Length == 0)
+        var createdIds = createdEventIds?
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray() ?? [];
+        if (snapshots.Length == 0 && createdIds.Length == 0)
         {
             return;
         }
 
-        _lastOperation = new UndoOperation(description, snapshots);
+        _lastOperation = new UndoOperation(description, snapshots, createdIds);
     }
 
     public UndoOperation? Peek() => _lastOperation;
