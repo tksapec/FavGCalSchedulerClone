@@ -54,7 +54,8 @@ public partial class MainWindow
         if (sender is not MonthEventLayer layer
             || _dragStartPoint is not Point startPoint
             || _dragSegment is not { Event: not null } segment
-            || e.LeftButton != MouseButtonState.Pressed)
+            || e.LeftButton != MouseButtonState.Pressed
+            || !ReferenceEquals(layer.HitTestSegment(e.GetPosition(layer)), segment))
         {
             return;
         }
