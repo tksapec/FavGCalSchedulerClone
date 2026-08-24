@@ -19,6 +19,7 @@ public sealed partial class MainViewModel
         }
 
         CaptureUndo("一括編集", events);
+        var writes = new List<CalendarEvent>();
         var updated = 0;
         foreach (var calendarEvent in events)
         {
@@ -61,10 +62,12 @@ public sealed partial class MainViewModel
             }
 
             calendarEvent.IsDirty = true;
-            await SaveEventWithCalendarMoveAsync(calendarEvent, original);
+            NormalizeTimedEventTimeZoneOffsets(calendarEvent);
+            writes.AddRange(PrepareCalendarMoveWrites(calendarEvent, original));
             updated++;
         }
 
+        await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes);
         await RefreshCalendarAsync();
         Status = $"一括編集しました: {updated} 件";
         await SyncAfterLocalChangeAsync();
@@ -80,13 +83,14 @@ public sealed partial class MainViewModel
         }
 
         CaptureUndo("一括削除", events);
-        var deleted = 0;
         foreach (var calendarEvent in events)
         {
-            await _repository.DeleteEventAsync(calendarEvent);
-            deleted++;
+            calendarEvent.IsDeleted = true;
+            calendarEvent.IsDirty = true;
         }
 
+        await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, events);
+        var deleted = events.Count;
         SelectedEvent = null;
         await RefreshCalendarAsync();
         Status = $"一括削除しました: {deleted} 件";
@@ -103,18 +107,27 @@ public sealed partial class MainViewModel
             return false;
         }
 
+        var writes = new List<CalendarEvent>();
+        var hardDeleteIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var snapshot in operation.BeforeEvents)
         {
             var current = await _repository.FindMasterByIdAsync(snapshot.Id);
-            await CreateDestinationDeleteForSyncedMoveAsync(current, snapshot);
+            if (CreateDestinationDeleteForSyncedMove(current, snapshot) is { } destinationTombstone)
+            {
+                writes.Add(destinationTombstone);
+            }
 
             var restored = UndoService.Clone(snapshot);
             restored.IsDirty = true;
             restored.LastSyncedAt = null;
-            await _repository.SaveEventAsync(restored);
-            await RemoveUndoMoveTombstonesAsync(restored);
+            writes.Add(restored);
+            foreach (var id in await FindUndoMoveTombstoneIdsAsync(restored))
+            {
+                hardDeleteIds.Add(id);
+            }
         }
 
+        await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes, hardDeleteIds);
         SelectedEvent = operation.BeforeEvents.Count == 1
             ? await _repository.FindMasterByIdAsync(operation.BeforeEvents[0].Id)
             : null;
@@ -142,14 +155,42 @@ public sealed partial class MainViewModel
         return events;
     }
 
-    private async Task CreateDestinationDeleteForSyncedMoveAsync(CalendarEvent? current, CalendarEvent before)
+    private static IReadOnlyList<CalendarEvent> PrepareCalendarMoveWrites(CalendarEvent candidate, CalendarEvent? original)
+    {
+        if (original is null
+            || string.IsNullOrWhiteSpace(original.GoogleEventId)
+            || string.Equals(original.CalendarId, candidate.CalendarId, StringComparison.Ordinal))
+        {
+            return [candidate];
+        }
+
+        var tombstone = CloneEventForEditing(original);
+        tombstone.Id = Guid.NewGuid().ToString("N");
+        tombstone.IsDeleted = true;
+        tombstone.IsDirty = true;
+        tombstone.LastSyncedAt = null;
+
+        candidate.GoogleEventId = null;
+        candidate.LastSyncedGoogleEtag = null;
+        candidate.LastSyncedAt = null;
+        if (candidate.IsRecurrenceException)
+        {
+            candidate.RecurringEventId = null;
+            candidate.RecurringParentId = null;
+            candidate.OriginalStart = null;
+        }
+
+        return [tombstone, candidate];
+    }
+
+    private static CalendarEvent? CreateDestinationDeleteForSyncedMove(CalendarEvent? current, CalendarEvent before)
     {
         if (current is null
             || string.IsNullOrWhiteSpace(current.GoogleEventId)
             || string.Equals(current.CalendarId, before.CalendarId, StringComparison.Ordinal)
             || string.Equals(current.GoogleEventId, before.GoogleEventId, StringComparison.Ordinal))
         {
-            return;
+            return null;
         }
 
         var destinationTombstone = UndoService.Clone(current);
@@ -157,28 +198,28 @@ public sealed partial class MainViewModel
         destinationTombstone.IsDeleted = true;
         destinationTombstone.IsDirty = true;
         destinationTombstone.LastSyncedAt = null;
-        await _repository.SaveEventAsync(destinationTombstone);
+        return destinationTombstone;
     }
 
-    private async Task RemoveUndoMoveTombstonesAsync(CalendarEvent restored)
+    private async Task<IReadOnlyList<string>> FindUndoMoveTombstoneIdsAsync(CalendarEvent restored)
     {
         if (string.IsNullOrWhiteSpace(restored.GoogleEventId))
         {
-            return;
+            return [];
         }
 
         var candidates = await _repository.LoadEventsAsync(
             restored.Start.AddDays(-1),
             restored.End.AddDays(1),
             includeDeleted: true);
-        foreach (var tombstone in candidates.Where(item =>
-                     item.Id != restored.Id
-                     && item.IsDeleted
-                     && string.Equals(item.CalendarId, restored.CalendarId, StringComparison.Ordinal)
-                     && string.Equals(item.GoogleEventId, restored.GoogleEventId, StringComparison.Ordinal)))
-        {
-            await _repository.HardDeleteEventAsync(tombstone.Id);
-        }
+        return candidates
+            .Where(item =>
+                item.Id != restored.Id
+                && item.IsDeleted
+                && string.Equals(item.CalendarId, restored.CalendarId, StringComparison.Ordinal)
+                && string.Equals(item.GoogleEventId, restored.GoogleEventId, StringComparison.Ordinal))
+            .Select(item => item.Id)
+            .ToArray();
     }
 
     private void CaptureUndo(string description, IEnumerable<CalendarEvent?> beforeEvents)
