@@ -68,7 +68,7 @@ internal static class ReminderHistoryDialog
             reasonSummary.Text = FormatReasonSummary(data.Diagnostics);
         }
 
-        checkNow.Click += async (_, _) =>
+        checkNow.Click += (_, _) => DialogAsyncGuard.Run(window, async () =>
         {
             checkNow.IsEnabled = false;
             try
@@ -80,9 +80,9 @@ internal static class ReminderHistoryDialog
             {
                 checkNow.IsEnabled = true;
             }
-        };
+        }, "通知判定");
 
-        createTest.Click += async (_, _) =>
+        createTest.Click += (_, _) => DialogAsyncGuard.Run(window, async () =>
         {
             createTest.IsEnabled = false;
             try
@@ -94,9 +94,9 @@ internal static class ReminderHistoryDialog
             {
                 createTest.IsEnabled = true;
             }
-        };
+        }, "通知テスト予定作成");
 
-        refreshGoogle.Click += async (_, _) =>
+        refreshGoogle.Click += (_, _) => DialogAsyncGuard.Run(window, async () =>
         {
             if (refreshGoogleRemindersAsync is null)
             {
@@ -113,7 +113,7 @@ internal static class ReminderHistoryDialog
             {
                 refreshGoogle.IsEnabled = true;
             }
-        };
+        }, "Google通知設定更新");
 
         await ReloadAsync();
         window.ShowDialog();
@@ -122,14 +122,14 @@ internal static class ReminderHistoryDialog
     private static DataGrid CreateHistoryGrid(ObservableCollection<ReminderHistoryItem> items, Func<ReminderHistoryItem, Task> openAsync, Window window)
     {
         var grid = new DataGrid { ItemsSource = items, AutoGenerateColumns = false, CanUserAddRows = false, IsReadOnly = true, RowHeight = 24 };
-        grid.MouseDoubleClick += async (_, _) =>
+        grid.MouseDoubleClick += (_, _) => DialogAsyncGuard.Run(window, async () =>
         {
             if (grid.SelectedItem is ReminderHistoryItem item)
             {
                 await openAsync(item);
                 window.Close();
             }
-        };
+        }, "通知履歴を開く");
         grid.Columns.Add(new DataGridTextColumn { Header = "通知日時", Binding = new Binding(nameof(ReminderHistoryItem.NotifiedAtText)), Width = 140 });
         grid.Columns.Add(new DataGridTextColumn { Header = "件名", Binding = new Binding(nameof(ReminderHistoryItem.Title)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
         grid.Columns.Add(new DataGridTextColumn { Header = "予定日時", Binding = new Binding(nameof(ReminderHistoryItem.DateDisplayText)), Width = 150 });
