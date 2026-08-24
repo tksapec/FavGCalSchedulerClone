@@ -266,21 +266,23 @@ internal static class RecurrenceRuleHelper
             return masterEvent.RecurrenceJson;
         }
 
-        var rule = ParseRule(lines[ruleIndex]);
-        if (rule.Count is > 0)
+        var ruleLine = lines[ruleIndex];
+        var count = GetPositiveIntRulePart(ruleLine, "COUNT");
+        if (count is > 0)
         {
             var beforeCount = CountOccurrencesBefore(masterEvent, occurrenceStart);
-            rule.Count = beforeCount == 0 ? 1 : beforeCount;
-            rule.Until = null;
+            ruleLine = SetRulePart(ruleLine, "COUNT", Math.Max(1, beforeCount).ToString(CultureInfo.InvariantCulture));
+            ruleLine = RemoveRulePart(ruleLine, "UNTIL");
         }
         else
         {
-            rule.Until = masterEvent.IsAllDay
-                ? new DateTimeOffset(occurrenceStart.Date.AddDays(-1), occurrenceStart.Offset)
-                : occurrenceStart.AddTicks(-1);
+            var untilValue = masterEvent.IsAllDay
+                ? occurrenceStart.Date.AddDays(-1).ToString("yyyyMMdd", CultureInfo.InvariantCulture)
+                : occurrenceStart.AddTicks(-1).UtcDateTime.ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture);
+            ruleLine = SetRulePart(ruleLine, "UNTIL", untilValue);
         }
 
-        lines[ruleIndex] = FormatRule(rule);
+        lines[ruleIndex] = ruleLine;
         return SerializeLines(lines);
     }
 
@@ -293,17 +295,59 @@ internal static class RecurrenceRuleHelper
             return masterEvent.RecurrenceJson;
         }
 
-        var rule = ParseRule(lines[ruleIndex]);
-        if (rule.Count is > 0)
+        var ruleLine = lines[ruleIndex];
+        var count = GetPositiveIntRulePart(ruleLine, "COUNT");
+        if (count is > 0)
         {
             var beforeCount = CountOccurrencesBefore(masterEvent, occurrenceStart);
-            var totalCount = rule.Count.Value;
-            var remaining = Math.Max(1, totalCount - beforeCount);
-            rule.Count = remaining;
+            var remaining = Math.Max(1, count.Value - beforeCount);
+            ruleLine = SetRulePart(ruleLine, "COUNT", remaining.ToString(CultureInfo.InvariantCulture));
         }
 
-        lines[ruleIndex] = FormatRule(rule);
+        lines[ruleIndex] = ruleLine;
         return SerializeLines(lines);
+    }
+
+    private static int? GetPositiveIntRulePart(string ruleLine, string key)
+    {
+        var value = GetRuleParts(ruleLine)
+            .Select(part => part.Split('=', 2))
+            .FirstOrDefault(parts => parts.Length == 2 && string.Equals(parts[0], key, StringComparison.OrdinalIgnoreCase));
+        return value is { Length: 2 }
+               && int.TryParse(value[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+               && parsed > 0
+            ? parsed
+            : null;
+    }
+
+    private static string SetRulePart(string ruleLine, string key, string value)
+    {
+        var parts = GetRuleParts(ruleLine).ToList();
+        var replacement = $"{key}={value}";
+        var index = parts.FindIndex(part => part.StartsWith($"{key}=", StringComparison.OrdinalIgnoreCase));
+        if (index >= 0)
+        {
+            parts[index] = replacement;
+        }
+        else
+        {
+            parts.Add(replacement);
+        }
+
+        return $"RRULE:{string.Join(";", parts)}";
+    }
+
+    private static string RemoveRulePart(string ruleLine, string key)
+    {
+        var parts = GetRuleParts(ruleLine)
+            .Where(part => !part.StartsWith($"{key}=", StringComparison.OrdinalIgnoreCase));
+        return $"RRULE:{string.Join(";", parts)}";
+    }
+
+    private static IEnumerable<string> GetRuleParts(string ruleLine)
+    {
+        var content = ruleLine.StartsWith("RRULE:", StringComparison.OrdinalIgnoreCase) ? ruleLine[6..] : ruleLine;
+        return content.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 
     public static string? AddExDate(string? recurrenceJson, DateTimeOffset originalStart, bool isAllDay)
