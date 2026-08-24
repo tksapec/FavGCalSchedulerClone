@@ -1,3 +1,4 @@
+using System.Data;
 using System.Globalization;
 using System.Text.Json;
 using FavGCalSchedulerClone.App.Models;
@@ -9,6 +10,10 @@ namespace FavGCalSchedulerClone.App.Services;
 public sealed class CalendarRepository : IEventRepository, ISettingsRepository, ITagRepository, ISyncStateRepository
 {
     private readonly string _databasePath;
+    private readonly object _maintenanceLock = new();
+    private bool _databaseMaintenanceRequested;
+    private int _activeConnectionCount;
+    private TaskCompletionSource<bool>? _connectionsDrained;
 
     public CalendarRepository(string? databasePath = null)
     {
@@ -16,6 +21,49 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
     }
 
     public string DatabasePath => _databasePath;
+
+    internal async Task BeginMaintenanceAsync(CancellationToken cancellationToken = default)
+    {
+        Task? waitTask = null;
+        lock (_maintenanceLock)
+        {
+            if (_databaseMaintenanceRequested)
+            {
+                throw new InvalidOperationException("Database maintenance is in progress.");
+            }
+
+            _databaseMaintenanceRequested = true;
+            if (_activeConnectionCount > 0)
+            {
+                _connectionsDrained = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                waitTask = _connectionsDrained.Task;
+            }
+        }
+
+        if (waitTask is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await waitTask.WaitAsync(cancellationToken);
+        }
+        catch
+        {
+            EndMaintenance();
+            throw;
+        }
+    }
+
+    internal void EndMaintenance()
+    {
+        lock (_maintenanceLock)
+        {
+            _databaseMaintenanceRequested = false;
+            _connectionsDrained = null;
+        }
+    }
 
     public async Task InitializeAsync()
     {
@@ -648,6 +696,34 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
 
     private SqliteConnection OpenConnection()
     {
+        lock (_maintenanceLock)
+        {
+            if (_databaseMaintenanceRequested)
+            {
+                throw new InvalidOperationException("Database maintenance is in progress.");
+            }
+
+            _activeConnectionCount++;
+        }
+
+        var released = 0;
+        void ReleaseConnection()
+        {
+            if (Interlocked.Exchange(ref released, 1) != 0)
+            {
+                return;
+            }
+
+            lock (_maintenanceLock)
+            {
+                _activeConnectionCount--;
+                if (_activeConnectionCount == 0)
+                {
+                    _connectionsDrained?.TrySetResult(true);
+                }
+            }
+        }
+
         var directory = Path.GetDirectoryName(_databasePath);
         if (!string.IsNullOrWhiteSpace(directory))
         {
@@ -659,8 +735,25 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
             DataSource = _databasePath,
             DefaultTimeout = 10
         }.ToString());
-        connection.Open();
-        return connection;
+        connection.StateChange += (_, args) =>
+        {
+            if (args.CurrentState is ConnectionState.Closed or ConnectionState.Broken)
+            {
+                ReleaseConnection();
+            }
+        };
+
+        try
+        {
+            connection.Open();
+            return connection;
+        }
+        catch
+        {
+            ReleaseConnection();
+            connection.Dispose();
+            throw;
+        }
     }
 
     private static async Task ExecuteAsync(SqliteConnection connection, string sql)
