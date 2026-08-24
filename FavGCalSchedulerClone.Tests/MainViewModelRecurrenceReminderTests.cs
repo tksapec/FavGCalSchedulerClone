@@ -81,6 +81,58 @@ public sealed class MainViewModelRecurrenceReminderTests
     }
 
     [Fact]
+    public async Task SaveCurrentEventAsync_ThisAndFollowingAtFirstOccurrence_UpdatesExistingSeriesWithoutCreatingDuplicateSeries()
+    {
+        var repository = await CreateRepositoryAsync();
+        var master = CreateDailyMaster("series-first-edit");
+        master.GoogleEventId = "remote-first-edit";
+        await repository.SaveEventAsync(master);
+        var viewModel = await CreateViewModelAsync(repository);
+        var occurrence = await SelectOccurrenceAsync(viewModel, new DateTime(2026, 5, 10));
+        viewModel.Title = "Renamed entire series";
+        viewModel.Description = occurrence.Description ?? "";
+        viewModel.Location = occurrence.Location ?? "";
+        viewModel.StartDate = occurrence.Start.Date;
+        viewModel.EndDate = occurrence.End.Date;
+        viewModel.StartTime = occurrence.Start.ToString("HH:mm");
+        viewModel.EndTime = occurrence.End.ToString("HH:mm");
+        viewModel.IsAllDay = false;
+
+        await viewModel.SaveCurrentEventAsync(RecurrenceEditScope.ThisAndFollowing);
+
+        var events = await repository.LoadEventsAsync(
+            new DateTimeOffset(new DateTime(2026, 5, 1)),
+            new DateTimeOffset(new DateTime(2026, 6, 1)),
+            includeDeleted: true);
+        var stored = Assert.Single(events, item => item.IsRecurringMaster && !item.IsDeleted);
+        Assert.Equal(master.Id, stored.Id);
+        Assert.Equal("remote-first-edit", stored.GoogleEventId);
+        Assert.Equal("Renamed entire series", stored.Title);
+        Assert.Contains("COUNT=5", stored.RecurrenceJson ?? "");
+    }
+
+    [Fact]
+    public async Task DeleteSelectedEventAsync_ThisAndFollowingAtFirstOccurrence_DeletesWholeSeries()
+    {
+        var repository = await CreateRepositoryAsync();
+        var master = CreateDailyMaster("series-first-delete");
+        await repository.SaveEventAsync(master);
+        var viewModel = await CreateViewModelAsync(repository);
+        await SelectOccurrenceAsync(viewModel, new DateTime(2026, 5, 10));
+
+        await viewModel.DeleteSelectedEventAsync(RecurrenceEditScope.ThisAndFollowing);
+
+        var stored = await repository.FindMasterByIdAsync(master.Id);
+        Assert.NotNull(stored);
+        Assert.True(stored!.IsDeleted);
+        var active = await repository.LoadEventsAsync(
+            new DateTimeOffset(new DateTime(2026, 5, 1)),
+            new DateTimeOffset(new DateTime(2026, 6, 1)),
+            includeDeleted: false);
+        Assert.DoesNotContain(active, item => item.IsRecurringMaster && item.Id == master.Id);
+    }
+
+    [Fact]
     public async Task SaveCurrentEventAsync_ThisOccurrence_ReplacesOccurrenceWithoutExcludingItFromMaster()
     {
         var repository = await CreateRepositoryAsync();
