@@ -37,6 +37,24 @@ public sealed class FinalReliabilitySourceTests
     }
 
     [Fact]
+    public async Task Restore_PreparesAndMigratesDatabaseBeforeMovingTheLiveDatabase()
+    {
+        var source = await ReadAppFileAsync("Services", "BackupService.cs");
+        var restoreStart = source.IndexOf("public async Task<RestoreResult> RestoreBackupAsync", StringComparison.Ordinal);
+        var validateArchiveStart = source.IndexOf("private static void ValidateArchive", restoreStart, StringComparison.Ordinal);
+        Assert.True(restoreStart >= 0 && validateArchiveStart > restoreStart);
+        var restoreBody = source[restoreStart..validateArchiveStart];
+
+        var prepareIndex = restoreBody.IndexOf("PrepareRestoredDatabaseAsync(tempRestorePath, preparedRestorePath", StringComparison.Ordinal);
+        var moveLiveIndex = restoreBody.IndexOf("MoveFileWithRetryAsync(databasePath, rollbackPath", StringComparison.Ordinal);
+        var installPreparedIndex = restoreBody.IndexOf("MoveFileWithRetryAsync(preparedRestorePath, databasePath", StringComparison.Ordinal);
+
+        Assert.True(prepareIndex >= 0 && moveLiveIndex > prepareIndex);
+        Assert.True(installPreparedIndex > moveLiveIndex);
+        Assert.DoesNotContain("MoveFileWithRetryAsync(tempRestorePath, databasePath", restoreBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Repository_RejectsNewConnectionsDuringDatabaseMaintenanceAndAtomicWriterUsesTrackedConnection()
     {
         var repository = await ReadAppFileAsync("Services", "CalendarRepository.cs");
