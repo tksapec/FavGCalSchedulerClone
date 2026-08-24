@@ -24,13 +24,7 @@ internal static class CalendarRepositoryAtomicWriter
             return;
         }
 
-        var connectionString = new SqliteConnectionStringBuilder
-        {
-            DataSource = repository.DatabasePath,
-            DefaultTimeout = 10
-        }.ToString();
-        await using var connection = new SqliteConnection(connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = repository.OpenConnection();
         await using var transaction = connection.BeginTransaction();
         try
         {
