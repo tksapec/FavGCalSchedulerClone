@@ -8,58 +8,61 @@ public sealed class MonthViewFastPathSourceTests
         "FavGCalSchedulerClone.App"));
 
     private static readonly string MainWindowXamlPath = Path.Combine(AppDirectory, "MainWindow.xaml");
+    private static readonly string FastPathPath = Path.Combine(AppDirectory, "MainWindow.MonthViewFastPath.cs");
+    private static readonly string HandlerPath = Path.Combine(AppDirectory, "MainWindow.MonthEventLayer.cs");
     private static readonly string LayerPath = Path.Combine(AppDirectory, "Controls", "MonthEventLayer.cs");
 
     [Fact]
     public async Task MonthView_InstallsLightweightTemplateWhenTheMainViewModelIsAssigned()
     {
-        var sources = await ReadMainWindowSourcesAsync();
+        var source = await File.ReadAllTextAsync(FastPathPath);
 
-        Assert.Contains("protected override void OnPropertyChanged(DependencyPropertyChangedEventArgs e)", sources);
-        Assert.Contains("e.Property != DataContextProperty", sources);
-        Assert.Contains("e.NewValue is not MainViewModel", sources);
-        Assert.Contains("DayList.ItemTemplate = CreateFastMonthDayTemplate();", sources);
-        Assert.Contains("new FrameworkElementFactory(typeof(MonthEventLayer))", sources);
+        Assert.Contains("protected override void OnPropertyChanged(DependencyPropertyChangedEventArgs e)", source);
+        Assert.Contains("e.Property != DataContextProperty", source);
+        Assert.Contains("e.NewValue is not MainViewModel", source);
+        Assert.Contains("DayList.ItemTemplate = CreateFastMonthDayTemplate();", source);
+        Assert.Contains("new FrameworkElementFactory(typeof(MonthEventLayer))", source);
     }
 
     [Fact]
     public async Task MonthViewFastTemplate_DoesNotExpandSegmentsIntoAnItemsControl()
     {
-        var sources = await ReadMainWindowSourcesAsync();
+        var source = await File.ReadAllTextAsync(FastPathPath);
 
-        Assert.DoesNotContain("new FrameworkElementFactory(typeof(ItemsControl))", sources);
-        Assert.Contains("MonthEventLayer.SegmentsProperty", sources);
-        Assert.Contains("MonthEventLayer.EventFontSizeProperty", sources);
+        Assert.DoesNotContain("new FrameworkElementFactory(typeof(ItemsControl))", source);
+        Assert.Contains("MonthEventLayer.SegmentsProperty", source);
+        Assert.Contains("MonthEventLayer.EventFontSizeProperty", source);
     }
 
     [Fact]
     public async Task MonthViewFastTemplate_PreservesDayChromeAndInteractionHandlers()
     {
-        var sources = await ReadMainWindowSourcesAsync();
+        var source = await File.ReadAllTextAsync(FastPathPath);
 
-        Assert.Contains("SetResourceReference(FrameworkElement.StyleProperty, \"DayCell\")", sources);
-        Assert.Contains("CreateDateBadgeFactory()", sources);
-        Assert.Contains("CreateHiddenEventBadgeFactory()", sources);
-        Assert.Contains("CreateSelectionOverlayFactory()", sources);
-        Assert.Contains("DayCell_MouseLeftButtonDown", sources);
-        Assert.Contains("DayCell_MouseRightButtonDown", sources);
-        Assert.Contains("DayCell_DragOver", sources);
-        Assert.Contains("DayCell_Drop", sources);
-        Assert.Contains("MonthEventLayer_PreviewMouseLeftButtonDown", sources);
-        Assert.Contains("MonthEventLayer_MouseRightButtonDown", sources);
+        Assert.Contains("SetResourceReference(FrameworkElement.StyleProperty, \"DayCell\")", source);
+        Assert.Contains("CreateDateBadgeFactory()", source);
+        Assert.Contains("CreateHiddenEventBadgeFactory()", source);
+        Assert.Contains("CreateSelectionOverlayFactory()", source);
+        Assert.Contains("DayCell_MouseLeftButtonDown", source);
+        Assert.Contains("DayCell_MouseRightButtonDown", source);
+        Assert.Contains("DayCell_DragOver", source);
+        Assert.Contains("DayCell_Drop", source);
+        Assert.Contains("MonthEventLayer_PreviewMouseLeftButtonDown", source);
+        Assert.Contains("MonthEventLayer_MouseRightButtonDown", source);
     }
 
     [Fact]
     public async Task MonthView_ReplacesTheOriginalDayListDoubleClickHandlerWithMonthAwareHandling()
     {
-        var sources = await ReadMainWindowSourcesAsync();
+        var fastPath = await File.ReadAllTextAsync(FastPathPath);
+        var handlers = await File.ReadAllTextAsync(HandlerPath);
 
-        Assert.Contains("DayList.MouseDoubleClick -= DayList_MouseDoubleClick", sources);
-        Assert.Contains("DayList.MouseDoubleClick += MonthDayList_MouseDoubleClick", sources);
-        Assert.Contains("FindMonthEventLayer(e.OriginalSource)", sources);
-        Assert.Contains("layer.HitTestSegment(e.GetPosition(layer))", sources);
-        Assert.Contains("e.Handled = true", sources);
-        Assert.Contains("await ShowScheduleDialogAsync()", sources);
+        Assert.Contains("DayList.MouseDoubleClick -= DayList_MouseDoubleClick", fastPath);
+        Assert.Contains("DayList.MouseDoubleClick += MonthDayList_MouseDoubleClick", fastPath);
+        Assert.Contains("FindMonthEventLayer(e.OriginalSource)", handlers);
+        Assert.Contains("layer.HitTestSegment(e.GetPosition(layer))", handlers);
+        Assert.Contains("e.Handled = true", handlers);
+        Assert.Contains("await ShowScheduleDialogAsync()", handlers);
     }
 
     [Fact]
@@ -105,24 +108,13 @@ public sealed class MonthViewFastPathSourceTests
     [Fact]
     public async Task MonthEventLayerHandlers_ReuseExistingSelectionDragAndContextMenuFlow()
     {
-        var sources = await ReadMainWindowSourcesAsync();
+        var source = await File.ReadAllTextAsync(HandlerPath);
 
-        Assert.Contains("layer.HitTestSegment(e.GetPosition(layer))", sources);
-        Assert.Contains("_viewModel.SelectEventSegment(segment)", sources);
-        Assert.Contains("DragDrop.DoDragDrop(layer, segment, DragDropEffects.Move)", sources);
-        Assert.Contains("ShowCalendarContextMenu(layer)", sources);
-        Assert.Contains("await OpenSelectedEventEditorAsync()", sources);
-    }
-
-    private static async Task<string> ReadMainWindowSourcesAsync()
-    {
-        var paths = Directory.GetFiles(AppDirectory, "MainWindow*.cs", SearchOption.TopDirectoryOnly);
-        var sources = new List<string>(paths.Length);
-        foreach (var path in paths)
-        {
-            sources.Add(await File.ReadAllTextAsync(path));
-        }
-
-        return string.Join(Environment.NewLine, sources);
+        Assert.Contains("layer.HitTestSegment(e.GetPosition(layer))", source);
+        Assert.Contains("_viewModel.SelectEventSegment(segment)", source);
+        Assert.Contains("DragDrop.DoDragDrop(layer, segment, DragDropEffects.Move)", source);
+        Assert.Contains("ShowCalendarContextMenu(layer)", source);
+        Assert.Contains("await OpenSelectedEventEditorAsync()", source);
+        Assert.Contains("ReferenceEquals(layer.HitTestSegment(e.GetPosition(layer)), segment)", source);
     }
 }
