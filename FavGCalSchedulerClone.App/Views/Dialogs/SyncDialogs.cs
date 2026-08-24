@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using FavGCalSchedulerClone.App.Models;
+using FavGCalSchedulerClone.App.Services;
 using Microsoft.Win32;
 
 namespace FavGCalSchedulerClone.App.Views.Dialogs;
@@ -100,10 +101,6 @@ internal static class SyncDialogs
         var panel = new DockPanel { Margin = new Thickness(12), LastChildFill = true };
         window.Content = panel;
 
-        var last = diagnostics.LastResult;
-        var summaryText = last is null
-            ? $"未同期変更: {diagnostics.DirtyCount} 件\n最終同期結果はありません。"
-            : $"未同期変更: {diagnostics.DirtyCount} 件\n最終同期: {last.FinishedAt:yyyy/MM/dd HH:mm:ss} / {last.SummaryText}";
         var summary = new TextBlock { Text = BuildDiagnosticsSummary(diagnostics), Margin = new Thickness(0, 0, 0, 8), FontWeight = FontWeights.SemiBold };
         DockPanel.SetDock(summary, Dock.Top);
         panel.Children.Add(summary);
@@ -245,14 +242,14 @@ internal static class SyncDialogs
 
         dirtyGrid.SelectionChanged += (_, _) => UpdateDirtyActionState();
 
-        openDirty.Click += async (_, _) =>
+        openDirty.Click += (_, _) => DialogAsyncGuard.Run(window, async () =>
         {
             if (openDirtyItemAsync is not null && GetSelectedDirtyIds(dirtyGrid).FirstOrDefault() is { } id)
             {
                 await openDirtyItemAsync(id);
                 window.Close();
             }
-        };
+        }, "未同期データを開く");
         retryDirty.Click += async (_, _) =>
         {
             var ids = GetSelectedDirtyIds(dirtyGrid);
@@ -412,10 +409,17 @@ internal static class SyncDialogs
 
     private static void ExportText(Window owner, string fileName, string content)
     {
-        var dialog = new SaveFileDialog { FileName = fileName, Filter = "Text files (*.txt;*.csv)|*.txt;*.csv|All files (*.*)|*.*" };
-        if (dialog.ShowDialog(owner) == true)
+        try
         {
-            File.WriteAllText(dialog.FileName, content, Encoding.UTF8);
+            var dialog = new SaveFileDialog { FileName = fileName, Filter = "Text files (*.txt;*.csv)|*.txt;*.csv|All files (*.*)|*.*" };
+            if (dialog.ShowDialog(owner) == true)
+            {
+                File.WriteAllText(dialog.FileName, content, Encoding.UTF8);
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(owner, ex.Message, "診断データ出力エラー", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -450,7 +454,7 @@ internal static class SyncDialogs
 
     private static string Csv(string? value)
     {
-        value ??= "";
+        value = CsvCellSanitizer.NeutralizeForSpreadsheet(value);
         return "\"" + value.Replace("\"", "\"\"") + "\"";
     }
 }
