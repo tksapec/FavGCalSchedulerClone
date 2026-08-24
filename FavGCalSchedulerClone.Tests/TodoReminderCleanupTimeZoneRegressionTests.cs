@@ -5,8 +5,10 @@ namespace FavGCalSchedulerClone.Tests;
 
 public sealed class TodoReminderCleanupTimeZoneRegressionTests
 {
-    [Fact]
-    public async Task ApplyTodoReminderCleanupStateAsync_PreservesPersistedTimeZonesWhileClearingGoogleReminders()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ApplyTodoReminderCleanupStateAsync_PreservesPersistedTimeZonesWhileClearingGoogleReminders(bool preserveDirtyState)
     {
         var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
         await repository.InitializeAsync();
@@ -15,6 +17,7 @@ public sealed class TodoReminderCleanupTimeZoneRegressionTests
             Id = "todo-timezone-cleanup",
             CalendarId = "work",
             GoogleEventId = "google-todo-timezone",
+            LastSyncedGoogleEtag = "etag-before-cleanup",
             Title = "Timed todo",
             Start = new DateTimeOffset(2026, 8, 24, 9, 0, 0, TimeSpan.FromHours(9)),
             End = new DateTimeOffset(2026, 8, 24, 10, 0, 0, TimeSpan.FromHours(9)),
@@ -31,11 +34,14 @@ public sealed class TodoReminderCleanupTimeZoneRegressionTests
             GoogleEmailReminderMinutesBeforeStart = [30],
             IsAppReminderEnabled = true,
             IsGoogleEmailReminderEnabled = true,
-            IsDirty = false
+            IsDirty = preserveDirtyState
         };
         await repository.SaveEventAsync(calendarEvent);
 
-        await repository.ApplyTodoReminderCleanupStateAsync(calendarEvent.Id, preserveDirtyState: true);
+        await repository.ApplyTodoReminderCleanupStateAsync(
+            calendarEvent.Id,
+            preserveDirtyState,
+            cleanedGoogleEtag: "etag-after-cleanup");
         var reloaded = await repository.FindEventByIdAsync(calendarEvent.Id);
 
         Assert.NotNull(reloaded);
@@ -45,5 +51,8 @@ public sealed class TodoReminderCleanupTimeZoneRegressionTests
         Assert.Empty(reloaded.EffectiveGoogleEmailReminderMinutesBeforeStart);
         Assert.NotNull(reloaded.GoogleReminderMetadata);
         Assert.False(reloaded.GoogleReminderMetadata!.HasGoogleReminder);
+        Assert.Equal(
+            preserveDirtyState ? "etag-before-cleanup" : "etag-after-cleanup",
+            reloaded.LastSyncedGoogleEtag);
     }
 }
