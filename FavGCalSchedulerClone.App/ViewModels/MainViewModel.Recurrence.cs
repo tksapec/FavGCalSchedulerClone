@@ -29,8 +29,8 @@ public sealed partial class MainViewModel
 
             await SaveEventWithCalendarMoveAsync(candidate, SelectedEvent);
             await RecordScheduleHistoryAsync(candidate);
-            SelectedEvent = candidate;
             await RefreshCalendarAsync();
+            SelectedEvent = candidate;
             Status = "予定を保存しました。";
             await SyncAfterLocalChangeAsync();
             return;
