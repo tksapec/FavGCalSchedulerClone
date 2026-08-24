@@ -111,4 +111,37 @@ public sealed class GoogleTimeZoneRoundTripTests
         Assert.Equal(TimeSpan.FromHours(-4), generated[1].Start.Offset);
         Assert.All(generated, item => Assert.Equal(9, item.Start.Hour));
     }
+
+    [Theory]
+    [InlineData(2026, 1, 15, -5)]
+    [InlineData(2026, 7, 15, -4)]
+    public void TryCreateDateTimeOffset_UsesEventTimeZoneForEditedWallClock(int year, int month, int day, int expectedOffsetHours)
+    {
+        var wallClock = new DateTime(year, month, day, 10, 30, 0, DateTimeKind.Unspecified);
+
+        var created = GoogleCalendarTimeZone.TryCreateDateTimeOffset(
+            wallClock,
+            "America/New_York",
+            preferredOffset: TimeSpan.FromHours(-5),
+            out var result);
+
+        Assert.True(created);
+        Assert.Equal(10, result.Hour);
+        Assert.Equal(30, result.Minute);
+        Assert.Equal(TimeSpan.FromHours(expectedOffsetHours), result.Offset);
+    }
+
+    [Fact]
+    public void TryCreateDateTimeOffset_RejectsNonexistentDstWallClock()
+    {
+        var nonexistent = new DateTime(2026, 3, 8, 2, 30, 0, DateTimeKind.Unspecified);
+
+        var created = GoogleCalendarTimeZone.TryCreateDateTimeOffset(
+            nonexistent,
+            "America/New_York",
+            preferredOffset: TimeSpan.FromHours(-5),
+            out _);
+
+        Assert.False(created);
+    }
 }
