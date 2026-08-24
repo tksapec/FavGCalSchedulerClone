@@ -189,7 +189,7 @@ internal static class RecurrenceRuleHelper
         var recurrenceEvent = new IcalCalendarEvent
         {
             DtStart = ToCalDateTime(masterEvent.Start, masterEvent.IsAllDay, masterEvent.StartTimeZoneId),
-            RecurrenceRule = new RecurrencePattern(ruleLine[6..])
+            RecurrenceRule = new RecurrenceRule(ruleLine[6..])
         };
         var excluded = ParseExDates(masterEvent);
         var evaluationStart = ToEvaluationBoundary(rangeStart, masterEvent.IsAllDay);
