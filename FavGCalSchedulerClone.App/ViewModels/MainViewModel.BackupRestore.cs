@@ -29,6 +29,7 @@ public sealed partial class MainViewModel
 
         var reminderWasRunning = false;
         var reminderPaused = false;
+        var repositoryMaintenanceStarted = false;
         try
         {
             if (Volatile.Read(ref _syncInProgress) != 0)
@@ -42,7 +43,17 @@ public sealed partial class MainViewModel
                 reminderPaused = true;
             }
 
+            await _repository.BeginMaintenanceAsync();
+            repositoryMaintenanceStarted = true;
             var result = await _backupService.RestoreBackupAsync(backupZipPath, _repository.DatabasePath);
+
+            // The file replacement has completed. Release the repository gate before
+            // re-initializing the restored database because InitializeAsync opens its
+            // own SQLite connection. The MainViewModel maintenance flag remains set,
+            // so Google sync still cannot restart during reinitialization.
+            _repository.EndMaintenance();
+            repositoryMaintenanceStarted = false;
+
             await InitializeAsync();
             Status = "バックアップからリストアしました。Google認証は必要に応じて再実行してください。";
             return result;
@@ -51,6 +62,11 @@ public sealed partial class MainViewModel
         {
             try
             {
+                if (repositoryMaintenanceStarted)
+                {
+                    _repository.EndMaintenance();
+                }
+
                 if (reminderPaused)
                 {
                     await _reminderService!.ResumeAfterMaintenanceAsync(reminderWasRunning);
