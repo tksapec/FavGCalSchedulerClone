@@ -310,7 +310,14 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
                   google_email_reminder_enabled = 0,
                   app_reminder_minutes_json = '[]',
                   google_email_reminder_minutes_json = '[]',
-                  google_reminder_metadata_json = NULL
+                  google_reminder_metadata_json = CASE
+                      WHEN google_reminder_metadata_json IS NULL OR json_valid(google_reminder_metadata_json) = 0 THEN NULL
+                      WHEN json_extract(google_reminder_metadata_json, '$.StartTimeZoneId') IS NULL
+                       AND json_extract(google_reminder_metadata_json, '$.EndTimeZoneId') IS NULL THEN NULL
+                      ELSE json_object(
+                          'StartTimeZoneId', json_extract(google_reminder_metadata_json, '$.StartTimeZoneId'),
+                          'EndTimeZoneId', json_extract(google_reminder_metadata_json, '$.EndTimeZoneId'))
+                  END
               WHERE id = $id
               """
             : """
@@ -320,7 +327,14 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
                   google_email_reminder_enabled = 0,
                   app_reminder_minutes_json = '[]',
                   google_email_reminder_minutes_json = '[]',
-                  google_reminder_metadata_json = NULL,
+                  google_reminder_metadata_json = CASE
+                      WHEN google_reminder_metadata_json IS NULL OR json_valid(google_reminder_metadata_json) = 0 THEN NULL
+                      WHEN json_extract(google_reminder_metadata_json, '$.StartTimeZoneId') IS NULL
+                       AND json_extract(google_reminder_metadata_json, '$.EndTimeZoneId') IS NULL THEN NULL
+                      ELSE json_object(
+                          'StartTimeZoneId', json_extract(google_reminder_metadata_json, '$.StartTimeZoneId'),
+                          'EndTimeZoneId', json_extract(google_reminder_metadata_json, '$.EndTimeZoneId'))
+                  END,
                   last_synced_google_etag = COALESCE($etag, last_synced_google_etag)
               WHERE id = $id
               """;
