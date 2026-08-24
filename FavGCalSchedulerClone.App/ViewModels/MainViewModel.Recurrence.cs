@@ -173,6 +173,14 @@ public sealed partial class MainViewModel
         }
 
         var splitStart = SelectedEvent.OriginalStart ?? SelectedEvent.Start;
+        if (splitStart <= master.Start)
+        {
+            // Splitting at the first occurrence is equivalent to editing the whole series.
+            // Keeping a one-occurrence source series would create two series at the same start.
+            await SaveEntireSeriesAsync(candidate);
+            return;
+        }
+
         var original = CloneEventForEditing(master);
         original.RecurrenceJson = RecurrenceRuleHelper.BuildSplitSourceRecurrenceJson(master, splitStart);
         original.IsDirty = true;
@@ -289,6 +297,12 @@ public sealed partial class MainViewModel
         }
 
         var splitStart = SelectedEvent.OriginalStart ?? SelectedEvent.Start;
+        if (splitStart <= master.Start)
+        {
+            await DeleteEntireSeriesAsync();
+            return;
+        }
+
         master.RecurrenceJson = RecurrenceRuleHelper.BuildSplitSourceRecurrenceJson(master, splitStart);
         master.IsDirty = true;
         await _repository.SaveEventAsync(master);
