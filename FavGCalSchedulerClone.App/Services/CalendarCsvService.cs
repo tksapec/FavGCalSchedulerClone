@@ -39,7 +39,7 @@ public sealed class CalendarCsvService
         foreach (var row in rows)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await writer.WriteLineAsync(string.Join(",", row.Select(Escape)));
+            await writer.WriteLineAsync(string.Join(",", row.Select(value => Escape(CsvCellSanitizer.NeutralizeForSpreadsheet(value)))));
         }
 
         return new CalendarCsvExportResult(csvPath, rows.Count - 1);
@@ -202,7 +202,8 @@ public sealed class CalendarCsvService
     private static string Get(IReadOnlyList<string> row, IReadOnlyDictionary<string, int> headerMap, string name)
     {
         var index = headerMap[name];
-        return index < row.Count ? row[index] : "";
+        var value = index < row.Count ? row[index] : "";
+        return CsvCellSanitizer.RestoreNeutralizedValue(value);
     }
 
     private static string? EmptyToNull(string value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
