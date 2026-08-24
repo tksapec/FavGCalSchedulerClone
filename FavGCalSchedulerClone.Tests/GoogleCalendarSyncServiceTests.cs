@@ -246,8 +246,8 @@ public sealed class GoogleCalendarSyncServiceTests
         Assert.Equal("fake-etag-1", created.LastSyncedGoogleEtag);
         Assert.True(api.EventsByCalendar["work"].ContainsKey(created.GoogleEventId!));
         var inserted = api.EventsByCalendar["work"][created.GoogleEventId!];
-        Assert.Equal(GoogleCalendarTimeZone.TokyoIanaId, inserted.Start.TimeZone);
-        Assert.Equal(GoogleCalendarTimeZone.TokyoIanaId, inserted.End.TimeZone);
+        Assert.Equal(GoogleCalendarTimeZone.LocalIanaId, inserted.Start.TimeZone);
+        Assert.Equal(GoogleCalendarTimeZone.LocalIanaId, inserted.End.TimeZone);
 
         created.Title = "local update";
         created.IsDirty = true;
@@ -257,8 +257,8 @@ public sealed class GoogleCalendarSyncServiceTests
         var updatedLocal = (await repository.FindEventByIdAsync(created.Id))!;
         Assert.Equal("fake-etag-2", updatedLocal.LastSyncedGoogleEtag);
         var updated = api.EventsByCalendar["work"][created.GoogleEventId!];
-        Assert.Equal(GoogleCalendarTimeZone.TokyoIanaId, updated.Start.TimeZone);
-        Assert.Equal(GoogleCalendarTimeZone.TokyoIanaId, updated.End.TimeZone);
+        Assert.Equal(GoogleCalendarTimeZone.LocalIanaId, updated.Start.TimeZone);
+        Assert.Equal(GoogleCalendarTimeZone.LocalIanaId, updated.End.TimeZone);
 
         await repository.DeleteEventAsync(created);
         await service.SyncAsync(settings);
