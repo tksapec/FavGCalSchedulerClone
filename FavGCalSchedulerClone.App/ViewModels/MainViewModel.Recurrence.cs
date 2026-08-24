@@ -194,6 +194,13 @@ public sealed partial class MainViewModel
         future.RecurringParentId = null;
         future.OriginalStart = null;
         future.IsRecurrenceException = false;
+        // The new series must be anchored at the occurrence where the split happens,
+        // not at the original master's DTSTART. ApplySeriesEditValues then applies any
+        // date/time change made in the editor relative to this occurrence.
+        future.Start = SelectedEvent.Start;
+        future.End = SelectedEvent.End;
+        future.StartTimeZoneId = SelectedEvent.StartTimeZoneId ?? master.StartTimeZoneId;
+        future.EndTimeZoneId = SelectedEvent.EndTimeZoneId ?? master.EndTimeZoneId ?? future.StartTimeZoneId;
         ApplySeriesEditValues(future, candidate, SelectedEvent);
         future.RecurrenceJson = RecurrenceRuleHelper.BuildSplitFutureRecurrenceJson(master, splitStart);
         future.IsDirty = true;
@@ -353,23 +360,49 @@ public sealed partial class MainViewModel
         target.AppReminderEnabled = candidate.AppReminderEnabled;
         target.GoogleEmailReminderEnabled = candidate.GoogleEmailReminderEnabled;
         target.GoogleReminderMetadata = candidate.GoogleReminderMetadata?.Clone();
-        target.Start = dayShift == 0
-            ? new DateTimeOffset(target.Start.Date.Add(candidate.Start.TimeOfDay), candidate.Start.Offset)
-            : target.Start.AddDays(dayShift).Date.Add(candidate.Start.TimeOfDay);
-        target.End = dayShift == 0
-            ? new DateTimeOffset(target.End.Date.Add(candidate.End.TimeOfDay), candidate.End.Offset)
-            : target.End.AddDays(dayShift).Date.Add(candidate.End.TimeOfDay);
+        target.StartTimeZoneId = candidate.IsAllDay ? null : candidate.StartTimeZoneId;
+        target.EndTimeZoneId = candidate.IsAllDay ? null : candidate.EndTimeZoneId ?? candidate.StartTimeZoneId;
 
+        var targetStartDate = target.Start.Date.AddDays(dayShift);
         if (candidate.IsAllDay)
         {
             var durationDays = Math.Max(1, (candidate.End.Date - candidate.Start.Date).Days);
-            target.Start = new DateTimeOffset(target.Start.Date);
-            target.End = new DateTimeOffset(target.Start.Date.AddDays(durationDays));
+            target.Start = new DateTimeOffset(targetStartDate);
+            target.End = new DateTimeOffset(targetStartDate.AddDays(durationDays));
+            return;
         }
-        else
+
+        var endDayOffset = (candidate.End.Date - candidate.Start.Date).Days;
+        var startWallClock = targetStartDate.Add(candidate.Start.TimeOfDay);
+        var endWallClock = targetStartDate.AddDays(endDayOffset).Add(candidate.End.TimeOfDay);
+        target.Start = CreateSeriesDateTimeOffset(
+            startWallClock,
+            target.StartTimeZoneId,
+            target.Start.Offset);
+        target.End = CreateSeriesDateTimeOffset(
+            endWallClock,
+            target.EndTimeZoneId ?? target.StartTimeZoneId,
+            target.End.Offset);
+    }
+
+    private static DateTimeOffset CreateSeriesDateTimeOffset(
+        DateTime wallClock,
+        string? timeZoneId,
+        TimeSpan preferredOffset)
+    {
+        if (GoogleCalendarTimeZone.TryCreateDateTimeOffset(
+                wallClock,
+                timeZoneId,
+                preferredOffset,
+                out var value))
         {
-            var duration = candidate.End - candidate.Start;
-            target.End = target.Start.Add(duration);
+            return value;
         }
+
+        // BuildEditedEventAsync already validates the edited occurrence. The only
+        // remaining failure case is normally an invalid wall-clock on the older series
+        // anchor date (for example a DST gap). Keep the prior offset rather than
+        // silently applying the machine-local zone.
+        return new DateTimeOffset(DateTime.SpecifyKind(wallClock, DateTimeKind.Unspecified), preferredOffset);
     }
 }
