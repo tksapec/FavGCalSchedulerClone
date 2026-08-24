@@ -27,10 +27,28 @@ public sealed partial class MainViewModel
             throw new InvalidOperationException("Google同期中はバックアップをリストアできません。同期完了後に再実行してください。");
         }
 
-        var result = await _backupService.RestoreBackupAsync(backupZipPath, _repository.DatabasePath);
-        await InitializeAsync();
-        Status = "バックアップからリストアしました。Google認証は必要に応じて再実行してください。";
-        return result;
+        var reminderWasRunning = false;
+        var reminderPaused = false;
+        if (_reminderService is not null)
+        {
+            reminderWasRunning = await _reminderService.PauseForMaintenanceAsync();
+            reminderPaused = true;
+        }
+
+        try
+        {
+            var result = await _backupService.RestoreBackupAsync(backupZipPath, _repository.DatabasePath);
+            await InitializeAsync();
+            Status = "バックアップからリストアしました。Google認証は必要に応じて再実行してください。";
+            return result;
+        }
+        finally
+        {
+            if (reminderPaused)
+            {
+                await _reminderService!.ResumeAfterMaintenanceAsync(reminderWasRunning);
+            }
+        }
     }
 
     public async Task<BackupResult> CreateDiagnosticsBulkBackupAsync()
