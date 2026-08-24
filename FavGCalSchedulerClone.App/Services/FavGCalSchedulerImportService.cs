@@ -69,6 +69,31 @@ public sealed class FavGCalSchedulerImportService
         var parseErrors = analysis.ParseErrorCount;
         var warnings = new List<string>(analysis.Warnings);
         var normalizedImportedEvents = new List<CalendarEvent>();
+        var stagedWrites = new Dictionary<string, CalendarEvent>(StringComparer.Ordinal);
+        var stagedByGoogle = new Dictionary<(string CalendarId, string GoogleEventId), CalendarEvent>();
+        var stagedByDuplicate = new Dictionary<(string CalendarId, string Title, long StartUtcTicks, long EndUtcTicks, string Location), CalendarEvent>();
+
+        static (string CalendarId, string Title, long StartUtcTicks, long EndUtcTicks, string Location) DuplicateKey(CalendarEvent calendarEvent) =>
+            (calendarEvent.CalendarId, calendarEvent.Title, calendarEvent.Start.UtcTicks, calendarEvent.End.UtcTicks, calendarEvent.Location ?? "");
+
+        void IndexStagedEvent(CalendarEvent calendarEvent)
+        {
+            if (!calendarEvent.IsDeleted)
+            {
+                stagedByDuplicate[DuplicateKey(calendarEvent)] = calendarEvent;
+            }
+
+            if (!string.IsNullOrWhiteSpace(calendarEvent.GoogleEventId))
+            {
+                stagedByGoogle[(calendarEvent.CalendarId, calendarEvent.GoogleEventId)] = calendarEvent;
+            }
+        }
+
+        void StageWrite(CalendarEvent calendarEvent)
+        {
+            stagedWrites[calendarEvent.Id] = calendarEvent;
+            IndexStagedEvent(calendarEvent);
+        }
 
         foreach (var sourceCalendar in analysis.Calendars)
         {
@@ -102,7 +127,16 @@ public sealed class FavGCalSchedulerImportService
 
                 if (!string.IsNullOrWhiteSpace(calendarEvent.GoogleEventId))
                 {
-                    var existingGoogleEvent = await _repository.FindEventByGoogleEventIdAsync(targetCalendarId, calendarEvent.GoogleEventId);
+                    var googleKey = (targetCalendarId, calendarEvent.GoogleEventId);
+                    if (!stagedByGoogle.TryGetValue(googleKey, out var existingGoogleEvent))
+                    {
+                        existingGoogleEvent = await _repository.FindEventByGoogleEventIdAsync(targetCalendarId, calendarEvent.GoogleEventId);
+                        if (existingGoogleEvent is not null)
+                        {
+                            IndexStagedEvent(existingGoogleEvent);
+                        }
+                    }
+
                     if (existingGoogleEvent is not null)
                     {
                         var colorChanged = ApplyImportedColor(
@@ -120,7 +154,7 @@ public sealed class FavGCalSchedulerImportService
                                 options.MarkImportedEventsDirty);
                         if (colorChanged || todoChanged || descriptionChanged)
                         {
-                            await _repository.SaveEventAsync(existingGoogleEvent);
+                            StageWrite(existingGoogleEvent);
                         }
 
                         if (colorChanged)
@@ -140,7 +174,16 @@ public sealed class FavGCalSchedulerImportService
 
                 if (options.SkipDuplicates)
                 {
-                    var existingDuplicate = await _repository.FindDuplicateEventAsync(calendarEvent);
+                    var duplicateKey = DuplicateKey(calendarEvent);
+                    if (!stagedByDuplicate.TryGetValue(duplicateKey, out var existingDuplicate))
+                    {
+                        existingDuplicate = await _repository.FindDuplicateEventAsync(calendarEvent);
+                        if (existingDuplicate is not null)
+                        {
+                            IndexStagedEvent(existingDuplicate);
+                        }
+                    }
+
                     if (existingDuplicate is not null)
                     {
                         var colorChanged = ApplyImportedColor(
@@ -158,7 +201,7 @@ public sealed class FavGCalSchedulerImportService
                                 options.MarkImportedEventsDirty);
                         if (colorChanged || todoChanged || descriptionChanged)
                         {
-                            await _repository.SaveEventAsync(existingDuplicate);
+                            StageWrite(existingDuplicate);
                         }
 
                         if (colorChanged)
@@ -176,7 +219,7 @@ public sealed class FavGCalSchedulerImportService
                     }
                 }
 
-                await _repository.SaveEventAsync(calendarEvent);
+                StageWrite(calendarEvent);
                 imported++;
             }
         }
@@ -187,6 +230,11 @@ public sealed class FavGCalSchedulerImportService
             var exportData = await _compareService.LoadFromZipAsync(options.ComparisonZipPath, cancellationToken);
             comparisonSummary = _compareService.Compare(normalizedImportedEvents, exportData.Events);
         }
+
+        await CalendarRepositoryAtomicWriter.SaveEventsAsync(
+            _repository,
+            stagedWrites.Values,
+            cancellationToken: cancellationToken);
 
         return new FavGCalImportResult(imported, linked, skipped, correctedColors, correctedTodoDescriptions, analysis.UnrestoredTodoCount, parseErrors, warnings, comparisonSummary);
     }
