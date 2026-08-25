@@ -91,6 +91,18 @@ public sealed class ReliabilityHardeningSourceTests
     }
 
     [Fact]
+    public async Task AtomicWriters_DoNotMaskTheOriginalFailureWhenRollbackAlsoFails()
+    {
+        var events = await ReadAppFileAsync("Services", "CalendarRepositoryAtomicWriter.cs");
+        var tags = await ReadAppFileAsync("Services", "CalendarTagAtomicWriter.cs");
+
+        Assert.Contains("RollbackSafelyAsync", events);
+        Assert.Contains("RollbackSafelyAsync", tags);
+        Assert.Contains("catch (Exception rollbackException)", events);
+        Assert.Contains("catch (Exception rollbackException)", tags);
+    }
+
+    [Fact]
     public async Task Undo_IsConsumedOnlyAfterTheTransactionalRestoreSucceeds()
     {
         var source = await ReadAppFileAsync("ViewModels", "MainViewModel.BulkUndo.cs");
