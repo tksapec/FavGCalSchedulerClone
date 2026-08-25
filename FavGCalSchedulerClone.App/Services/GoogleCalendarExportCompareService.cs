@@ -14,12 +14,30 @@ public sealed class GoogleCalendarExportCompareService
         }
 
         using var archive = ZipFile.OpenRead(zipPath);
-        var entry = archive.Entries.FirstOrDefault(item => item.FullName.EndsWith(".ics", StringComparison.OrdinalIgnoreCase))
-            ?? throw new InvalidDataException("The zip does not contain any .ics files.");
+        var entries = archive.Entries
+            .Where(item => item.FullName.EndsWith(".ics", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (entries.Length == 0)
+        {
+            throw new InvalidDataException("The zip does not contain any .ics files.");
+        }
 
-        using var reader = new StreamReader(entry.Open(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-        var content = await reader.ReadToEndAsync(cancellationToken);
-        return ParseIcs(entry.FullName, content);
+        var calendars = new List<GoogleCalendarExportData>(entries.Length);
+        foreach (var entry in entries)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var reader = new StreamReader(entry.Open(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            var content = await reader.ReadToEndAsync(cancellationToken);
+            calendars.Add(ParseIcs(entry.FullName, content));
+        }
+
+        var calendarName = string.Join(", ", calendars
+            .Select(item => item.CalendarName)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.Ordinal));
+        return new GoogleCalendarExportData(
+            calendarName,
+            calendars.SelectMany(item => item.Events).ToArray());
     }
 
     public GoogleCalendarComparisonSummary Compare(IEnumerable<CalendarEvent> localEvents, IEnumerable<GoogleExportEvent> exportedEvents)
