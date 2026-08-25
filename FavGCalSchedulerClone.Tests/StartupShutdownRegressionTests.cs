@@ -42,7 +42,7 @@ public sealed class StartupShutdownRegressionTests
     }
 
     [Fact]
-    public async Task ViewModelInitializationFailure_StopsTheRemainingStartupSequence()
+    public async Task ViewModelInitializationFailure_StopsAndPropagatesTheStartupSequence()
     {
         var source = await File.ReadAllTextAsync(Path.Combine(
             Root,
@@ -51,7 +51,7 @@ public sealed class StartupShutdownRegressionTests
             "ApplicationStartupService.cs"));
 
         Assert.Contains(
-            "MessageBox.Show(owner, ex.Message, \"初期化エラー\", MessageBoxButton.OK, MessageBoxImage.Error);\n            return;",
+            "MessageBox.Show(owner, ex.Message, \"初期化エラー\", MessageBoxButton.OK, MessageBoxImage.Error);\n            throw;",
             source,
             StringComparison.Ordinal);
     }
