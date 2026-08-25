@@ -18,6 +18,8 @@ public sealed record ReminderMonitoringSnapshot(
     string? LastError,
     IReadOnlyList<ReminderCandidateDiagnostic> Candidates)
 {
+    public IReadOnlyList<ReminderCandidateDiagnostic> Candidates { get; init; } = Candidates ?? [];
+
     public static ReminderMonitoringSnapshot Stopped { get; } = new(
         false, null, null, null, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, null, []);
 }
