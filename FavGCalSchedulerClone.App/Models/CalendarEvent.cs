@@ -232,7 +232,8 @@ public sealed class CalendarEvent
 
     private static string? NormalizeRecurrenceJson(string? value)
     {
-        if (string.IsNullOrWhiteSpace(value))
+        if (string.IsNullOrWhiteSpace(value)
+            || !value.Contains("null", StringComparison.Ordinal))
         {
             return value;
         }
