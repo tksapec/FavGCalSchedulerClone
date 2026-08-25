@@ -28,6 +28,10 @@ public sealed class FallbackReminderNotifier : IReminderNotifier, IReminderNotif
                 await _fallback.ShowAsync(notification, cancellationToken);
             }
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch
         {
             _lastPrimaryFailed = true;
