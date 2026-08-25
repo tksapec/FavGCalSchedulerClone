@@ -28,7 +28,7 @@ public static class RecurrenceExpansionService
                 .Where(item => BelongsToMaster(item, master))
                 .ToArray();
 
-            foreach (var occurrenceStart in RecurrenceRuleHelper.ExpandOccurrences(master, rangeStart, rangeEnd))
+            foreach (var occurrenceStart in ExpandMasterOccurrencesSafely(master, rangeStart, rangeEnd))
             {
                 var exception = seriesExceptions
                     .Where(item => item.OriginalStart is not null)
@@ -73,6 +73,23 @@ public static class RecurrenceExpansionService
             .OrderBy(item => item.Start)
             .ThenBy(item => item.Title, StringComparer.CurrentCultureIgnoreCase)
             .ToArray();
+    }
+
+    private static IReadOnlyList<DateTimeOffset> ExpandMasterOccurrencesSafely(
+        CalendarEvent master,
+        DateTimeOffset rangeStart,
+        DateTimeOffset rangeEnd)
+    {
+        try
+        {
+            return RecurrenceRuleHelper.ExpandOccurrences(master, rangeStart, rangeEnd).ToArray();
+        }
+        catch
+        {
+            // A single malformed persisted RRULE must not prevent unrelated events
+            // from rendering. The source master remains stored and can still be edited.
+            return [];
+        }
     }
 
     private static bool BelongsToMaster(CalendarEvent exception, CalendarEvent master)
