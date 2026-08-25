@@ -127,8 +127,7 @@ public partial class App : System.Windows.Application
 
     private async Task CompleteStartupInitializationAsync(Func<Task> initialize, IAppLogger logger)
     {
-        try { await RunStartupInitializationAsync(initialize, logger); }
-        finally { _startupInitializationCompleted = true; }
+        _startupInitializationCompleted = await RunStartupInitializationAsync(initialize, logger);
     }
 
     private static ServiceProvider CreateServiceProvider()
@@ -159,15 +158,17 @@ public partial class App : System.Windows.Application
         return services.BuildServiceProvider();
     }
 
-    internal static async Task RunStartupInitializationAsync(Func<Task> initialize, IAppLogger logger)
+    internal static async Task<bool> RunStartupInitializationAsync(Func<Task> initialize, IAppLogger logger)
     {
         try
         {
             await initialize();
+            return true;
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Application startup initialization failed.");
+            return false;
         }
     }
 
