@@ -619,7 +619,7 @@ public sealed class ReminderNotificationService : IDisposable
 
     private static DateTimeOffset? TryGetSnoozedUntil(IReadOnlyDictionary<string, string> snoozed, string occurrenceKey)
     {
-        return snoozed.TryGetValue(notification.OccurrenceKey, out var value) && DateTimeOffset.TryParse(value, out var parsed) ? parsed : null;
+        return snoozed.TryGetValue(occurrenceKey, out var value) && DateTimeOffset.TryParse(value, out var parsed) ? parsed : null;
     }
 
     private static ReminderCandidateDiagnostic CreateCandidateDiagnostic(
