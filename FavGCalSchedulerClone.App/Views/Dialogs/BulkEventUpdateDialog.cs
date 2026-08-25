@@ -51,7 +51,7 @@ internal static class BulkEventUpdateDialog
             reminderPanel.IsEnabled = reminderEnabled.IsChecked == true;
             ok.IsEnabled = calendarEnabled.IsChecked == true && calendar.SelectedItem is string
                 || colorEnabled.IsChecked == true
-                || reminderEnabled.IsChecked == true && minutes.SelectedValue is int;
+                || reminderEnabled.IsChecked == true;
         }
 
         calendarEnabled.Checked += (_, _) => UpdateApplyState();
@@ -66,12 +66,13 @@ internal static class BulkEventUpdateDialog
         BulkEventUpdateRequest? result = null;
         ok.Click += (_, _) =>
         {
+            var selectedReminderMinutes = minutes.SelectedValue as int?;
             result = new BulkEventUpdateRequest(
                 CalendarId: calendarEnabled.IsChecked == true ? calendar.SelectedItem as string : null,
                 ColorId: colorEnabled.IsChecked == true ? color.SelectedValue as string : null,
-                ReminderMinutesBeforeStart: reminderEnabled.IsChecked == true ? minutes.SelectedValue as int? : null,
-                AppReminderEnabled: reminderEnabled.IsChecked == true ? appReminder.IsChecked == true : null,
-                GoogleEmailReminderEnabled: reminderEnabled.IsChecked == true ? emailReminder.IsChecked == true : null,
+                ReminderMinutesBeforeStart: reminderEnabled.IsChecked == true ? selectedReminderMinutes : null,
+                AppReminderEnabled: reminderEnabled.IsChecked == true ? selectedReminderMinutes is null ? false : appReminder.IsChecked == true : null,
+                GoogleEmailReminderEnabled: reminderEnabled.IsChecked == true ? selectedReminderMinutes is null ? false : emailReminder.IsChecked == true : null,
                 UpdateColor: colorEnabled.IsChecked == true);
             if (result.HasUpdates)
             {
