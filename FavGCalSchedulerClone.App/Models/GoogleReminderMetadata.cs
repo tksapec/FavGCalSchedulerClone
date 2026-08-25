@@ -2,11 +2,36 @@ namespace FavGCalSchedulerClone.App.Models;
 
 public sealed class GoogleReminderMetadata
 {
+    private List<int> _popupMinutes = [];
+    private List<int> _emailMinutes = [];
+    private List<int> _defaultPopupMinutes = [];
+    private List<int> _defaultEmailMinutes = [];
+
     public bool? UseDefault { get; set; }
-    public List<int> PopupMinutes { get; set; } = [];
-    public List<int> EmailMinutes { get; set; } = [];
-    public List<int> DefaultPopupMinutes { get; set; } = [];
-    public List<int> DefaultEmailMinutes { get; set; } = [];
+    public List<int> PopupMinutes
+    {
+        get => _popupMinutes;
+        set => _popupMinutes = value ?? [];
+    }
+
+    public List<int> EmailMinutes
+    {
+        get => _emailMinutes;
+        set => _emailMinutes = value ?? [];
+    }
+
+    public List<int> DefaultPopupMinutes
+    {
+        get => _defaultPopupMinutes;
+        set => _defaultPopupMinutes = value ?? [];
+    }
+
+    public List<int> DefaultEmailMinutes
+    {
+        get => _defaultEmailMinutes;
+        set => _defaultEmailMinutes = value ?? [];
+    }
+
     public int? AdoptedReminderMinutes { get; set; }
     public string? AdoptedReminderMethod { get; set; }
     public string? Source { get; set; }
