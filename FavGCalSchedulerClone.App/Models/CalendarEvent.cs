@@ -5,6 +5,8 @@ public sealed class CalendarEvent
     private string? _startTimeZoneId;
     private string? _endTimeZoneId;
     private GoogleReminderMetadata? _googleReminderMetadata;
+    private List<int> _appReminderMinutesBeforeStart = [];
+    private List<int> _googleEmailReminderMinutesBeforeStart = [];
 
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string? GoogleEventId { get; set; }
@@ -65,8 +67,18 @@ public sealed class CalendarEvent
     public string? DirtyFields { get; set; }
     public bool IsTodoLike { get; set; }
     public int? ReminderMinutesBeforeStart { get; set; }
-    public List<int> AppReminderMinutesBeforeStart { get; set; } = [];
-    public List<int> GoogleEmailReminderMinutesBeforeStart { get; set; } = [];
+    public List<int> AppReminderMinutesBeforeStart
+    {
+        get => _appReminderMinutesBeforeStart;
+        set => _appReminderMinutesBeforeStart = value ?? [];
+    }
+
+    public List<int> GoogleEmailReminderMinutesBeforeStart
+    {
+        get => _googleEmailReminderMinutesBeforeStart;
+        set => _googleEmailReminderMinutesBeforeStart = value ?? [];
+    }
+
     internal bool? AppReminderEnabled { get; set; }
     internal bool? GoogleEmailReminderEnabled { get; set; }
     public GoogleReminderMetadata? GoogleReminderMetadata
