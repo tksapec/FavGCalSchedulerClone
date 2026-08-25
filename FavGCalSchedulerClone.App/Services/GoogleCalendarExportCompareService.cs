@@ -125,7 +125,43 @@ public sealed class GoogleCalendarExportCompareService
             return DateTimeOffset.ParseExact(value, "yyyyMMdd'T'HHmmss'Z'", null).ToLocalTime();
         }
 
-        return DateTimeOffset.ParseExact(value, "yyyyMMdd'T'HHmmss", null, System.Globalization.DateTimeStyles.AssumeLocal);
+        var wallClock = DateTime.ParseExact(
+            value,
+            "yyyyMMdd'T'HHmmss",
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.None);
+        var timeZoneId = TryGetIcsParameter(item.Key, "TZID");
+        if (!string.IsNullOrWhiteSpace(timeZoneId)
+            && GoogleCalendarTimeZone.TryCreateDateTimeOffset(wallClock, timeZoneId, preferredOffset: null, out var zonedValue))
+        {
+            return zonedValue;
+        }
+
+        return DateTimeOffset.ParseExact(
+            value,
+            "yyyyMMdd'T'HHmmss",
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeLocal);
+    }
+
+    private static string? TryGetIcsParameter(string key, string parameterName)
+    {
+        foreach (var part in key.Split(';').Skip(1))
+        {
+            var separator = part.IndexOf('=');
+            if (separator <= 0
+                || !string.Equals(part[..separator], parameterName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var value = part[(separator + 1)..].Trim();
+            return value.Length >= 2 && value[0] == '"' && value[^1] == '"'
+                ? value[1..^1]
+                : value;
+        }
+
+        return null;
     }
 
     private static string[] UnfoldLines(string content)
