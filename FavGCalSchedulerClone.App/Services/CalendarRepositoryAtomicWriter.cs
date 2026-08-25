@@ -55,7 +55,7 @@ internal static class CalendarRepositoryAtomicWriter
         }
         catch
         {
-            await transaction.RollbackAsync(CancellationToken.None);
+            await RollbackSafelyAsync(transaction);
             throw;
         }
     }
@@ -203,6 +203,18 @@ internal static class CalendarRepositoryAtomicWriter
             : JsonSerializer.Serialize(calendarEvent.GoogleReminderMetadata));
         command.Parameters.AddWithValue("$app_reminder_minutes_json", SerializeReminderMinutes(appReminderMinutes));
         command.Parameters.AddWithValue("$google_email_reminder_minutes_json", SerializeReminderMinutes(googleEmailReminderMinutes));
+    }
+
+    private static async Task RollbackSafelyAsync(SqliteTransaction transaction)
+    {
+        try
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+        }
+        catch (Exception rollbackException)
+        {
+            System.Diagnostics.Debug.WriteLine(rollbackException);
+        }
     }
 
     private static DateTimeOffset ParseDateTimeOffset(string value)
