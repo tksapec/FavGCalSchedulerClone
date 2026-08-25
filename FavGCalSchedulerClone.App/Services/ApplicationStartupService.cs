@@ -43,7 +43,7 @@ public sealed class ApplicationStartupService : IApplicationStartupService, IDis
             }
 
             MessageBox.Show(owner, ex.Message, "初期化エラー", MessageBoxButton.OK, MessageBoxImage.Error);
-            return;
+            throw;
         }
 
         if (_disposed)
