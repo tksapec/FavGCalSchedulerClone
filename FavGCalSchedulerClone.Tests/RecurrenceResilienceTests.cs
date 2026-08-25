@@ -40,6 +40,26 @@ public sealed class RecurrenceResilienceTests
     }
 
     [Fact]
+    public void ExpandForRange_IgnoresNullRecurrenceEntriesAndUsesValidRule()
+    {
+        var rangeStart = new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.FromHours(9));
+        var masterStart = rangeStart.AddDays(1).AddHours(9);
+        var master = new CalendarEvent
+        {
+            Id = "series",
+            CalendarId = "primary",
+            Title = "Recurring event",
+            Start = masterStart,
+            End = masterStart.AddHours(1),
+            RecurrenceJson = "[null,\"RRULE:FREQ=DAILY;COUNT=2\"]"
+        };
+
+        var expanded = RecurrenceExpansionService.ExpandForRange([master], rangeStart, rangeStart.AddMonths(1));
+
+        Assert.Equal(2, expanded.Count(item => item.Id.StartsWith("series@", StringComparison.Ordinal)));
+    }
+
+    [Fact]
     public void ExpandForRange_NormalizesNullReminderCollectionsWhileCloning()
     {
         var rangeStart = new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.FromHours(9));
