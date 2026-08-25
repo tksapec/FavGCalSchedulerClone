@@ -60,10 +60,15 @@ public sealed class ReminderNotificationService : IDisposable
 
     public void Stop()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
         _timer.Change(Timeout.Infinite, Timeout.Infinite);
         _isRunning = false;
         UpdateRuntimeState(null);
-        _ = SaveDiagnosticsAsync(force: true);
+        _ = SaveDiagnosticsSafelyAsync();
     }
 
     public async Task<bool> PauseForMaintenanceAsync(CancellationToken cancellationToken = default)
@@ -582,9 +587,12 @@ public sealed class ReminderNotificationService : IDisposable
                 dispatched = true;
             }
 
-            if (ReminderTriggered is not null)
+            if (ReminderTriggered is { } triggered)
             {
-                await ReminderTriggered.Invoke(notification);
+                foreach (var handler in triggered.GetInvocationList().Cast<Func<ReminderNotification, Task>>())
+                {
+                    await handler(notification);
+                }
                 dispatched = true;
             }
 
@@ -611,7 +619,7 @@ public sealed class ReminderNotificationService : IDisposable
 
     private static DateTimeOffset? TryGetSnoozedUntil(IReadOnlyDictionary<string, string> snoozed, string occurrenceKey)
     {
-        return snoozed.TryGetValue(occurrenceKey, out var value) && DateTimeOffset.TryParse(value, out var parsed) ? parsed : null;
+        return snoozed.TryGetValue(notification.OccurrenceKey, out var value) && DateTimeOffset.TryParse(value, out var parsed) ? parsed : null;
     }
 
     private static ReminderCandidateDiagnostic CreateCandidateDiagnostic(
@@ -761,6 +769,18 @@ public sealed class ReminderNotificationService : IDisposable
         await _repository.SaveSettingValueAsync(ReminderDiagnosticsKey, JsonSerializer.Serialize(_diagnostics));
         _lastDiagnosticsSavedAt = savedAt;
         _lastPersistedDiagnosticsSignature = signature;
+    }
+
+    private async Task SaveDiagnosticsSafelyAsync()
+    {
+        try
+        {
+            await SaveDiagnosticsAsync(force: true);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(ex);
+        }
     }
 
     private static string CreateDiagnosticsSignature(ReminderMonitoringSnapshot snapshot)
