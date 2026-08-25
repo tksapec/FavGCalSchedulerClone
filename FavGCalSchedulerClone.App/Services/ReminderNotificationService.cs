@@ -534,7 +534,9 @@ public sealed class ReminderNotificationService : IDisposable
 
         try
         {
-            return JsonSerializer.Deserialize<List<ReminderHistoryItem>>(json) ?? [];
+            return (JsonSerializer.Deserialize<List<ReminderHistoryItem?>>(json) ?? [])
+                .OfType<ReminderHistoryItem>()
+                .ToArray();
         }
         catch (Exception ex) when (ex is JsonException or NotSupportedException)
         {
