@@ -25,6 +25,11 @@ public sealed class ApplicationStartupService : IApplicationStartupService, IDis
 
     public async Task InitializeAsync(Window owner, Func<IReminderNotifier> notifierFactory)
     {
+        if (_disposed)
+        {
+            return;
+        }
+
         try
         {
             await _viewModel.InitializeAsync();
@@ -32,25 +37,57 @@ public sealed class ApplicationStartupService : IApplicationStartupService, IDis
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Main view model initialization failed.");
+            if (_disposed)
+            {
+                return;
+            }
+
             MessageBox.Show(owner, ex.Message, "初期化エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+
+        if (_disposed)
+        {
+            return;
         }
 
         try
         {
             _reminderService.SetNotifier(notifierFactory());
             await _reminderService.StartAsync();
+            if (_disposed)
+            {
+                _reminderService.Stop();
+                return;
+            }
+
             _viewModel.Status = "通知監視を開始しました";
         }
         catch (Exception ex)
         {
             Debug.WriteLine(ex);
             _logger?.LogError(ex, "Reminder monitoring startup failed.");
+            if (_disposed)
+            {
+                return;
+            }
+
             MessageBox.Show(owner, $"通知監視を開始できませんでした。\n{ex.Message}", "通知エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+
+        if (_disposed)
+        {
+            return;
         }
 
         try
         {
             _automaticSyncTimer.Start();
+            if (_disposed)
+            {
+                _automaticSyncTimer.Stop();
+                return;
+            }
+
             if (owner is MainWindow mainWindow)
             {
                 mainWindow.StartOperationalStatusRefresh();
