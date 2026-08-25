@@ -268,6 +268,21 @@ public sealed class TagServiceTests
     }
 
     [Fact]
+    public void ResolveDisplayColor_NullCachedPaletteValue_UsesBuiltInFallback()
+    {
+        var item = new CalendarEvent { Title = "Remote", ColorId = "5" };
+        var cached = new Dictionary<string, EventDisplayColors>
+        {
+            ["5"] = null!
+        };
+
+        var color = TagService.ResolveDisplayColors(item, cached);
+
+        Assert.Equal("#FBD75B", color.Background);
+        Assert.Equal("#1D1D1D", color.Foreground);
+    }
+
+    [Fact]
     public void ResolveSelectedDisplayColors_UsesVisibleTintForWhiteLabel()
     {
         var color = TagService.ResolveSelectedDisplayColors("#FFFFFF", "#111827");
