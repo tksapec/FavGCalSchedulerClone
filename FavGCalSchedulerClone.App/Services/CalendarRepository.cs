@@ -840,7 +840,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
                 DirtyFields = reader.IsDBNull(23) ? null : reader.GetString(23),
                 GoogleReminderMetadata = reader.IsDBNull(24)
                     ? null
-                    : JsonSerializer.Deserialize<GoogleReminderMetadata>(reader.GetString(24)),
+                    : DeserializeGoogleReminderMetadata(reader.GetString(24)),
                 AppReminderMinutesBeforeStart = reader.FieldCount <= 25 || reader.IsDBNull(25)
                     ? []
                     : DeserializeReminderMinutes(reader.GetString(25)),
@@ -1020,6 +1020,23 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         return calendarEvent.GoogleEmailReminderEnabled == true && calendarEvent.ReminderMinutesBeforeStart is int minutes
             ? [minutes]
             : [];
+    }
+
+    private static GoogleReminderMetadata? DeserializeGoogleReminderMetadata(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<GoogleReminderMetadata>(json);
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            return null;
+        }
     }
 
     private static List<int> DeserializeReminderMinutes(string? json)
