@@ -1,4 +1,5 @@
 using FavGCalSchedulerClone.App.Models;
+using Microsoft.Data.Sqlite;
 
 namespace FavGCalSchedulerClone.App.Services;
 
@@ -40,8 +41,20 @@ internal static class CalendarTagAtomicWriter
         }
         catch
         {
-            await transaction.RollbackAsync(CancellationToken.None);
+            await RollbackSafelyAsync(transaction);
             throw;
+        }
+    }
+
+    private static async Task RollbackSafelyAsync(SqliteTransaction transaction)
+    {
+        try
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+        }
+        catch (Exception rollbackException)
+        {
+            System.Diagnostics.Debug.WriteLine(rollbackException);
         }
     }
 }
