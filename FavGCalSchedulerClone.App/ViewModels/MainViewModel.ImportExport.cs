@@ -121,7 +121,7 @@ public sealed partial class MainViewModel
             var key = trimmed[..separator].Trim();
             var value = trimmed[(separator + 1)..].Trim();
             if (section.Equals("DISP_INFO", StringComparison.OrdinalIgnoreCase)
-                && new[] { "DeletePopup", "AppClose", "EditScheduleWindowHide", "StartWeekdayIndex", "WeekdayType", "FontSize", "BottomInfoFontSize", "ToDoRunLimitMonthCount", "ToDoCompLimitMonthCount" }
+                && new[] { "DeletePopup", "EditScheduleWindowHide", "StartWeekdayIndex", "WeekdayType", "FontSize", "BottomInfoFontSize", "ToDoRunLimitMonthCount", "ToDoCompLimitMonthCount" }
                     .Contains(key, StringComparer.OrdinalIgnoreCase))
             {
                 values[key] = value;
@@ -144,11 +144,6 @@ public sealed partial class MainViewModel
         if (values.TryGetValue("DeletePopup", out var deletePopup))
         {
             _settings.ConfirmBeforeDelete = deletePopup != "0";
-        }
-
-        if (values.TryGetValue("AppClose", out var appClose))
-        {
-            _settings.CloseButtonExitsApplication = appClose != "0";
         }
 
         if (values.TryGetValue("ScheduleDeaultAllDay", out var defaultAllDay))
