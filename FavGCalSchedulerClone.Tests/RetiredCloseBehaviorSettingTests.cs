@@ -14,27 +14,26 @@ public sealed class RetiredCloseBehaviorSettingTests
     {
         var settings = JsonSerializer.Deserialize<AppSettings>("""
             {
-              "CloseButtonExitsApplication": false,
+              "CloseButtonExitsApplication": true,
               "ConfirmBeforeDelete": false
             }
             """);
 
         Assert.NotNull(settings);
         Assert.False(settings.ConfirmBeforeDelete);
+        Assert.False(settings.CloseButtonExitsApplication);
         Assert.DoesNotContain("CloseButtonExitsApplication", JsonSerializer.Serialize(settings), StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task Sources_DoNotExposeOrImportRetiredCloseBehaviorSetting()
+    public async Task Sources_DoNotPersistOrImportRetiredCloseBehaviorSetting()
     {
         var appSettings = await ReadAppFileAsync("Models", "AppSettings.cs");
-        var mainViewModel = await ReadAppFileAsync("ViewModels", "MainViewModel.cs");
         var settingsViewModel = await ReadAppFileAsync("ViewModels", "MainViewModel.Settings.cs");
         var importExport = await ReadAppFileAsync("ViewModels", "MainViewModel.ImportExport.cs");
         var mainWindow = await ReadAppFileAsync("MainWindow.xaml.cs");
 
-        Assert.DoesNotContain("CloseButtonExitsApplication", appSettings, StringComparison.Ordinal);
-        Assert.DoesNotContain("CloseButtonExitsApplication", mainViewModel, StringComparison.Ordinal);
+        Assert.Contains("[JsonIgnore]", appSettings, StringComparison.Ordinal);
         Assert.DoesNotContain("CloseButtonExitsApplication", settingsViewModel, StringComparison.Ordinal);
         Assert.DoesNotContain("AppClose", importExport, StringComparison.Ordinal);
 
