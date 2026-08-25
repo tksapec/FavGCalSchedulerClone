@@ -41,6 +41,30 @@ public sealed class UndoConsistencyRegressionTests
     }
 
     [Fact]
+    public async Task ReminderTestSchedule_BecomesTheLatestUndoOperation()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        try
+        {
+            var repository = new CalendarRepository(dbPath);
+            await repository.InitializeAsync();
+            var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+            await viewModel.InitializeAsync();
+
+            var created = await viewModel.CreateTwoMinuteReminderTestEventAsync();
+
+            Assert.Equal("予定追加", viewModel.UndoStatusText);
+            Assert.NotNull(await repository.FindEventByIdAsync(created.Id));
+            Assert.True(await viewModel.UndoLastChangeAsync());
+            Assert.Null(await repository.FindEventByIdAsync(created.Id));
+        }
+        finally
+        {
+            CleanupDatabase(dbPath);
+        }
+    }
+
+    [Fact]
     public async Task NewTodo_BecomesTheLatestUndoOperation()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
