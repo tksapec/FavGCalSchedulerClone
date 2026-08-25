@@ -32,11 +32,7 @@ public sealed partial class MainViewModel
 
     public async Task SaveTagsAsync()
     {
-        foreach (var tag in Tags)
-        {
-            await _repository.SaveTagAsync(tag);
-        }
-
+        await CalendarTagAtomicWriter.SaveTagsAsync(_repository, Tags);
         await RefreshCalendarAsync();
         Status = "タグ設定を保存しました。";
     }
