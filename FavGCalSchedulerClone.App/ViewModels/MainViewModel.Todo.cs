@@ -41,6 +41,7 @@ public sealed partial class MainViewModel
         };
 
         await _repository.SaveEventAsync(todoEvent);
+        CaptureUndo("ToDo追加", [], [todoEvent.Id]);
         await RefreshCalendarAsync();
         Status = "ToDoを保存しました。同期するとGoogleカレンダーへ反映されます。";
         await SyncAfterLocalChangeAsync();
@@ -55,22 +56,23 @@ public sealed partial class MainViewModel
         }
 
         var originalTodo = CloneEventForEditing(editingTodo);
-        CaptureUndo("ToDo編集", [originalTodo]);
-        editingTodo.Title = title.Trim();
-        editingTodo.Description = TagService.UpdateTodoMarker(description, priority, progress);
-        editingTodo.CalendarId = ResolveEditorCalendarId();
-        editingTodo.Start = new DateTimeOffset(dueDate.Date);
-        editingTodo.End = new DateTimeOffset(dueDate.Date.AddDays(1));
-        editingTodo.IsAllDay = true;
-        editingTodo.IsDirty = true;
-        editingTodo.IsDeleted = false;
-        editingTodo.IsTodoLike = true;
-        TodoReminderPolicy.NormalizeLocalFields(editingTodo);
-        editingTodo.ColorId = EditorColorId;
+        var updatedTodo = CloneEventForEditing(editingTodo);
+        updatedTodo.Title = title.Trim();
+        updatedTodo.Description = TagService.UpdateTodoMarker(description, priority, progress);
+        updatedTodo.CalendarId = ResolveEditorCalendarId();
+        updatedTodo.Start = new DateTimeOffset(dueDate.Date);
+        updatedTodo.End = new DateTimeOffset(dueDate.Date.AddDays(1));
+        updatedTodo.IsAllDay = true;
+        updatedTodo.IsDirty = true;
+        updatedTodo.IsDeleted = false;
+        updatedTodo.IsTodoLike = true;
+        TodoReminderPolicy.NormalizeLocalFields(updatedTodo);
+        updatedTodo.ColorId = EditorColorId;
 
-        await SaveEventWithCalendarMoveAsync(editingTodo, originalTodo);
+        await SaveEventWithCalendarMoveAsync(updatedTodo, originalTodo);
+        CaptureUndo("ToDo編集", [originalTodo]);
         await RefreshCalendarAsync();
-        SelectedEvent = _visibleEvents.FirstOrDefault(item => item.Id == editingTodo.Id) ?? editingTodo;
+        SelectedEvent = _visibleEvents.FirstOrDefault(item => item.Id == updatedTodo.Id) ?? updatedTodo;
         Status = "ToDoを保存しました。同期するとGoogleカレンダーへ反映されます。";
         await SyncAfterLocalChangeAsync();
     }
@@ -95,12 +97,15 @@ public sealed partial class MainViewModel
             return;
         }
 
-        var priority = SelectedEvent.TodoPriority;
-        CaptureUndo("ToDo完了", [SelectedEvent]);
-        SelectedEvent.Description = TagService.UpdateTodoMarker(SelectedEvent.Description, priority, 100);
-        SelectedEvent.IsDirty = true;
-        await _repository.SaveEventAsync(SelectedEvent);
+        var originalTodo = CloneEventForEditing(SelectedEvent);
+        var updatedTodo = CloneEventForEditing(SelectedEvent);
+        var priority = updatedTodo.TodoPriority;
+        updatedTodo.Description = TagService.UpdateTodoMarker(updatedTodo.Description, priority, 100);
+        updatedTodo.IsDirty = true;
+        await _repository.SaveEventAsync(updatedTodo);
+        CaptureUndo("ToDo完了", [originalTodo]);
         await RefreshCalendarAsync();
+        SelectedEvent = _visibleEvents.FirstOrDefault(item => item.Id == updatedTodo.Id) ?? updatedTodo;
         MarkSelectedTodoDoneCommand.RaiseCanExecuteChanged();
         Status = "ToDoを処理済みにしました。同期するとGoogleカレンダーへ反映されます。";
         await SyncAfterLocalChangeAsync();
@@ -113,11 +118,13 @@ public sealed partial class MainViewModel
             return;
         }
 
-        var priority = todoEvent.TodoPriority;
-        CaptureUndo("ToDo完了", [todoEvent]);
-        todoEvent.Description = TagService.UpdateTodoMarker(todoEvent.Description, priority, 100);
-        todoEvent.IsDirty = true;
-        await _repository.SaveEventAsync(todoEvent);
+        var originalTodo = CloneEventForEditing(todoEvent);
+        var updatedTodo = CloneEventForEditing(todoEvent);
+        var priority = updatedTodo.TodoPriority;
+        updatedTodo.Description = TagService.UpdateTodoMarker(updatedTodo.Description, priority, 100);
+        updatedTodo.IsDirty = true;
+        await _repository.SaveEventAsync(updatedTodo);
+        CaptureUndo("ToDo完了", [originalTodo]);
         await RefreshCalendarAsync();
         MarkSelectedTodoDoneCommand.RaiseCanExecuteChanged();
         Status = "ToDoを処理済みにしました。同期するとGoogleカレンダーへ反映されます。";
@@ -137,15 +144,17 @@ public sealed partial class MainViewModel
             return;
         }
 
-        var metadata = todoEvent.TodoMetadata;
-        CaptureUndo("ToDo更新", [todoEvent]);
+        var originalTodo = CloneEventForEditing(todoEvent);
+        var updatedTodo = CloneEventForEditing(todoEvent);
+        var metadata = updatedTodo.TodoMetadata;
         var nextPriority = string.IsNullOrWhiteSpace(priority) ? metadata?.Priority ?? "A" : priority;
         var nextProgress = Math.Clamp((metadata?.Progress ?? 0) + (progressDelta ?? 0), 0, 100);
-        todoEvent.Description = TagService.UpdateTodoMarker(todoEvent.Description, nextPriority, nextProgress);
-        todoEvent.IsDirty = true;
-        await _repository.SaveEventAsync(todoEvent);
+        updatedTodo.Description = TagService.UpdateTodoMarker(updatedTodo.Description, nextPriority, nextProgress);
+        updatedTodo.IsDirty = true;
+        await _repository.SaveEventAsync(updatedTodo);
+        CaptureUndo("ToDo更新", [originalTodo]);
         await RefreshCalendarAsync();
-        SelectedEvent = _visibleEvents.FirstOrDefault(item => item.Id == todoEvent.Id) ?? todoEvent;
+        SelectedEvent = _visibleEvents.FirstOrDefault(item => item.Id == updatedTodo.Id) ?? updatedTodo;
         Status = $"ToDoを更新しました: 優先度 {nextPriority} / 進捗 {nextProgress}%";
         await SyncAfterLocalChangeAsync();
     }
