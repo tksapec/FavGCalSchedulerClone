@@ -54,16 +54,19 @@ public sealed partial class MainViewModel
 
         if (clipboard.Cut)
         {
-            var source = clipboard.Event;
+            var sourceSnapshot = UndoService.Clone(clipboard.Event);
+            var source = CloneEventForEditing(clipboard.Event);
             source.IsDeleted = true;
             source.IsDirty = true;
             await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, [pasted, source]);
+            CaptureUndo("予定移動", [sourceSnapshot], [pasted.Id]);
             _labelClipboard = null;
             OnPropertyChanged(nameof(CanPasteEventLabel));
         }
         else
         {
             await _repository.SaveEventAsync(pasted);
+            CaptureUndo("予定貼り付け", [], [pasted.Id]);
         }
 
         _pendingSelectedDate = targetDate.Date;
@@ -98,7 +101,12 @@ public sealed partial class MainViewModel
 
     public async Task SaveCurrentEventAsync(RecurrenceEditScope? recurrenceScope = null)
     {
+        var wasNew = SelectedEvent is null;
         await SaveEventWithRecurrenceAsync(recurrenceScope);
+        if (wasNew && SelectedEvent is { IsDeleted: false } created)
+        {
+            CaptureUndo("予定追加", [], [created.Id]);
+        }
     }
 
     public async Task DeleteSelectedEventAsync(RecurrenceEditScope? recurrenceScope = null)
