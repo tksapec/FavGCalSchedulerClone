@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FavGCalSchedulerClone.App.Models;
 
 namespace FavGCalSchedulerClone.Tests;
@@ -63,5 +64,29 @@ public sealed class GoogleReminderMetadataTests
         Assert.Equal(source.AdoptedReminderMinutes, clone.AdoptedReminderMinutes);
         Assert.Equal(source.AdoptedReminderMethod, clone.AdoptedReminderMethod);
         Assert.Equal(source.Source, clone.Source);
+    }
+
+    [Fact]
+    public void Deserialize_NullReminderLists_AreNormalizedToEmptyCollections()
+    {
+        var metadata = JsonSerializer.Deserialize<GoogleReminderMetadata>("""
+            {
+              "UseDefault": false,
+              "PopupMinutes": null,
+              "EmailMinutes": null,
+              "DefaultPopupMinutes": null,
+              "DefaultEmailMinutes": null
+            }
+            """);
+
+        Assert.NotNull(metadata);
+        Assert.Empty(metadata.PopupMinutes);
+        Assert.Empty(metadata.EmailMinutes);
+        Assert.Empty(metadata.DefaultPopupMinutes);
+        Assert.Empty(metadata.DefaultEmailMinutes);
+        Assert.False(metadata.HasGoogleReminder);
+        Assert.False(metadata.HasEffectiveGoogleReminder);
+        Assert.False(metadata.HasEmailOnly);
+        Assert.NotNull(metadata.Clone());
     }
 }
