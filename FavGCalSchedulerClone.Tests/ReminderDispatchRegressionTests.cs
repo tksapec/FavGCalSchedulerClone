@@ -90,6 +90,30 @@ public sealed class ReminderDispatchRegressionTests
         }
     }
 
+    [Fact]
+    public async Task StartAsync_AfterDispose_IsHarmless()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        try
+        {
+            var repository = new CalendarRepository(dbPath);
+            var service = new ReminderNotificationService(repository);
+            service.Dispose();
+
+            var exception = await Record.ExceptionAsync(service.StartAsync);
+
+            Assert.Null(exception);
+            Assert.False(service.IsRunning);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            DeleteIfExists(dbPath);
+            DeleteIfExists(dbPath + "-wal");
+            DeleteIfExists(dbPath + "-shm");
+        }
+    }
+
     private sealed class CancellingNotifier : IReminderNotifier
     {
         public Task ShowAsync(ReminderNotification notification, CancellationToken cancellationToken = default)
