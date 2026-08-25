@@ -114,6 +114,31 @@ public sealed class ReminderDispatchRegressionTests
         }
     }
 
+    [Fact]
+    public async Task StartAsync_WithRequestedCancellation_DoesNotStartMonitoring()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        try
+        {
+            var repository = new CalendarRepository(dbPath);
+            await repository.InitializeAsync();
+            using var service = new ReminderNotificationService(repository);
+            using var cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.StartAsync(cancellation.Token));
+
+            Assert.False(service.IsRunning);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            DeleteIfExists(dbPath);
+            DeleteIfExists(dbPath + "-wal");
+            DeleteIfExists(dbPath + "-shm");
+        }
+    }
+
     private sealed class CancellingNotifier : IReminderNotifier
     {
         public Task ShowAsync(ReminderNotification notification, CancellationToken cancellationToken = default)
