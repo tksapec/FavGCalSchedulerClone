@@ -1868,7 +1868,9 @@ public sealed class GoogleCalendarSyncService
 
         try
         {
-            return JsonSerializer.Deserialize<List<SyncFailureDiagnostic>>(json) ?? [];
+            return (JsonSerializer.Deserialize<List<SyncFailureDiagnostic?>>(json) ?? [])
+                .OfType<SyncFailureDiagnostic>()
+                .ToArray();
         }
         catch (JsonException)
         {
@@ -1885,7 +1887,9 @@ public sealed class GoogleCalendarSyncService
 
         try
         {
-            return JsonSerializer.Deserialize<List<SyncResult>>(json) ?? [];
+            return (JsonSerializer.Deserialize<List<SyncResult?>>(json) ?? [])
+                .OfType<SyncResult>()
+                .ToArray();
         }
         catch (JsonException)
         {
