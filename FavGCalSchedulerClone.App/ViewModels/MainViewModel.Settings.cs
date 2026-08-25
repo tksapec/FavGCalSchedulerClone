@@ -266,9 +266,20 @@ public sealed partial class MainViewModel
 
     private static IReadOnlyList<string> DeserializeHistory(string? json)
     {
-        return string.IsNullOrWhiteSpace(json)
-            ? []
-            : JsonSerializer.Deserialize<List<string>>(json) ?? [];
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return [];
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(json) ?? [];
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            Debug.WriteLine(ex);
+            return [];
+        }
     }
 
     private static IReadOnlyList<string> AddHistoryValue(IReadOnlyList<string> history, string? value)
