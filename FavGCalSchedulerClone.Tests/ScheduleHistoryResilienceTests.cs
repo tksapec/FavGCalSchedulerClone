@@ -1,3 +1,4 @@
+using FavGCalSchedulerClone.App.Models;
 using FavGCalSchedulerClone.App.Services;
 using FavGCalSchedulerClone.App.ViewModels;
 using Microsoft.Data.Sqlite;
