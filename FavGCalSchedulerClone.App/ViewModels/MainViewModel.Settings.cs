@@ -217,6 +217,20 @@ public sealed partial class MainViewModel
         await PersistSettingsAsync(snapshot);
     }
 
+    private async Task<AppSettings> LoadSettingsSafelyAsync()
+    {
+        try
+        {
+            return await _repository.LoadSettingsAsync();
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            Debug.WriteLine(ex);
+            _logger?.LogError(ex, "Stored application settings are invalid. Default settings will be used.");
+            return new AppSettings();
+        }
+    }
+
     private AppSettings CreateSettingsPersistenceSnapshot()
     {
         lock (_settingsStateLock)
