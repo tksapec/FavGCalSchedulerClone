@@ -609,6 +609,10 @@ public sealed class ReminderNotificationService : IDisposable
                 ? ReminderDeliveryResult.Success(metadata?.DeliveryMethodName ?? notifier?.GetType().Name ?? "ReminderTriggered", metadata?.UsedMessageBoxFallback ?? false, metadata?.MessageBoxRole ?? MessageBoxNotificationRole.None, metadata?.ToastVerified ?? false, metadata?.ToastStatus, metadata?.SoundStatus ?? ReminderSoundStatus.NotConfigured, metadata?.SoundError)
                 : ReminderDeliveryResult.Failure("none", "No reminder notifier is configured.");
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             Debug.WriteLine(ex);
