@@ -637,7 +637,7 @@ public sealed partial class MainViewModel : ObservableObject
     public async Task InitializeAsync()
     {
         await _repository.InitializeAsync();
-        var loadedSettings = AppSettingsNormalizer.Normalize(await _repository.LoadSettingsAsync());
+        var loadedSettings = AppSettingsNormalizer.Normalize(await LoadSettingsSafelyAsync());
         lock (_settingsStateLock)
         {
             _settings = loadedSettings;
