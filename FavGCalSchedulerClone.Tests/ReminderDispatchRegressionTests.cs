@@ -44,6 +44,30 @@ public sealed class ReminderDispatchRegressionTests
     }
 
     [Fact]
+    public async Task ShowTestNotificationAsync_PropagatesRequestedCancellation()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        try
+        {
+            var repository = new CalendarRepository(dbPath);
+            await repository.InitializeAsync();
+            using var service = new ReminderNotificationService(repository);
+            using var cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                service.ShowTestNotificationAsync(new CancellingNotifier(), cancellation.Token));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            DeleteIfExists(dbPath);
+            DeleteIfExists(dbPath + "-wal");
+            DeleteIfExists(dbPath + "-shm");
+        }
+    }
+
+    [Fact]
     public void Stop_AfterDispose_IsHarmless()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
@@ -63,6 +87,15 @@ public sealed class ReminderDispatchRegressionTests
             DeleteIfExists(dbPath);
             DeleteIfExists(dbPath + "-wal");
             DeleteIfExists(dbPath + "-shm");
+        }
+    }
+
+    private sealed class CancellingNotifier : IReminderNotifier
+    {
+        public Task ShowAsync(ReminderNotification notification, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
         }
     }
 
