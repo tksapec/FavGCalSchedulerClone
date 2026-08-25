@@ -45,7 +45,7 @@ public sealed class ReminderNotificationService : IDisposable
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
-        if (_isRunning)
+        if (_disposed || _isRunning)
         {
             return;
         }
@@ -53,7 +53,25 @@ public sealed class ReminderNotificationService : IDisposable
         _isRunning = true;
         _startedAt = DateTimeOffset.Now;
         await CheckDueRemindersAsync(DateTimeOffset.Now, cancellationToken);
-        _timer.Change(CheckInterval, CheckInterval);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_disposed)
+        {
+            _isRunning = false;
+            UpdateRuntimeState(null);
+            return;
+        }
+
+        try
+        {
+            _timer.Change(CheckInterval, CheckInterval);
+        }
+        catch (ObjectDisposedException) when (_disposed)
+        {
+            _isRunning = false;
+            UpdateRuntimeState(null);
+            return;
+        }
+
         UpdateRuntimeState(DateTimeOffset.Now.Add(CheckInterval));
         Debug.WriteLine("通知監視を開始しました");
     }
@@ -576,6 +594,8 @@ public sealed class ReminderNotificationService : IDisposable
         }
 
         _disposed = true;
+        _isRunning = false;
+        UpdateRuntimeState(null);
         _timer.Dispose();
         _gate.Dispose();
     }
