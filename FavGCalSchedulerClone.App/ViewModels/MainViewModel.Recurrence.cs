@@ -210,6 +210,7 @@ public sealed partial class MainViewModel
         }
 
         var writes = new List<CalendarEvent>();
+        var hardDeleteIds = new List<string>();
         var createdIds = new List<string>();
         var original = CloneEventForEditing(master);
         original.RecurrenceJson = RecurrenceRuleHelper.BuildSplitSourceRecurrenceJson(master, splitStart);
@@ -244,6 +245,23 @@ public sealed partial class MainViewModel
                 continue;
             }
 
+            // The exception is being transferred to the new future series. Retire the
+            // old-series row as part of the same transaction so it cannot reappear if
+            // the shortened source series is later extended again. Synced exceptions
+            // need a tombstone for Google; purely local exceptions can be removed.
+            if (string.IsNullOrWhiteSpace(child.GoogleEventId))
+            {
+                hardDeleteIds.Add(child.Id);
+            }
+            else
+            {
+                var retired = CloneEventForEditing(child);
+                retired.IsDeleted = true;
+                retired.IsDirty = true;
+                retired.LastSyncedAt = null;
+                writes.Add(retired);
+            }
+
             var moved = CloneEventForEditing(child);
             moved.Id = Guid.NewGuid().ToString("N");
             moved.CalendarId = future.CalendarId;
@@ -257,7 +275,7 @@ public sealed partial class MainViewModel
             createdIds.Add(moved.Id);
         }
 
-        await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes);
+        await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes, hardDeleteIds);
         SelectedEvent = future;
         return createdIds;
     }
@@ -427,11 +445,12 @@ public sealed partial class MainViewModel
 
         var splitStart = selectedEvent.OriginalStart ?? selectedEvent.Start;
         var affectsEntireSeries = recurrenceScope == RecurrenceEditScope.AllEvents || splitStart <= master.Start;
+        var splitsSeries = recurrenceScope == RecurrenceEditScope.ThisAndFollowing && splitStart > master.Start;
         var movesEntireSeriesToAnotherCalendar = !isDelete
             && affectsEntireSeries
             && !string.IsNullOrWhiteSpace(targetCalendarId)
             && !string.Equals(master.CalendarId, targetCalendarId, StringComparison.Ordinal);
-        if (!isDelete && !movesEntireSeriesToAnotherCalendar)
+        if (!isDelete && !movesEntireSeriesToAnotherCalendar && !splitsSeries)
         {
             return [UndoService.Clone(master)];
         }
