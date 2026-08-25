@@ -145,7 +145,9 @@ public static partial class TagService
     {
         if (!string.IsNullOrWhiteSpace(calendarEvent.ColorId))
         {
-            if (eventColorPalette is not null && eventColorPalette.TryGetValue(calendarEvent.ColorId, out var cachedColor))
+            if (eventColorPalette is not null
+                && eventColorPalette.TryGetValue(calendarEvent.ColorId, out var cachedColor)
+                && cachedColor is not null)
             {
                 return cachedColor;
             }
