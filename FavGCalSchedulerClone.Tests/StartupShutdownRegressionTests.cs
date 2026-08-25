@@ -40,4 +40,19 @@ public sealed class StartupShutdownRegressionTests
         Assert.Contains("MessageBox.Show", source, StringComparison.Ordinal);
         Assert.Contains("return;", source, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ViewModelInitializationFailure_StopsTheRemainingStartupSequence()
+    {
+        var source = await File.ReadAllTextAsync(Path.Combine(
+            Root,
+            "FavGCalSchedulerClone.App",
+            "Services",
+            "ApplicationStartupService.cs"));
+
+        Assert.Contains(
+            "MessageBox.Show(owner, ex.Message, \"初期化エラー\", MessageBoxButton.OK, MessageBoxImage.Error);\n            return;",
+            source,
+            StringComparison.Ordinal);
+    }
 }
