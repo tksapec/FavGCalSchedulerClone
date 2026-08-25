@@ -268,7 +268,9 @@ public sealed partial class MainViewModel
 
         try
         {
-            return JsonSerializer.Deserialize<List<string>>(json) ?? [];
+            return (JsonSerializer.Deserialize<List<string?>>(json) ?? [])
+                .OfType<string>()
+                .ToArray();
         }
         catch (Exception ex) when (ex is JsonException or NotSupportedException)
         {
