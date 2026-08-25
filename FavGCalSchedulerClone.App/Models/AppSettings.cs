@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace FavGCalSchedulerClone.App.Models;
 
 public sealed class AppSettings
@@ -10,7 +12,10 @@ public sealed class AppSettings
     public CalendarViewMode StartupCalendarViewMode { get; set; } = CalendarViewMode.Month;
     public int StartupTodoTabIndex { get; set; }
     public bool ConfirmBeforeDelete { get; set; } = true;
-    public bool CloseButtonExitsApplication { get; set; } = true;
+    // Compatibility-only facade for callers compiled against older versions.
+    // Window close always minimizes to the notification area unless explicit exit is requested.
+    [JsonIgnore]
+    public bool CloseButtonExitsApplication { get; set; }
     public bool DefaultNewEventIsAllDay { get; set; }
     public bool HideMainWindowWhileEditingSchedule { get; set; }
     public bool ReuseLastScheduleInput { get; set; }
