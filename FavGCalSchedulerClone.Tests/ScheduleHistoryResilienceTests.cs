@@ -33,6 +33,29 @@ public sealed class ScheduleHistoryResilienceTests
     }
 
     [Fact]
+    public async Task InitializeAsync_IgnoresNullScheduleHistoryEntries()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        try
+        {
+            var repository = new CalendarRepository(dbPath);
+            await repository.InitializeAsync();
+            await repository.SaveSettingValueAsync("schedule:title-history", "[null,\"Title\",null]");
+            await repository.SaveSettingValueAsync("schedule:location-history", "[null,\"Location\"]");
+
+            var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+            await viewModel.InitializeAsync();
+
+            Assert.Equal(["Title"], await viewModel.LoadScheduleTitleHistoryAsync());
+            Assert.Equal(["Location"], await viewModel.LoadScheduleLocationHistoryAsync());
+        }
+        finally
+        {
+            CleanupDatabase(dbPath);
+        }
+    }
+
+    [Fact]
     public async Task InitializeAsync_FallsBackToDefaultSettingsWhenAppSettingsJsonIsCorrupted()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
