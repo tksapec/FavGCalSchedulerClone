@@ -27,11 +27,39 @@ public sealed class ScheduleHistoryResilienceTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
-            DeleteIfExists(dbPath);
-            DeleteIfExists(dbPath + "-wal");
-            DeleteIfExists(dbPath + "-shm");
+            CleanupDatabase(dbPath);
         }
+    }
+
+    [Fact]
+    public async Task InitializeAsync_FallsBackToDefaultSettingsWhenAppSettingsJsonIsCorrupted()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        try
+        {
+            var repository = new CalendarRepository(dbPath);
+            await repository.InitializeAsync();
+            await repository.SaveSettingValueAsync("app", "{not-json");
+
+            var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+
+            var exception = await Record.ExceptionAsync(viewModel.InitializeAsync);
+
+            Assert.Null(exception);
+            Assert.Equal(GoogleCalendarDefaults.PrimaryCalendarId, viewModel.EditorCalendarId);
+        }
+        finally
+        {
+            CleanupDatabase(dbPath);
+        }
+    }
+
+    private static void CleanupDatabase(string dbPath)
+    {
+        SqliteConnection.ClearAllPools();
+        DeleteIfExists(dbPath);
+        DeleteIfExists(dbPath + "-wal");
+        DeleteIfExists(dbPath + "-shm");
     }
 
     private static void DeleteIfExists(string path)
