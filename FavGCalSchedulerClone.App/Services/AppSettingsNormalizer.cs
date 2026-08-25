@@ -11,6 +11,15 @@ internal static class AppSettingsNormalizer
     {
         settings.StartupTabIndex = NormalizeTabIndex(settings.StartupTabIndex);
         settings.StartupTodoTabIndex = Math.Clamp(settings.StartupTodoTabIndex, 0, 1);
+        settings.StartupCalendarViewMode = Enum.IsDefined(typeof(CalendarViewMode), settings.StartupCalendarViewMode)
+            ? settings.StartupCalendarViewMode
+            : CalendarViewMode.Month;
+        settings.WeekdayDisplayType = Enum.IsDefined(typeof(WeekdayDisplayType), settings.WeekdayDisplayType)
+            ? settings.WeekdayDisplayType
+            : WeekdayDisplayType.EnglishShort;
+        settings.SyncConflictPolicy = Enum.IsDefined(typeof(SyncConflictPolicy), settings.SyncConflictPolicy)
+            ? settings.SyncConflictPolicy
+            : SyncConflictPolicy.SkipLocalDirty;
         settings.CalendarLabelFontSizeIndex = Math.Clamp(settings.CalendarLabelFontSizeIndex, 1, 3);
         settings.SideListFontSizeIndex = Math.Clamp(settings.SideListFontSizeIndex, 1, 3);
         settings.WindowOpacity = Math.Clamp(settings.WindowOpacity, 64, 255);
@@ -22,12 +31,12 @@ internal static class AppSettingsNormalizer
             && ValidAutomaticSyncIntervals.Contains(interval)
                 ? interval
                 : null;
-        settings.VisibleCalendarIds = settings.VisibleCalendarIds
+        settings.VisibleCalendarIds = (settings.VisibleCalendarIds ?? [])
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Distinct(StringComparer.Ordinal)
             .ToList();
-        settings.EventColorSettings = settings.EventColorSettings
-            .Where(setting => !string.IsNullOrWhiteSpace(setting.ColorId))
+        settings.EventColorSettings = (settings.EventColorSettings ?? [])
+            .Where(setting => setting is not null && !string.IsNullOrWhiteSpace(setting.ColorId))
             .GroupBy(setting => setting.ColorId.Trim(), StringComparer.Ordinal)
             .Select(group =>
             {
