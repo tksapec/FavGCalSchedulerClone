@@ -163,9 +163,17 @@ public sealed class ReminderNotificationService : IDisposable
         {
             Debug.WriteLine(ex);
             var error = $"{DateTimeOffset.Now:O} {ex}";
-            await _repository.SaveSettingValueAsync(ReminderLastErrorKey, error);
             _diagnostics = _diagnostics with { LastError = error, NextCheckAt = _isRunning ? DateTimeOffset.Now.Add(CheckInterval) : null };
-            await SaveDiagnosticsAsync(force: true);
+            try
+            {
+                await _repository.SaveSettingValueAsync(ReminderLastErrorKey, error);
+            }
+            catch (Exception persistenceException)
+            {
+                Debug.WriteLine(persistenceException);
+            }
+
+            await SaveDiagnosticsSafelyAsync();
         }
     }
 
