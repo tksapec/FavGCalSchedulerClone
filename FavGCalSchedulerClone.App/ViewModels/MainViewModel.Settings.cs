@@ -11,6 +11,24 @@ namespace FavGCalSchedulerClone.App.ViewModels;
 
 public sealed partial class MainViewModel
 {
+    public async Task SaveApplicationSettingsAsync(
+        int startupTabIndex,
+        bool confirmBeforeDelete,
+        bool closeButtonExitsApplication,
+        bool defaultNewEventIsAllDay)
+    {
+        _ = closeButtonExitsApplication;
+        SettingsPersistenceRequest snapshot;
+        lock (_settingsStateLock)
+        {
+            _settings.StartupTabIndex = AppSettingsNormalizer.NormalizeTabIndex(startupTabIndex);
+            _settings.ConfirmBeforeDelete = confirmBeforeDelete;
+            _settings.DefaultNewEventIsAllDay = defaultNewEventIsAllDay;
+            snapshot = CreateSettingsPersistenceRequestUnsafe();
+        }
+
+        await SaveApplicationSettingsAsync(snapshot.Settings);
+    }
 
     public AppSettings CreateSettingsSnapshot()
     {
