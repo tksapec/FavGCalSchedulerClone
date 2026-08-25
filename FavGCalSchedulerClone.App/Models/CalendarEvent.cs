@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace FavGCalSchedulerClone.App.Models;
 
 public sealed class CalendarEvent
@@ -7,6 +9,7 @@ public sealed class CalendarEvent
     private GoogleReminderMetadata? _googleReminderMetadata;
     private List<int> _appReminderMinutesBeforeStart = [];
     private List<int> _googleEmailReminderMinutesBeforeStart = [];
+    private string? _recurrenceJson;
 
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string? GoogleEventId { get; set; }
@@ -59,7 +62,11 @@ public sealed class CalendarEvent
 
     public bool IsAllDay { get; set; }
     public string? ColorId { get; set; }
-    public string? RecurrenceJson { get; set; }
+    public string? RecurrenceJson
+    {
+        get => _recurrenceJson;
+        set => _recurrenceJson = NormalizeRecurrenceJson(value);
+    }
     public bool IsDeleted { get; set; }
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
     public DateTimeOffset? LastSyncedAt { get; set; }
@@ -222,6 +229,35 @@ public sealed class CalendarEvent
     public bool IsRecurringMaster => !string.IsNullOrWhiteSpace(RecurrenceJson) && !IsRecurrenceException;
     public bool IsRecurringSeriesItem => IsRecurringMaster || IsRecurrenceException || IsGeneratedOccurrence || !string.IsNullOrWhiteSpace(RecurringEventId) || !string.IsNullOrWhiteSpace(RecurringParentId);
     public string DirtyFieldsDisplayText => Services.EventDirtyFieldTracker.ToDisplayText(DirtyFields);
+
+    private static string? NormalizeRecurrenceJson(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return value;
+        }
+
+        try
+        {
+            var lines = JsonSerializer.Deserialize<List<string?>>(value);
+            if (lines is null)
+            {
+                return null;
+            }
+
+            var normalized = lines
+                .Where(line => !string.IsNullOrWhiteSpace(line))
+                .Select(line => line!)
+                .ToArray();
+            return normalized.Length == 0 ? null : JsonSerializer.Serialize(normalized);
+        }
+        catch (JsonException)
+        {
+            // Preserve malformed legacy data so higher-level recurrence handling can
+            // isolate it without silently converting the event to a non-recurring one.
+            return value;
+        }
+    }
 
     private static string SingleLine(string? value)
     {
