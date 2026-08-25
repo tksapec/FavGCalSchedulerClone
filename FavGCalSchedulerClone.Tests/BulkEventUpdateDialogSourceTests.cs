@@ -5,16 +5,29 @@ public sealed class BulkEventUpdateDialogSourceTests
     [Fact]
     public void ReminderCombo_UsesTheReminderOptionMinutesProperty()
     {
-        var source = File.ReadAllText(Path.Combine(
-            GetRepositoryRoot(),
-            "FavGCalSchedulerClone.App",
-            "Views",
-            "Dialogs",
-            "BulkEventUpdateDialog.cs"));
+        var source = ReadSource();
 
         Assert.Contains("SelectedValuePath = nameof(ReminderOption.MinutesBeforeStart)", source, StringComparison.Ordinal);
         Assert.DoesNotContain("SelectedValuePath = \"Minutes\"", source, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void ReminderNone_RemainsApplicableAndExplicitlyDisablesBothReminderChannels()
+    {
+        var source = ReadSource();
+
+        Assert.Contains("|| reminderEnabled.IsChecked == true;", source, StringComparison.Ordinal);
+        Assert.Contains("var selectedReminderMinutes = minutes.SelectedValue as int?;", source, StringComparison.Ordinal);
+        Assert.Contains("selectedReminderMinutes is null ? false : appReminder.IsChecked == true", source, StringComparison.Ordinal);
+        Assert.Contains("selectedReminderMinutes is null ? false : emailReminder.IsChecked == true", source, StringComparison.Ordinal);
+    }
+
+    private static string ReadSource() => File.ReadAllText(Path.Combine(
+        GetRepositoryRoot(),
+        "FavGCalSchedulerClone.App",
+        "Views",
+        "Dialogs",
+        "BulkEventUpdateDialog.cs"));
 
     private static string GetRepositoryRoot()
     {
