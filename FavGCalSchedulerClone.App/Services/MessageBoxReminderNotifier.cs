@@ -23,6 +23,7 @@ public sealed class MessageBoxReminderNotifier : IReminderNotifier, IReminderNot
     {
         return _owner.Dispatcher.InvokeAsync(() =>
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var kind = notification.IsTodoLike ? "ToDo" : "予定";
             MessageBox.Show(
                 _owner,
