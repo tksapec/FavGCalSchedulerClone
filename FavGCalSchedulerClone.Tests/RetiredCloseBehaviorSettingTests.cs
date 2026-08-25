@@ -34,7 +34,9 @@ public sealed class RetiredCloseBehaviorSettingTests
         var mainWindow = await ReadAppFileAsync("MainWindow.xaml.cs");
 
         Assert.Contains("[JsonIgnore]", appSettings, StringComparison.Ordinal);
-        Assert.DoesNotContain("CloseButtonExitsApplication", settingsViewModel, StringComparison.Ordinal);
+        Assert.Contains("bool closeButtonExitsApplication", settingsViewModel, StringComparison.Ordinal);
+        Assert.Contains("_ = closeButtonExitsApplication;", settingsViewModel, StringComparison.Ordinal);
+        Assert.DoesNotContain("_settings.CloseButtonExitsApplication =", settingsViewModel, StringComparison.Ordinal);
         Assert.DoesNotContain("AppClose", importExport, StringComparison.Ordinal);
 
         Assert.Contains("e.Cancel = true;", mainWindow, StringComparison.Ordinal);
