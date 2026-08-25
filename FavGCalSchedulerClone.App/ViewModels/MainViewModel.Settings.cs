@@ -12,24 +12,6 @@ namespace FavGCalSchedulerClone.App.ViewModels;
 public sealed partial class MainViewModel
 {
 
-    public async Task SaveApplicationSettingsAsync(
-        int startupTabIndex,
-        bool confirmBeforeDelete,
-        bool closeButtonExitsApplication,
-        bool defaultNewEventIsAllDay)
-    {
-        SettingsPersistenceRequest snapshot;
-        lock (_settingsStateLock)
-        {
-            _settings.StartupTabIndex = AppSettingsNormalizer.NormalizeTabIndex(startupTabIndex);
-            _settings.ConfirmBeforeDelete = confirmBeforeDelete;
-            _settings.CloseButtonExitsApplication = closeButtonExitsApplication;
-            _settings.DefaultNewEventIsAllDay = defaultNewEventIsAllDay;
-            snapshot = CreateSettingsPersistenceRequestUnsafe();
-        }
-        await SaveApplicationSettingsAsync(snapshot.Settings);
-    }
-
     public AppSettings CreateSettingsSnapshot()
     {
         lock (_settingsStateLock)
@@ -58,8 +40,7 @@ public sealed partial class MainViewModel
         foreach (var propertyName in new[]
         {
             nameof(StartupTabIndex), nameof(StartupCalendarViewMode), nameof(ConfirmBeforeDelete),
-            nameof(CloseButtonExitsApplication), nameof(DefaultNewEventIsAllDay),
-            nameof(HideMainWindowWhileEditingSchedule), nameof(ReuseLastScheduleInput),
+            nameof(DefaultNewEventIsAllDay), nameof(HideMainWindowWhileEditingSchedule), nameof(ReuseLastScheduleInput),
             nameof(DefaultScheduleReminderMinutes), nameof(CalendarLabelFontSize),
             nameof(SideListFontSize), nameof(WindowOpacity), nameof(WeekdayHeaders),
             nameof(EnableReminderSound), nameof(ReminderSoundFilePath),
