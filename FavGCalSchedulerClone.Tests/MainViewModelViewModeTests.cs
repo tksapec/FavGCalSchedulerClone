@@ -391,7 +391,7 @@ public sealed class MainViewModelViewModeTests
         await firstLoadStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         viewModel.CurrentMonth = secondTarget;
 
-        await WaitUntilAsync(() => viewModel.CalendarDays.Any(day => day.Events.Any(item => item.Title == "second target")));
+        await WaitUntilAsync(() => ContainsCalendarEvent(viewModel.CalendarDays, "second target"));
         Assert.Equal(secondTarget, viewModel.CurrentMonth);
         Assert.DoesNotContain(viewModel.CalendarDays.SelectMany(day => day.Events), item => item.Title == "first target");
 
@@ -1288,6 +1288,21 @@ public sealed class MainViewModelViewModeTests
             }
 
             await Task.Delay(25);
+        }
+    }
+
+    private static bool ContainsCalendarEvent(IEnumerable<CalendarDay> days, string title)
+    {
+        try
+        {
+            return days.Any(day => day.Events.Any(item => item.Title == title));
+        }
+        catch (InvalidOperationException)
+        {
+            // Navigation swaps the observable day list as one bulk update. In the
+            // test context there is no WPF dispatcher to serialize this polling
+            // read with that update, so retry the same semantic condition.
+            return false;
         }
     }
 

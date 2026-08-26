@@ -1,9 +1,17 @@
 bin/
 obj/
 .vs/
+.idea/
+coverage/
+*.trx
+*.coverage
+*.coveragexml
+coverage.cobertura.xml
 *.user
 *.suo
 *.zip
+*.db-wal
+*.db-shm
 publish/
 TestResults/
 /.codex/
