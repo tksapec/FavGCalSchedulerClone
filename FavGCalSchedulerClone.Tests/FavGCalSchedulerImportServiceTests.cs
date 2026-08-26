@@ -530,7 +530,7 @@ public sealed class FavGCalSchedulerImportServiceTests
             VerifyGoogleEventsBeforeImport: false));
 
         Assert.False(viewModel.ConfirmBeforeDelete);
-        Assert.True(viewModel.CloseButtonExitsApplication);
+        Assert.False(viewModel.CloseButtonExitsApplication);
         Assert.False(viewModel.DefaultNewEventIsAllDay);
     }
 

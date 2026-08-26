@@ -1,5 +1,6 @@
 using System.Text;
 using FavGCalSchedulerClone.App.Services;
+using Microsoft.Data.Sqlite;
 
 namespace FavGCalSchedulerClone.Tests;
 
@@ -30,6 +31,7 @@ public sealed class FavGCalSchedulerImportAtomicityTests
         }
         finally
         {
+            SqliteConnection.ClearAllPools();
             if (Directory.Exists(sourceFolder))
             {
                 Directory.Delete(sourceFolder, recursive: true);
@@ -66,6 +68,7 @@ public sealed class FavGCalSchedulerImportAtomicityTests
         }
         finally
         {
+            SqliteConnection.ClearAllPools();
             if (Directory.Exists(sourceFolder))
             {
                 Directory.Delete(sourceFolder, recursive: true);

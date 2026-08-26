@@ -100,7 +100,7 @@ public sealed class ReminderDispatchRegressionTests
             var service = new ReminderNotificationService(repository);
             service.Dispose();
 
-            var exception = await Record.ExceptionAsync(service.StartAsync);
+            var exception = await Record.ExceptionAsync(() => service.StartAsync());
 
             Assert.Null(exception);
             Assert.False(service.IsRunning);

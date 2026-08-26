@@ -52,28 +52,37 @@ public sealed class ReminderNotificationService : IDisposable
 
         _isRunning = true;
         _startedAt = DateTimeOffset.Now;
-        await CheckDueRemindersAsync(DateTimeOffset.Now, cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
-        if (_disposed)
-        {
-            _isRunning = false;
-            UpdateRuntimeState(null);
-            return;
-        }
-
         try
         {
-            _timer.Change(CheckInterval, CheckInterval);
+            await CheckDueRemindersAsync(DateTimeOffset.Now, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_disposed)
+            {
+                _isRunning = false;
+                UpdateRuntimeState(null);
+                return;
+            }
+
+            try
+            {
+                _timer.Change(CheckInterval, CheckInterval);
+            }
+            catch (ObjectDisposedException) when (_disposed)
+            {
+                _isRunning = false;
+                UpdateRuntimeState(null);
+                return;
+            }
+
+            UpdateRuntimeState(DateTimeOffset.Now.Add(CheckInterval));
+            Debug.WriteLine("通知監視を開始しました");
         }
-        catch (ObjectDisposedException) when (_disposed)
+        catch
         {
             _isRunning = false;
             UpdateRuntimeState(null);
-            return;
+            throw;
         }
-
-        UpdateRuntimeState(DateTimeOffset.Now.Add(CheckInterval));
-        Debug.WriteLine("通知監視を開始しました");
     }
 
     public void Stop()

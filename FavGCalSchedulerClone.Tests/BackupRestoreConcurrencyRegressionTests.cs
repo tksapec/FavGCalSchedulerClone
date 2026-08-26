@@ -131,7 +131,7 @@ public sealed class BackupRestoreConcurrencyRegressionTests
 
             var targetRepository = new CalendarRepository(targetPath);
             await targetRepository.InitializeAsync();
-            await targetRepository.SaveSettingsAsync(new AppSettings { StartupTabIndex = 6 });
+            await targetRepository.SaveSettingsAsync(new AppSettings { StartupTabIndex = 3 });
             using var reminderService = new ReminderNotificationService(targetRepository, new RecordingNotifier());
             await reminderService.StartAsync();
             var viewModel = new MainViewModel(
@@ -147,13 +147,14 @@ public sealed class BackupRestoreConcurrencyRegressionTests
             await Assert.ThrowsAnyAsync<Exception>(() => viewModel.RestoreAllCalendarsAsync(backupPath));
 
             Assert.True(reminderService.IsRunning);
-            Assert.Equal(6, (await targetRepository.LoadSettingsAsync()).StartupTabIndex);
+            Assert.Equal(3, (await targetRepository.LoadSettingsAsync()).StartupTabIndex);
             var maintenanceField = typeof(MainViewModel).GetField(
                 "_databaseMaintenanceInProgress",
                 BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.NotNull(maintenanceField);
             Assert.Equal(0, Assert.IsType<int>(maintenanceField!.GetValue(viewModel)));
             reminderService.Stop();
+            reminderService.Dispose();
         }
         finally
         {

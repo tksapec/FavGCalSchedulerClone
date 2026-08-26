@@ -14,7 +14,6 @@ public sealed class StartupShutdownRegressionTests
             "FavGCalSchedulerClone.App",
             "Services",
             "ApplicationStartupService.cs"));
-
         var viewModelAwait = source.IndexOf("await _viewModel.InitializeAsync()", StringComparison.Ordinal);
         var notifierStart = source.IndexOf("_reminderService.SetNotifier", viewModelAwait, StringComparison.Ordinal);
         var reminderAwait = source.IndexOf("await _reminderService.StartAsync()", notifierStart, StringComparison.Ordinal);
@@ -49,6 +48,8 @@ public sealed class StartupShutdownRegressionTests
             "FavGCalSchedulerClone.App",
             "Services",
             "ApplicationStartupService.cs"));
+
+        source = source.ReplaceLineEndings("\n");
 
         Assert.Contains(
             "MessageBox.Show(owner, ex.Message, \"初期化エラー\", MessageBoxButton.OK, MessageBoxImage.Error);\n            throw;",

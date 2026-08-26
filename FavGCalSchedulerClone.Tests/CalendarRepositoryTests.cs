@@ -262,7 +262,7 @@ public sealed class CalendarRepositoryTests
         Assert.Empty(settings.VisibleCalendarIds);
         Assert.Equal(0, settings.StartupTabIndex);
         Assert.True(settings.ConfirmBeforeDelete);
-        Assert.True(settings.CloseButtonExitsApplication);
+        Assert.False(settings.CloseButtonExitsApplication);
         Assert.False(settings.DefaultNewEventIsAllDay);
         Assert.True(settings.UseWindowsToastNotifications);
         Assert.Equal(CalendarViewMode.Month, settings.StartupCalendarViewMode);
