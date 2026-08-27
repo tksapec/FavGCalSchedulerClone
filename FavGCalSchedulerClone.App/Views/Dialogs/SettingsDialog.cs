@@ -31,6 +31,7 @@ internal static class SettingsDialog
         var appPage = Page();
         var startupView = Options(Enum.GetValues<CalendarViewMode>().Cast<object>(), settings.StartupCalendarViewMode);
         var startupTodo = Options(new object[] { "未処理ToDo", "処理済みToDo" }, settings.StartupTodoTabIndex == 0 ? "未処理ToDo" : "処理済みToDo");
+        var returnToTodayWhenDeactivated = new CheckBox { Content = "アプリが非アクティブになったときに今日へ戻る", IsChecked = settings.ReturnToTodayWhenDeactivated, Margin = new Thickness(0, 6, 0, 6) };
         var confirmDelete = new CheckBox { Content = "スケジュールを削除する際に確認ポップアップを表示する", IsChecked = settings.ConfirmBeforeDelete, Margin = new Thickness(0, 6, 0, 6) };
         var hideEditor = new CheckBox { Content = "スケジュール編集時にメインウィンドウを非表示にする", IsChecked = settings.HideMainWindowWhileEditingSchedule, Margin = new Thickness(0, 6, 0, 6) };
         var noReuse = new CheckBox { Content = "新規入力時、場所や件名に前回の入力内容を設定しない", IsChecked = !settings.ReuseLastScheduleInput, Margin = new Thickness(0, 6, 0, 6) };
@@ -39,6 +40,7 @@ internal static class SettingsDialog
         appPage.Children.Add(startupView);
         appPage.Children.Add(new TextBlock { Text = "起動時のToDoタブ表示タイプ" });
         appPage.Children.Add(startupTodo);
+        appPage.Children.Add(returnToTodayWhenDeactivated);
         appPage.Children.Add(confirmDelete);
         appPage.Children.Add(hideEditor);
         appPage.Children.Add(new Separator { Margin = new Thickness(0, 8, 0, 8) });
@@ -287,6 +289,7 @@ internal static class SettingsDialog
         request.StopPreviewSound();
         settings.StartupCalendarViewMode = startupView.SelectedItem is CalendarViewMode mode ? mode : CalendarViewMode.Month;
         settings.StartupTodoTabIndex = startupTodo.SelectedIndex;
+        settings.ReturnToTodayWhenDeactivated = returnToTodayWhenDeactivated.IsChecked == true;
         settings.ConfirmBeforeDelete = confirmDelete.IsChecked == true;
         settings.HideMainWindowWhileEditingSchedule = hideEditor.IsChecked == true;
         settings.ReuseLastScheduleInput = noReuse.IsChecked != true;
