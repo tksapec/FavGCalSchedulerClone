@@ -29,9 +29,11 @@ public sealed partial class MainViewModel
 
         // ActiveCalendarId is the persisted default calendar. Selecting an existing
         // event also changes EditorCalendarId, so do not let that transient editor
-        // state replace the configured default for a later new schedule.
+        // state replace the configured default for a later new schedule. A stale
+        // active id that is no longer visible must not make a newly saved event vanish.
         if (!string.IsNullOrWhiteSpace(activeCalendarId)
-            && AvailableCalendars.Any(item => string.Equals(item.Id, activeCalendarId, StringComparison.Ordinal)))
+            && AvailableCalendars.Any(item => item.IsSelected
+                && string.Equals(item.Id, activeCalendarId, StringComparison.Ordinal)))
         {
             return activeCalendarId;
         }
