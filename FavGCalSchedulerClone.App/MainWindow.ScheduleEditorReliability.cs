@@ -14,6 +14,7 @@ public partial class MainWindow
     private bool _scheduleEditorReliabilityInitialized;
     private bool _restoringScheduleEditingIdentity;
     private CalendarEvent? _activeScheduleEditingEvent;
+    private CalendarEvent? _lastSelectedScheduleEvent;
     private readonly HashSet<Window> _observedScheduleEditorWindows = [];
 
     protected override void OnContentRendered(EventArgs e)
@@ -25,6 +26,7 @@ public partial class MainWindow
         }
 
         _scheduleEditorReliabilityInitialized = true;
+        _lastSelectedScheduleEvent = _viewModel.SelectedEvent is { IsTodoLike: false } selected ? selected : null;
         _viewModel.PropertyChanged += PreserveScheduleEditingIdentity;
         Deactivated += ScheduleEditorReliability_Deactivated;
         PreviewMouseLeftButtonDown += ReliableEventSegment_PreviewMouseLeftButtonDown;
@@ -84,6 +86,7 @@ public partial class MainWindow
         }
 
         _activeScheduleEditingEvent = editingEvent;
+        _lastSelectedScheduleEvent = editingEvent;
         EnsureScheduleEditorCalendar(editingEvent);
         try
         {
@@ -115,9 +118,11 @@ public partial class MainWindow
         }
 
         if (_activeScheduleEditingEvent is null
-            && _viewModel.SelectedEvent is { IsTodoLike: false } selected)
+            && string.Equals(window.Title, "スケジュールの編集", StringComparison.Ordinal))
         {
-            _activeScheduleEditingEvent = selected;
+            _activeScheduleEditingEvent = _viewModel.SelectedEvent is { IsTodoLike: false } selected
+                ? selected
+                : _lastSelectedScheduleEvent;
         }
 
         if (_observedScheduleEditorWindows.Add(window))
@@ -142,12 +147,27 @@ public partial class MainWindow
 
     private void PreserveScheduleEditingIdentity(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName != nameof(ViewModels.MainViewModel.SelectedEvent)
-            || FindScheduleEditorWindow() is null)
+        if (e.PropertyName != nameof(ViewModels.MainViewModel.SelectedEvent))
         {
             return;
         }
 
+        if (_viewModel.SelectedEvent is { IsTodoLike: false } selected)
+        {
+            _lastSelectedScheduleEvent = selected;
+        }
+
+        var window = FindScheduleEditorWindow();
+        if (window is null)
+        {
+            return;
+        }
+
+        if (_activeScheduleEditingEvent is null
+            && string.Equals(window.Title, "スケジュールの編集", StringComparison.Ordinal))
+        {
+            _activeScheduleEditingEvent = _lastSelectedScheduleEvent;
+        }
         RestoreScheduleEditingIdentity();
     }
 
