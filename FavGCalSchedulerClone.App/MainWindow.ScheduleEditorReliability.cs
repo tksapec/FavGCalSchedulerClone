@@ -87,7 +87,6 @@ public partial class MainWindow
 
         _activeScheduleEditingEvent = editingEvent;
         _lastSelectedScheduleEvent = editingEvent;
-        EnsureScheduleEditorCalendar(editingEvent);
         try
         {
             using (_applicationInteractionGuard.EnterOwnedModal())
@@ -192,22 +191,12 @@ public partial class MainWindow
         }
     }
 
-    private void EnsureScheduleEditorCalendar(CalendarEvent? editingEvent)
-    {
-        _viewModel.EditorCalendarId = _viewModel.ResolveScheduleEditorCalendarId(editingEvent);
-    }
-
     private void EnsureScheduleEditorCalendarSelection(Window scheduleWindow)
     {
         var editingEvent = _activeScheduleEditingEvent;
-        if (editingEvent is not null
-            && !string.IsNullOrWhiteSpace(editingEvent.CalendarId)
-            && !string.Equals(editingEvent.CalendarId, GoogleCalendarDefaults.PrimaryCalendarId, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        var calendarId = _viewModel.ResolveScheduleEditorCalendarId(editingEvent);
+        var calendarId = editingEvent is not null && !string.IsNullOrWhiteSpace(editingEvent.CalendarId)
+            ? editingEvent.CalendarId
+            : _viewModel.ResolveScheduleEditorCalendarId(editingEvent);
         if (string.IsNullOrWhiteSpace(calendarId))
         {
             return;
@@ -215,12 +204,20 @@ public partial class MainWindow
 
         var calendarSelector = FindVisualDescendants<ComboBox>(scheduleWindow)
             .FirstOrDefault(combo => ReferenceEquals(combo.ItemsSource, _viewModel.AvailableCalendars));
-        if (calendarSelector is null || calendarSelector.SelectedIndex >= 0)
+        if (calendarSelector is null)
         {
             return;
         }
 
+        var calendarOptions = _viewModel.CreateScheduleEditorCalendarOptions(editingEvent, calendarId);
+        calendarSelector.ItemsSource = calendarOptions;
         calendarSelector.SelectedValue = calendarId;
+        if (calendarSelector.SelectedIndex < 0 && calendarOptions.Count > 0)
+        {
+            calendarSelector.SelectedIndex = 0;
+            calendarId = calendarOptions[0].Id;
+        }
+
         _viewModel.EditorCalendarId = calendarId;
     }
 
