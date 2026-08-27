@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FavGCalSchedulerClone.App.Models;
+using FavGCalSchedulerClone.App.Services;
 
 namespace FavGCalSchedulerClone.Tests;
 
@@ -29,14 +30,36 @@ public sealed class ReturnToTodaySettingTests
     }
 
     [Fact]
+    public async Task Setting_PersistsThroughRepository()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+
+        await repository.SaveSettingsAsync(new AppSettings
+        {
+            ReturnToTodayWhenDeactivated = false
+        });
+
+        var restored = await repository.LoadSettingsAsync();
+
+        Assert.False(restored.ReturnToTodayWhenDeactivated);
+    }
+
+    [Fact]
     public async Task Setting_IsWiredIntoDeactivationAndSettingsDialog()
     {
         var app = await ReadAppFileAsync("App.xaml.cs");
         var dialog = await ReadAppFileAsync("Views", "Dialogs", "SettingsDialog.cs");
 
-        Assert.Contains("!viewModel.CreateSettingsSnapshot().ReturnToTodayWhenDeactivated", app, StringComparison.Ordinal);
+        var preferenceCheck = app.IndexOf("!viewModel.CreateSettingsSnapshot().ReturnToTodayWhenDeactivated", StringComparison.Ordinal);
+        var returnToTodayCall = app.IndexOf("await viewModel.ReturnSelectionToTodayAsync(cancellation.Token);", StringComparison.Ordinal);
+        Assert.True(preferenceCheck >= 0 && returnToTodayCall > preferenceCheck);
+
         Assert.Contains("IsChecked = settings.ReturnToTodayWhenDeactivated", dialog, StringComparison.Ordinal);
-        Assert.Contains("settings.ReturnToTodayWhenDeactivated = returnToTodayWhenDeactivated.IsChecked == true;", dialog, StringComparison.Ordinal);
+        var cancelGuard = dialog.IndexOf("if (window.ShowDialog() != true)", StringComparison.Ordinal);
+        var assignment = dialog.IndexOf("settings.ReturnToTodayWhenDeactivated = returnToTodayWhenDeactivated.IsChecked == true;", StringComparison.Ordinal);
+        Assert.True(cancelGuard >= 0 && assignment > cancelGuard);
     }
 
     private static Task<string> ReadAppFileAsync(params string[] relativePath)
