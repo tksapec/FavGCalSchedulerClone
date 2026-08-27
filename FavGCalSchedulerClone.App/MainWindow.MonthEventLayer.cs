@@ -40,7 +40,14 @@ public partial class MainWindow
                 _dragSegment = null;
                 _viewModel.SelectEventSegment(segment);
                 e.Handled = true;
-                await OpenSelectedEventEditorAsync();
+                if (segment.Event.IsTodoLike)
+                {
+                    await OpenSelectedEventEditorAsync();
+                }
+                else
+                {
+                    await OpenSelectedScheduleEditorReliablyAsync();
+                }
                 return;
             }
 
