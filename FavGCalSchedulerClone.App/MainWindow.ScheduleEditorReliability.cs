@@ -70,6 +70,8 @@ public partial class MainWindow
             return;
         }
 
+        _dragStartPoint = null;
+        _dragSegment = null;
         e.Handled = true;
         await RunUiActionAsync(async () =>
         {
@@ -151,14 +153,13 @@ public partial class MainWindow
             return;
         }
 
-        if (_viewModel.SelectedEvent is { IsTodoLike: false } selected)
-        {
-            _lastSelectedScheduleEvent = selected;
-        }
-
         var window = FindScheduleEditorWindow();
         if (window is null)
         {
+            if (_viewModel.SelectedEvent is { IsTodoLike: false } selected)
+            {
+                _lastSelectedScheduleEvent = selected;
+            }
             return;
         }
 
