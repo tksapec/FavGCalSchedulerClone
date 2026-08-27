@@ -15,11 +15,17 @@ public sealed class ScheduleEditingRegressionTests
     public async Task SidePanelDoubleClick_OpensScheduleEditorWithoutWaitingForDateNavigation()
     {
         var source = await ReadReliabilitySourceAsync();
+        var initialization = ExtractMethod(
+            source,
+            "protected override void OnContentRendered",
+            "private async void ReliableSelectedDayEventsGrid_MouseDoubleClick");
         var handler = ExtractMethod(
             source,
             "private async void ReliableSelectedDayEventsGrid_MouseDoubleClick",
             "private async void ReliableEventSegment_PreviewMouseLeftButtonDown");
 
+        Assert.Contains("grid.MouseDoubleClick -= SelectedDayEventsGrid_MouseDoubleClick;", initialization, StringComparison.Ordinal);
+        Assert.Contains("grid.MouseDoubleClick += ReliableSelectedDayEventsGrid_MouseDoubleClick;", initialization, StringComparison.Ordinal);
         Assert.Contains("_viewModel.SelectEvent(calendarEvent, selectEventDay: false);", handler, StringComparison.Ordinal);
         Assert.Contains("await OpenSelectedScheduleEditorReliablyAsync();", handler, StringComparison.Ordinal);
         Assert.DoesNotContain("NavigateToDateAsync", handler, StringComparison.Ordinal);
