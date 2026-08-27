@@ -22,7 +22,8 @@ public sealed partial class MainViewModel
         }
 
         // "primary" is a Google API alias and is not necessarily the concrete id
-        // returned by CalendarList. Prefer a concrete id already selected in the UI.
+        // returned by CalendarList. New events need a concrete registered id so the
+        // editor ComboBox has an actual item selected.
         if (!string.Equals(EditorCalendarId, GoogleCalendarDefaults.PrimaryCalendarId, StringComparison.Ordinal)
             && AvailableCalendars.Any(item => string.Equals(item.Id, EditorCalendarId, StringComparison.Ordinal)))
         {
@@ -43,33 +44,12 @@ public sealed partial class MainViewModel
         return ResolveEditorCalendarId();
     }
 
-    internal string ResolveScheduleEditorSavedCalendarId(
-        CalendarEvent? editingEvent,
-        string editorCalendarId,
-        string selectedCalendarId)
-    {
-        var selected = string.IsNullOrWhiteSpace(selectedCalendarId)
-            ? editorCalendarId
-            : selectedCalendarId;
-
-        // The Google Calendar API accepts "primary" as an alias for the account's
-        // primary calendar, while CalendarList normally exposes the concrete id.
-        // Showing that concrete id must not turn an unchanged edit into a calendar
-        // move, because the move writer intentionally clears Google identity.
-        if (editingEvent is not null
-            && string.Equals(editingEvent.CalendarId, GoogleCalendarDefaults.PrimaryCalendarId, StringComparison.Ordinal)
-            && string.Equals(selected, editorCalendarId, StringComparison.Ordinal))
-        {
-            return GoogleCalendarDefaults.PrimaryCalendarId;
-        }
-
-        return selected;
-    }
-
     internal IReadOnlyList<GoogleCalendarSelectionItem> CreateScheduleEditorCalendarOptions(
         CalendarEvent? editingEvent,
         string editorCalendarId)
     {
+        // Take a snapshot so an automatic calendar-list refresh cannot clear or
+        // replace the ComboBox items while a modal editor is open.
         var options = AvailableCalendars.ToList();
         if (string.IsNullOrWhiteSpace(editorCalendarId)
             || options.Any(item => string.Equals(item.Id, editorCalendarId, StringComparison.Ordinal)))
