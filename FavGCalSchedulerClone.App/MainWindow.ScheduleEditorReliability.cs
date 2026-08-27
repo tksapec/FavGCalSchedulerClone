@@ -104,6 +104,11 @@ public partial class MainWindow
 
     private void ScheduleEditorReliability_Deactivated(object? sender, EventArgs e)
     {
+        QueueScheduleEditorAttachment();
+    }
+
+    private void QueueScheduleEditorAttachment()
+    {
         TryAttachScheduleEditorWindow();
         Dispatcher.BeginInvoke(
             DispatcherPriority.Loaded,
@@ -159,6 +164,11 @@ public partial class MainWindow
             if (_viewModel.SelectedEvent is { IsTodoLike: false } selected)
             {
                 _lastSelectedScheduleEvent = selected;
+                // EventList and other owned modal windows can already have MainWindow
+                // inactive before a nested schedule editor is opened. In that case
+                // MainWindow.Deactivated will not fire again, so attach on the next
+                // dispatcher turn after the target schedule is selected.
+                QueueScheduleEditorAttachment();
             }
             return;
         }
