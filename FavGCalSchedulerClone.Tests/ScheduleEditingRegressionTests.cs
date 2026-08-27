@@ -32,6 +32,21 @@ public sealed class ScheduleEditingRegressionTests
     }
 
     [Fact]
+    public async Task WeekScheduleDoubleClick_ClearsPendingDragBeforeOpeningEditor()
+    {
+        var source = await ReadReliabilitySourceAsync();
+        var handler = ExtractMethod(
+            source,
+            "private async void ReliableEventSegment_PreviewMouseLeftButtonDown",
+            "private async Task OpenSelectedScheduleEditorReliablyAsync");
+
+        var clearStart = handler.IndexOf("_dragStartPoint = null;", StringComparison.Ordinal);
+        var clearSegment = handler.IndexOf("_dragSegment = null;", StringComparison.Ordinal);
+        var open = handler.IndexOf("await OpenSelectedScheduleEditorReliablyAsync();", StringComparison.Ordinal);
+        Assert.True(clearStart >= 0 && clearSegment > clearStart && open > clearSegment);
+    }
+
+    [Fact]
     public async Task ScheduleEditor_RestoresEditingIdentityBeforeModalReturnsToSavePath()
     {
         var source = await ReadReliabilitySourceAsync();
@@ -48,6 +63,22 @@ public sealed class ScheduleEditingRegressionTests
         var restore = closed.IndexOf("RestoreScheduleEditingIdentity();", StringComparison.Ordinal);
         var clear = closed.IndexOf("_activeScheduleEditingEvent = null;", StringComparison.Ordinal);
         Assert.True(restore >= 0 && clear > restore, "The original event identity must be restored synchronously before the modal window returns to the existing save path.");
+    }
+
+    [Fact]
+    public async Task ScheduleEditor_DoesNotReplaceFallbackIdentityWithTransientSelectionWhileOpen()
+    {
+        var source = await ReadReliabilitySourceAsync();
+        var method = ExtractMethod(
+            source,
+            "private void PreserveScheduleEditingIdentity",
+            "private void RestoreScheduleEditingIdentity");
+
+        var findWindow = method.IndexOf("var window = FindScheduleEditorWindow();", StringComparison.Ordinal);
+        var updateLast = method.IndexOf("_lastSelectedScheduleEvent = selected;", StringComparison.Ordinal);
+        var returnWhenNoWindow = method.IndexOf("return;", updateLast, StringComparison.Ordinal);
+        var activateFallback = method.IndexOf("_activeScheduleEditingEvent = _lastSelectedScheduleEvent;", StringComparison.Ordinal);
+        Assert.True(findWindow >= 0 && updateLast > findWindow && returnWhenNoWindow > updateLast && activateFallback > returnWhenNoWindow);
     }
 
     [Fact]
