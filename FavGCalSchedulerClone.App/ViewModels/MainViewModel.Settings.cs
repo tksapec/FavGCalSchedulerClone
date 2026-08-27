@@ -72,17 +72,11 @@ public sealed partial class MainViewModel
         Status = "アプリ設定を保存しました。";
     }
 
-    public async Task<IReadOnlyList<string>> LoadScheduleTitleHistoryAsync()
-    {
-        await ReloadScheduleHistoryAsync();
-        return _scheduleTitleHistory;
-    }
+    public Task<IReadOnlyList<string>> LoadScheduleTitleHistoryAsync()
+        => Task.FromResult(_scheduleTitleHistory);
 
-    public async Task<IReadOnlyList<string>> LoadScheduleLocationHistoryAsync()
-    {
-        await ReloadScheduleHistoryAsync();
-        return _scheduleLocationHistory;
-    }
+    public Task<IReadOnlyList<string>> LoadScheduleLocationHistoryAsync()
+        => Task.FromResult(_scheduleLocationHistory);
 
     public async Task ClearScheduleTitleHistoryAsync()
     {
