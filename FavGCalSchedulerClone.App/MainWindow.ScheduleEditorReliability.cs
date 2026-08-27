@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using FavGCalSchedulerClone.App.Models;
 using FavGCalSchedulerClone.App.Services;
 
@@ -13,6 +14,7 @@ public partial class MainWindow
     private bool _scheduleEditorReliabilityInitialized;
     private bool _restoringScheduleEditingIdentity;
     private CalendarEvent? _activeScheduleEditingEvent;
+    private readonly HashSet<Window> _observedScheduleEditorWindows = [];
 
     protected override void OnContentRendered(EventArgs e)
     {
@@ -24,53 +26,17 @@ public partial class MainWindow
 
         _scheduleEditorReliabilityInitialized = true;
         _viewModel.PropertyChanged += PreserveScheduleEditingIdentity;
+        Deactivated += ScheduleEditorReliability_Deactivated;
+        PreviewMouseLeftButtonDown += ReliableEventSegment_PreviewMouseLeftButtonDown;
 
         // The selected-day grids are used by both the month side pane and day view.
-        // Their legacy path navigates/reloads the calendar before opening the editor.
+        // Their legacy path performs a full date navigation before opening an editor.
         foreach (var grid in FindLogicalChildren<DataGrid>(this)
                      .Where(grid => ReferenceEquals(grid.ItemsSource, _viewModel.SelectedDayEvents)))
         {
             grid.MouseDoubleClick -= SelectedDayEventsGrid_MouseDoubleClick;
             grid.MouseDoubleClick += ReliableSelectedDayEventsGrid_MouseDoubleClick;
         }
-
-        DayList.MouseDoubleClick -= MonthDayList_MouseDoubleClick;
-        DayList.MouseDoubleClick += ReliableMonthDayList_MouseDoubleClick;
-
-        foreach (var list in FindLogicalChildren<ListBox>(this)
-                     .Where(list => !ReferenceEquals(list, DayList)
-                         && ReferenceEquals(list.ItemsSource, _viewModel.VisibleCalendarDays)))
-        {
-            list.MouseDoubleClick -= DayList_MouseDoubleClick;
-            list.MouseDoubleClick += ReliableWeekDayList_MouseDoubleClick;
-        }
-
-        // Week-view event segments use a template-level handler. Intercept only a
-        // schedule double click at the window preview stage so ToDo and drag behavior
-        // continue through the existing handlers unchanged.
-        PreviewMouseLeftButtonDown += ReliableEventSegment_PreviewMouseLeftButtonDown;
-
-        // Keep the existing command routing intact, replacing only schedule creation
-        // with the reliability wrapper so new appointments also receive a real calendar id.
-        _viewModel.SetWindowCommandHandlers(
-            () => RunAsOwnedModalAsync(ShowScheduleDialogReliablyAsync),
-            () => RunAsOwnedModalAsync(ShowTodoDialogAsync),
-            () => RunAsOwnedModalAsync(BackupAllCalendarsAsync),
-            () => RunAsOwnedModalAsync(RestoreAllCalendarsAsync),
-            () => RunAsOwnedModalAsync(ShowFavGCalSchedulerImportDialogAsync),
-            () => RunAsOwnedModalAsync(ImportCsvAsync),
-            () => RunAsOwnedModalAsync(ExportCsvAsync),
-            () => RunAsOwnedModalAsync(() => ShowEventListDialogAsync("スケジュール一覧", new EventListFilter(string.Empty, EventKindFilter.All, EventSearchRange.Year, _viewModel.CurrentMonth))),
-            () => RunAsOwnedModalAsync(ShowSearchDialogAsync),
-            () => RunAsOwnedModalAsync(ShowSyncDiagnosticsDialogAsync),
-            () => RunAsOwnedModalAsync(ShowSettingsDialogAsync),
-            () => RunAsOwnedModalAsync(ShowReminderHistoryDialogAsync),
-            () =>
-            {
-                RunAsOwnedModal(() => AboutDialog.Show(this));
-                return Task.CompletedTask;
-            },
-            () => RunAsOwnedModalAsync(ShowMonthJumpDialogAsync));
     }
 
     private async void ReliableSelectedDayEventsGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
@@ -90,48 +56,8 @@ public partial class MainWindow
             }
 
             _viewModel.SelectEvent(calendarEvent, selectEventDay: false);
-            using (_applicationInteractionGuard.EnterOwnedModal())
-            {
-                await ShowScheduleDialogReliablyAsync();
-            }
+            await OpenSelectedScheduleEditorReliablyAsync();
         }, nameof(ReliableSelectedDayEventsGrid_MouseDoubleClick));
-    }
-
-    private async void ReliableMonthDayList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
-    {
-        await RunUiActionAsync(async () =>
-        {
-            if (FindMonthEventLayer(e.OriginalSource) is { } layer
-                && layer.HitTestSegment(e.GetPosition(layer)) is { Event: not null })
-            {
-                e.Handled = true;
-                return;
-            }
-
-            _viewModel.SelectedEvent = null;
-            using (_applicationInteractionGuard.EnterOwnedModal())
-            {
-                await ShowScheduleDialogReliablyAsync();
-            }
-        }, nameof(ReliableMonthDayList_MouseDoubleClick));
-    }
-
-    private async void ReliableWeekDayList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
-    {
-        await RunUiActionAsync(async () =>
-        {
-            if (IsEventSegmentSource(e.OriginalSource))
-            {
-                e.Handled = true;
-                return;
-            }
-
-            _viewModel.SelectedEvent = null;
-            using (_applicationInteractionGuard.EnterOwnedModal())
-            {
-                await ShowScheduleDialogReliablyAsync();
-            }
-        }, nameof(ReliableWeekDayList_MouseDoubleClick));
     }
 
     private async void ReliableEventSegment_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -146,21 +72,25 @@ public partial class MainWindow
         await RunUiActionAsync(async () =>
         {
             _viewModel.SelectEventSegment(segment);
-            using (_applicationInteractionGuard.EnterOwnedModal())
-            {
-                await ShowScheduleDialogReliablyAsync();
-            }
+            await OpenSelectedScheduleEditorReliablyAsync();
         }, nameof(ReliableEventSegment_PreviewMouseLeftButtonDown));
     }
 
-    private async Task ShowScheduleDialogReliablyAsync()
+    private async Task OpenSelectedScheduleEditorReliablyAsync()
     {
-        var editingEvent = _viewModel.SelectedEvent;
-        EnsureScheduleEditorCalendar(editingEvent);
+        if (_viewModel.SelectedEvent is not { IsTodoLike: false } editingEvent)
+        {
+            return;
+        }
+
         _activeScheduleEditingEvent = editingEvent;
+        EnsureScheduleEditorCalendar(editingEvent);
         try
         {
-            await ShowScheduleDialogAsync();
+            using (_applicationInteractionGuard.EnterOwnedModal())
+            {
+                await ShowScheduleDialogAsync();
+            }
         }
         finally
         {
@@ -168,32 +98,77 @@ public partial class MainWindow
         }
     }
 
+    private void ScheduleEditorReliability_Deactivated(object? sender, EventArgs e)
+    {
+        TryAttachScheduleEditorWindow();
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Loaded,
+            new Action(TryAttachScheduleEditorWindow));
+    }
+
+    private void TryAttachScheduleEditorWindow()
+    {
+        var window = FindScheduleEditorWindow();
+        if (window is null)
+        {
+            return;
+        }
+
+        if (_activeScheduleEditingEvent is null
+            && _viewModel.SelectedEvent is { IsTodoLike: false } selected)
+        {
+            _activeScheduleEditingEvent = selected;
+        }
+
+        if (_observedScheduleEditorWindows.Add(window))
+        {
+            window.Closed += ScheduleEditorWindow_Closed;
+        }
+
+        RestoreScheduleEditingIdentity();
+        EnsureScheduleEditorCalendarSelection(window);
+    }
+
+    private void ScheduleEditorWindow_Closed(object? sender, EventArgs e)
+    {
+        RestoreScheduleEditingIdentity();
+        if (sender is Window window)
+        {
+            window.Closed -= ScheduleEditorWindow_Closed;
+            _observedScheduleEditorWindows.Remove(window);
+        }
+        _activeScheduleEditingEvent = null;
+    }
+
     private void PreserveScheduleEditingIdentity(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName != nameof(ViewModels.MainViewModel.SelectedEvent)
+            || FindScheduleEditorWindow() is null)
+        {
+            return;
+        }
+
+        RestoreScheduleEditingIdentity();
+    }
+
+    private void RestoreScheduleEditingIdentity()
+    {
         if (_restoringScheduleEditingIdentity
-            || e.PropertyName != nameof(ViewModels.MainViewModel.SelectedEvent)
             || _activeScheduleEditingEvent is not { } editingEvent
-            || !IsScheduleEditorWindowOpen()
             || (_viewModel.SelectedEvent is not null
                 && string.Equals(_viewModel.SelectedEvent.Id, editingEvent.Id, StringComparison.Ordinal)))
         {
             return;
         }
 
-        // The dialog edits local controls. Restoring the original selection here only
-        // protects the event identity; the accepted dialog values are applied afterward.
-        if (_viewModel.SelectedEvent is null
-            || !string.Equals(_viewModel.SelectedEvent.Id, editingEvent.Id, StringComparison.Ordinal))
+        _restoringScheduleEditingIdentity = true;
+        try
         {
-            _restoringScheduleEditingIdentity = true;
-            try
-            {
-                _viewModel.SelectEvent(editingEvent, selectEventDay: false);
-            }
-            finally
-            {
-                _restoringScheduleEditingIdentity = false;
-            }
+            _viewModel.SelectEvent(editingEvent, selectEventDay: false);
+        }
+        finally
+        {
+            _restoringScheduleEditingIdentity = false;
         }
     }
 
@@ -202,8 +177,35 @@ public partial class MainWindow
         _viewModel.EditorCalendarId = _viewModel.ResolveScheduleEditorCalendarId(editingEvent);
     }
 
-    private bool IsScheduleEditorWindowOpen() =>
-        Application.Current.Windows.OfType<Window>().Any(window =>
+    private void EnsureScheduleEditorCalendarSelection(Window scheduleWindow)
+    {
+        var editingEvent = _activeScheduleEditingEvent;
+        if (editingEvent is not null
+            && !string.IsNullOrWhiteSpace(editingEvent.CalendarId)
+            && !string.Equals(editingEvent.CalendarId, GoogleCalendarDefaults.PrimaryCalendarId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var calendarId = _viewModel.ResolveScheduleEditorCalendarId(editingEvent);
+        if (string.IsNullOrWhiteSpace(calendarId))
+        {
+            return;
+        }
+
+        var calendarSelector = FindVisualDescendants<ComboBox>(scheduleWindow)
+            .FirstOrDefault(combo => ReferenceEquals(combo.ItemsSource, _viewModel.AvailableCalendars));
+        if (calendarSelector is null || calendarSelector.SelectedIndex >= 0)
+        {
+            return;
+        }
+
+        calendarSelector.SelectedValue = calendarId;
+        _viewModel.EditorCalendarId = calendarId;
+    }
+
+    private Window? FindScheduleEditorWindow() =>
+        Application.Current.Windows.OfType<Window>().FirstOrDefault(window =>
             ReferenceEquals(window.Owner, this)
             && window.IsVisible
             && (string.Equals(window.Title, "スケジュールの編集", StringComparison.Ordinal)
@@ -225,5 +227,23 @@ public partial class MainWindow
         }
 
         return null;
+    }
+
+    private static IEnumerable<T> FindVisualDescendants<T>(DependencyObject root)
+        where T : DependencyObject
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+        {
+            var child = VisualTreeHelper.GetChild(root, index);
+            if (child is T match)
+            {
+                yield return match;
+            }
+
+            foreach (var descendant in FindVisualDescendants<T>(child))
+            {
+                yield return descendant;
+            }
+        }
     }
 }
