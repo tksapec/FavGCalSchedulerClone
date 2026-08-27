@@ -11,6 +11,7 @@ public sealed class AppSettings
     public int StartupTabIndex { get; set; }
     public CalendarViewMode StartupCalendarViewMode { get; set; } = CalendarViewMode.Month;
     public int StartupTodoTabIndex { get; set; }
+    public bool ReturnToTodayWhenDeactivated { get; set; } = true;
     public bool ConfirmBeforeDelete { get; set; } = true;
     // Compatibility-only facade for callers compiled against older versions.
     // Window close always minimizes to the notification area unless explicit exit is requested.
