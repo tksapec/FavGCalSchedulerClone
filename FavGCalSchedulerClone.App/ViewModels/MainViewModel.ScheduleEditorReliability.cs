@@ -21,13 +21,19 @@ public sealed partial class MainViewModel
             return eventCalendarId;
         }
 
-        // "primary" is a Google API alias and is not necessarily the concrete id
-        // returned by CalendarList. New events need a concrete registered id so the
-        // editor ComboBox has an actual item selected.
-        if (!string.Equals(EditorCalendarId, GoogleCalendarDefaults.PrimaryCalendarId, StringComparison.Ordinal)
-            && AvailableCalendars.Any(item => string.Equals(item.Id, EditorCalendarId, StringComparison.Ordinal)))
+        string activeCalendarId;
+        lock (_settingsStateLock)
         {
-            return EditorCalendarId;
+            activeCalendarId = _settings.ActiveCalendarId;
+        }
+
+        // ActiveCalendarId is the persisted default calendar. Selecting an existing
+        // event also changes EditorCalendarId, so do not let that transient editor
+        // state replace the configured default for a later new schedule.
+        if (!string.IsNullOrWhiteSpace(activeCalendarId)
+            && AvailableCalendars.Any(item => string.Equals(item.Id, activeCalendarId, StringComparison.Ordinal)))
+        {
+            return activeCalendarId;
         }
 
         var selected = AvailableCalendars.FirstOrDefault(item => item.IsSelected);
@@ -36,12 +42,20 @@ public sealed partial class MainViewModel
             return selected.Id;
         }
 
+        if (!string.Equals(EditorCalendarId, GoogleCalendarDefaults.PrimaryCalendarId, StringComparison.Ordinal)
+            && AvailableCalendars.Any(item => string.Equals(item.Id, EditorCalendarId, StringComparison.Ordinal)))
+        {
+            return EditorCalendarId;
+        }
+
         if (AvailableCalendars.Count > 0)
         {
             return AvailableCalendars[0].Id;
         }
 
-        return ResolveEditorCalendarId();
+        return string.IsNullOrWhiteSpace(activeCalendarId)
+            ? ResolveEditorCalendarId()
+            : activeCalendarId;
     }
 
     internal IReadOnlyList<GoogleCalendarSelectionItem> CreateScheduleEditorCalendarOptions(
