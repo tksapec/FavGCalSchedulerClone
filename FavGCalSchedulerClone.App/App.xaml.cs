@@ -105,7 +105,7 @@ public partial class App : System.Windows.Application
             }
             if (ShouldSkipReturnToToday()
                 || MainWindow?.DataContext is not MainViewModel viewModel
-                || !viewModel.CreateSettingsSnapshot().ReturnToTodayWhenDeactivated)
+                || !viewModel.ReturnToTodayWhenDeactivated)
             {
                 return;
             }
