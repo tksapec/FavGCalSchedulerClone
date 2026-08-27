@@ -133,6 +133,24 @@ public sealed class ScheduleEditingRegressionTests
     }
 
     [Fact]
+    public async Task ResolveScheduleEditorCalendarId_NewSchedulePrefersPersistedActiveCalendarOverTransientEditorCalendar()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        await repository.SaveSettingsAsync(new AppSettings
+        {
+            VisibleCalendarIds = ["calendar-a", "calendar-b"],
+            ActiveCalendarId = "calendar-b"
+        });
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        await viewModel.InitializeAsync();
+        viewModel.EditorCalendarId = "calendar-a";
+
+        Assert.Equal("calendar-b", viewModel.ResolveScheduleEditorCalendarId(null));
+    }
+
+    [Fact]
     public void CreateScheduleEditorCalendarOptions_PrimaryAliasAndUnavailableCurrentCalendarRemainSelectable()
     {
         var viewModel = CreateViewModel();
@@ -150,6 +168,25 @@ public sealed class ScheduleEditingRegressionTests
         Assert.Contains(unavailableOptions, item => item.Id == "archived-calendar");
         Assert.Contains(unavailableOptions, item => item.Id == "calendar-a");
         Assert.False(ReferenceEquals(viewModel.AvailableCalendars, primaryOptions));
+    }
+
+    [Fact]
+    public async Task ScheduleHistoryAccess_UsesInitializedInMemoryCacheInsteadOfReloadingSqliteForEveryDialog()
+    {
+        var source = await File.ReadAllTextAsync(Path.Combine(AppRoot, "ViewModels", "MainViewModel.Settings.cs"));
+        var title = ExtractMethod(
+            source,
+            "public Task<IReadOnlyList<string>> LoadScheduleTitleHistoryAsync",
+            "public Task<IReadOnlyList<string>> LoadScheduleLocationHistoryAsync");
+        var location = ExtractMethod(
+            source,
+            "public Task<IReadOnlyList<string>> LoadScheduleLocationHistoryAsync",
+            "public async Task ClearScheduleTitleHistoryAsync");
+
+        Assert.Contains("Task.FromResult(_scheduleTitleHistory)", title, StringComparison.Ordinal);
+        Assert.Contains("Task.FromResult(_scheduleLocationHistory)", location, StringComparison.Ordinal);
+        Assert.DoesNotContain("ReloadScheduleHistoryAsync", title, StringComparison.Ordinal);
+        Assert.DoesNotContain("ReloadScheduleHistoryAsync", location, StringComparison.Ordinal);
     }
 
     private static MainViewModel CreateViewModel()
