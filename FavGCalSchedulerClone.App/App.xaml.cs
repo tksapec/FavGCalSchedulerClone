@@ -104,7 +104,8 @@ public partial class App : System.Windows.Application
                 await Task.Delay(50, cancellation.Token);
             }
             if (ShouldSkipReturnToToday()
-                || MainWindow?.DataContext is not MainViewModel viewModel)
+                || MainWindow?.DataContext is not MainViewModel viewModel
+                || !viewModel.CreateSettingsSnapshot().ReturnToTodayWhenDeactivated)
             {
                 return;
             }
