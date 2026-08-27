@@ -1037,7 +1037,7 @@ public sealed partial class MainViewModel
         var anchor = GetNavigationAnchorDate();
         var target = CurrentViewMode switch
         {
-            CalendarViewMode.Month => anchor.AddMonths(direction),
+            CalendarViewMode.Month => GetDisplayedMonthNavigationTarget(anchor, direction),
             CalendarViewMode.Week => anchor.AddDays(direction * 7),
             CalendarViewMode.Day => anchor.AddDays(direction),
             _ => anchor
