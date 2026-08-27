@@ -50,11 +50,17 @@ public sealed class ReturnToTodaySettingTests
     public async Task Setting_IsWiredIntoDeactivationAndSettingsDialog()
     {
         var app = await ReadAppFileAsync("App.xaml.cs");
+        var viewModelSetting = await ReadAppFileAsync("ViewModels", "MainViewModel.ReturnToTodaySetting.cs");
         var dialog = await ReadAppFileAsync("Views", "Dialogs", "SettingsDialog.cs");
 
-        var preferenceCheck = app.IndexOf("!viewModel.CreateSettingsSnapshot().ReturnToTodayWhenDeactivated", StringComparison.Ordinal);
+        var preferenceCheck = app.IndexOf("!viewModel.ReturnToTodayWhenDeactivated", StringComparison.Ordinal);
         var returnToTodayCall = app.IndexOf("await viewModel.ReturnSelectionToTodayAsync(cancellation.Token);", StringComparison.Ordinal);
         Assert.True(preferenceCheck >= 0 && returnToTodayCall > preferenceCheck);
+        Assert.DoesNotContain("CreateSettingsSnapshot().ReturnToTodayWhenDeactivated", app, StringComparison.Ordinal);
+
+        Assert.Contains("public bool ReturnToTodayWhenDeactivated", viewModelSetting, StringComparison.Ordinal);
+        Assert.Contains("lock (_settingsStateLock)", viewModelSetting, StringComparison.Ordinal);
+        Assert.Contains("return _settings.ReturnToTodayWhenDeactivated;", viewModelSetting, StringComparison.Ordinal);
 
         Assert.Contains("IsChecked = settings.ReturnToTodayWhenDeactivated", dialog, StringComparison.Ordinal);
         var cancelGuard = dialog.IndexOf("if (window.ShowDialog() != true)", StringComparison.Ordinal);
