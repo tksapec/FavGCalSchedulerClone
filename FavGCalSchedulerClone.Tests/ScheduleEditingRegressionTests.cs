@@ -14,29 +14,35 @@ public sealed class ScheduleEditingRegressionTests
     [Fact]
     public async Task SidePanelDoubleClick_OpensScheduleEditorWithoutWaitingForDateNavigation()
     {
-        var source = await File.ReadAllTextAsync(Path.Combine(AppRoot, "MainWindow.xaml.cs"));
-        var handler = ExtractMethod(source, "private async void SelectedDayEventsGrid_MouseDoubleClick", "private async void TodoEventsGrid_MouseDoubleClick");
-        var fastEditor = ExtractMethod(source, "private async Task OpenSidePanelEventEditorAsync", "private async Task OpenGridEventEditorAsync");
+        var source = await ReadReliabilitySourceAsync();
+        var handler = ExtractMethod(
+            source,
+            "private async void ReliableSelectedDayEventsGrid_MouseDoubleClick",
+            "private async void ReliableMonthDayList_MouseDoubleClick");
 
-        Assert.Contains("await OpenSidePanelEventEditorAsync(calendarEvent);", handler, StringComparison.Ordinal);
-        Assert.Contains("_viewModel.SelectEvent(calendarEvent, selectEventDay: false);", fastEditor, StringComparison.Ordinal);
-        Assert.Contains("await ShowScheduleDialogAsync();", fastEditor, StringComparison.Ordinal);
-        Assert.DoesNotContain("NavigateToDateAsync", fastEditor, StringComparison.Ordinal);
+        Assert.Contains("_viewModel.SelectEvent(calendarEvent, selectEventDay: false);", handler, StringComparison.Ordinal);
+        Assert.Contains("await ShowScheduleDialogReliablyAsync();", handler, StringComparison.Ordinal);
+        Assert.DoesNotContain("NavigateToDateAsync", handler, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task ScheduleEditor_RestoresCapturedEditingEventBeforeApplyingDialogResult()
+    public async Task ScheduleEditor_PreservesCapturedEditingIdentityWhileDialogIsOpen()
     {
-        var source = await File.ReadAllTextAsync(Path.Combine(AppRoot, "MainWindow.xaml.cs"));
-        var method = ExtractMethod(source, "private async Task ShowScheduleDialogAsync", "private async Task ShowTodoDialogAsync");
+        var source = await ReadReliabilitySourceAsync();
+        var wrapper = ExtractMethod(
+            source,
+            "private async Task ShowScheduleDialogReliablyAsync",
+            "private void PreserveScheduleEditingIdentity");
+        var guard = ExtractMethod(
+            source,
+            "private void PreserveScheduleEditingIdentity",
+            "private void EnsureScheduleEditorCalendar");
 
-        var restore = method.IndexOf("_viewModel.SelectEvent(editingEvent, selectEventDay: false);", StringComparison.Ordinal);
-        var apply = method.IndexOf("_viewModel.EditorCalendarId = result.CalendarId;", StringComparison.Ordinal);
-        var save = method.IndexOf("await _viewModel.SaveCurrentEventAsync(recurrenceScope);", StringComparison.Ordinal);
-
-        Assert.True(restore >= 0, "The captured editing event must be restored before saving.");
-        Assert.True(apply > restore, "Dialog values must be applied after restoring the editing identity.");
-        Assert.True(save > apply, "The restored editing identity and dialog values must be in place before saving.");
+        Assert.Contains("var editingEvent = _viewModel.SelectedEvent;", wrapper, StringComparison.Ordinal);
+        Assert.Contains("_activeScheduleEditingEvent = editingEvent;", wrapper, StringComparison.Ordinal);
+        Assert.Contains("await ShowScheduleDialogAsync();", wrapper, StringComparison.Ordinal);
+        Assert.Contains("_viewModel.SelectedEvent is null", guard, StringComparison.Ordinal);
+        Assert.Contains("_viewModel.SelectEvent(editingEvent, selectEventDay: false);", guard, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -50,8 +56,12 @@ public sealed class ScheduleEditingRegressionTests
 
         Assert.Equal("calendar-a", viewModel.ResolveScheduleEditorCalendarId(null));
         Assert.Equal("calendar-a", viewModel.ResolveScheduleEditorCalendarId(new CalendarEvent { CalendarId = "" }));
+        Assert.Equal("calendar-a", viewModel.ResolveScheduleEditorCalendarId(new CalendarEvent { CalendarId = GoogleCalendarDefaults.PrimaryCalendarId }));
         Assert.Equal("hidden-calendar", viewModel.ResolveScheduleEditorCalendarId(new CalendarEvent { CalendarId = "hidden-calendar" }));
     }
+
+    private static Task<string> ReadReliabilitySourceAsync() =>
+        File.ReadAllTextAsync(Path.Combine(AppRoot, "MainWindow.ScheduleEditorReliability.cs"));
 
     private static string ExtractMethod(string source, string startMarker, string nextMarker)
     {
