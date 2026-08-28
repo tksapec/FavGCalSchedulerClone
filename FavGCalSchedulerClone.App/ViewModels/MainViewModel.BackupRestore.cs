@@ -59,9 +59,10 @@ public sealed partial class MainViewModel
             var result = await _backupService.RestoreBackupAsync(backupZipPath, _repository.DatabasePath);
 
             // Keep normal repository callers blocked until every view-model collection,
-            // cache and setting has been reloaded from the restored database. Only this
-            // asynchronous restore flow receives temporary maintenance access.
-            await _repository.RunWithMaintenanceAccessAsync(InitializeAsync);
+            // cache and setting has been reloaded from the restored database. This flow
+            // already owns _syncDataOperationGate, so the calendar-list reload must call
+            // its core implementation rather than re-entering the public gated wrapper.
+            await _repository.RunWithMaintenanceAccessAsync(ReloadRestoredViewModelStateAsync);
 
             _repository.EndMaintenance();
             repositoryMaintenanceStarted = false;
@@ -92,6 +93,33 @@ public sealed partial class MainViewModel
                 }
             }
         }
+    }
+
+    private async Task ReloadRestoredViewModelStateAsync()
+    {
+        await _repository.InitializeAsync();
+        var loadedSettings = AppSettingsNormalizer.Normalize(await LoadSettingsSafelyAsync());
+        lock (_settingsStateLock)
+        {
+            _settings = loadedSettings;
+        }
+        OAuthClientJsonPath = _settings.OAuthClientJsonPath ?? "";
+        OnPropertyChanged(nameof(CalendarLabelFontSize));
+        OnPropertyChanged(nameof(SideListFontSize));
+        OnPropertyChanged(nameof(WindowOpacity));
+        OnPropertyChanged(nameof(WeekdayHeaders));
+        SelectedTabIndex = _settings.StartupTabIndex;
+        SelectedTodoTabIndex = _settings.StartupTodoTabIndex;
+        CurrentViewMode = _settings.StartupCalendarViewMode;
+        await ReloadScheduleHistoryAsync();
+        SelectedDay = null;
+        await ReloadTagsAsync();
+        _eventColorPalette = await _syncService.LoadCachedEventColorPaletteAsync();
+        await ReloadAvailableCalendarsCoreAsync();
+        SetCurrentMonthWithoutRefreshing(_settings.DisplayMonth);
+        await RefreshCalendarAsync();
+        await RefreshOperationalStatusAsync(null);
+        Status = "準備完了";
     }
 
     public async Task<BackupResult> CreateDiagnosticsBulkBackupAsync()
