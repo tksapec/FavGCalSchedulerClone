@@ -91,6 +91,7 @@ public sealed partial class MainViewModel
             }
             catch (Exception ex)
             {
+                MarkDatabaseRestartRequired();
                 const string message = "バックアップDBの復元は完了しましたが、画面状態の再読み込みに失敗しました。アプリを再起動してください。";
                 Status = message;
                 throw new InvalidOperationException(message, ex);
