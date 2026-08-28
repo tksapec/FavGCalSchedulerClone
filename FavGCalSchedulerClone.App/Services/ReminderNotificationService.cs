@@ -122,17 +122,13 @@ public sealed class ReminderNotificationService : IDisposable
     public async Task ResumeAfterMaintenanceAsync(bool resumeMonitoring, CancellationToken cancellationToken = default)
     {
         Volatile.Write(ref _maintenancePaused, false);
-        _startedAt = null;
-        _lastDiagnosticsSavedAt = null;
-        _lastPersistedDiagnosticsSignature = null;
-        _diagnostics = ReminderMonitoringSnapshot.Stopped;
         if (resumeMonitoring)
         {
             await StartAsync(cancellationToken);
         }
         else
         {
-            await LoadDiagnosticsAsync();
+            UpdateRuntimeState(null);
         }
     }
 
@@ -548,8 +544,6 @@ public sealed class ReminderNotificationService : IDisposable
         try
         {
             return (JsonSerializer.Deserialize<List<ReminderHistoryItem?>>(json) ?? [])
-                .OfType<string>()
-                .Select(_ => (ReminderHistoryItem?)null)
                 .OfType<ReminderHistoryItem>()
                 .ToArray();
         }
@@ -668,7 +662,7 @@ public sealed class ReminderNotificationService : IDisposable
 
     private static DateTimeOffset? TryGetSnoozedUntil(IReadOnlyDictionary<string, string> snoozed, string occurrenceKey)
     {
-        return snoozed.TryGetValue(notification.OccurrenceKey, out var value) && DateTimeOffset.TryParse(value, out var parsed) ? parsed : null;
+        return snoozed.TryGetValue(occurrenceKey, out var value) && DateTimeOffset.TryParse(value, out var parsed) ? parsed : null;
     }
 
     private static ReminderCandidateDiagnostic CreateCandidateDiagnostic(
