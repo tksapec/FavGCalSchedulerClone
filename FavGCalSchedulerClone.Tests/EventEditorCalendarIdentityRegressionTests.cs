@@ -46,4 +46,42 @@ public sealed class EventEditorCalendarIdentityRegressionTests
         Assert.Single(dirty);
         Assert.Equal(original.Id, dirty[0].Id);
     }
+
+    [Fact]
+    public async Task SaveCurrentEventAsync_PrimaryAliasEdit_PreservesCalendarAndGoogleIdentity()
+    {
+        var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
+        await repository.InitializeAsync();
+        await repository.SaveSettingsAsync(new AppSettings
+        {
+            VisibleCalendarIds = [GoogleCalendarDefaults.PrimaryCalendarId],
+            ActiveCalendarId = GoogleCalendarDefaults.PrimaryCalendarId
+        });
+        var original = new CalendarEvent
+        {
+            Id = "linked-primary-alias",
+            CalendarId = GoogleCalendarDefaults.PrimaryCalendarId,
+            GoogleEventId = "remote-primary-event",
+            LastSyncedGoogleEtag = "etag-primary",
+            LastSyncedAt = DateTimeOffset.Now.AddDays(-1),
+            Title = "Original title",
+            Start = new DateTimeOffset(2026, 8, 25, 9, 0, 0, TimeSpan.FromHours(9)),
+            End = new DateTimeOffset(2026, 8, 25, 10, 0, 0, TimeSpan.FromHours(9)),
+            IsDirty = false
+        };
+        await repository.SaveEventAsync(original);
+        var stored = Assert.IsType<CalendarEvent>(await repository.FindEventByIdAsync(original.Id));
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        await viewModel.InitializeAsync();
+        viewModel.SelectedEvent = stored;
+        viewModel.Title = "Edited title";
+
+        await viewModel.SaveCurrentEventAsync();
+
+        var edited = Assert.IsType<CalendarEvent>(await repository.FindEventByIdAsync(original.Id));
+        Assert.Equal(original.Id, edited.Id);
+        Assert.Equal(GoogleCalendarDefaults.PrimaryCalendarId, edited.CalendarId);
+        Assert.Equal("remote-primary-event", edited.GoogleEventId);
+        Assert.Equal("Edited title", edited.Title);
+    }
 }
