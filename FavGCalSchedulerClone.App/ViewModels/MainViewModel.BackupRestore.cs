@@ -70,6 +70,7 @@ public sealed partial class MainViewModel
             repositoryMaintenanceStarted = true;
             var result = await _backupService.RestoreBackupAsync(backupZipPath, _repository.DatabasePath);
             databaseReplaced = true;
+            ResetTransientStateAfterDatabaseRestore();
 
             // Keep normal repository callers blocked until every view-model collection,
             // cache and setting has been reloaded from the restored database. This flow
@@ -119,6 +120,21 @@ public sealed partial class MainViewModel
                 }
             }
         }
+    }
+
+    private void ResetTransientStateAfterDatabaseRestore()
+    {
+        _undoService.Clear();
+        NotifyUndoStateChanged();
+
+        _labelClipboard = null;
+        OnPropertyChanged(nameof(CanPasteEventLabel));
+        OnPropertyChanged(nameof(CanCutSelectedEventLabel));
+
+        ClearCurrentYearSearch();
+        SelectedEvent = null;
+        _pendingSelectedDate = null;
+        _navigationAnchorDate = null;
     }
 
     private void MarkRestoredSettingsPersistenceBaseline()
