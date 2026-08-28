@@ -180,6 +180,36 @@ public sealed class BackupRestoreConcurrencyRegressionTests
         Assert.Contains("await _reminderService!.ResumeAfterMaintenanceAsync(reminderWasRunning)", source);
     }
 
+    [Fact]
+    public async Task ImportExportOperations_ShareRestoreSyncDataGateWithoutNestedCalendarReloadGate()
+    {
+        var sourcePath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..",
+            "FavGCalSchedulerClone.App", "ViewModels", "MainViewModel.ImportExport.cs"));
+        var source = await File.ReadAllTextAsync(sourcePath);
+
+        Assert.Contains(
+            "RunExclusiveSyncDataOperationAsync(() => ExportCurrentYearCsvCoreAsync(csvPath))",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "RunExclusiveSyncDataOperationAsync(() => ImportCsvCoreAsync(csvPath))",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "RunExclusiveSyncDataOperationAsync(() => ImportFavGCalSchedulerCoreAsync(options))",
+            source,
+            StringComparison.Ordinal);
+
+        var coreStart = source.IndexOf("private async Task<FavGCalImportResult> ImportFavGCalSchedulerCoreAsync", StringComparison.Ordinal);
+        var nextMethod = source.IndexOf("private void ApplyFavGCalSchedulerSettings", coreStart, StringComparison.Ordinal);
+        Assert.True(coreStart >= 0 && nextMethod > coreStart);
+        var core = source[coreStart..nextMethod];
+        Assert.Contains("await ReloadAvailableCalendarsCoreAsync();", core, StringComparison.Ordinal);
+        Assert.DoesNotContain("await ReloadAvailableCalendarsAsync();", core, StringComparison.Ordinal);
+    }
+
     private static async Task CreateMigrationFailureBackupAsync(string databasePath, string backupPath)
     {
         await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString()))
