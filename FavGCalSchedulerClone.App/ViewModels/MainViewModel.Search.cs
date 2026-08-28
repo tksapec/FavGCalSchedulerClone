@@ -5,12 +5,20 @@ namespace FavGCalSchedulerClone.App.ViewModels;
 public sealed partial class MainViewModel
 {
     private CalendarViewMode? _searchReturnViewMode;
+    private int _searchGeneration;
 
     public async Task RunCurrentYearSearchAsync()
     {
         var searchWasVisible = IsSearchResultsVisible;
         var previousView = CurrentViewMode;
-        await RunSearchForYearAsync(CurrentMonth.Year);
+        var year = CurrentMonth.Year;
+        var query = SearchQuery;
+        var generation = Interlocked.Increment(ref _searchGeneration);
+
+        if (!await RunSearchForYearAsync(year, query, generation, previousView))
+        {
+            return;
+        }
 
         if (!searchWasVisible || previousView != CalendarViewMode.Month)
         {
@@ -23,9 +31,20 @@ public sealed partial class MainViewModel
         }
     }
 
-    private async Task RunSearchForYearAsync(int year)
+    private async Task<bool> RunSearchForYearAsync(
+        int year,
+        string query,
+        int generation,
+        CalendarViewMode expectedView)
     {
-        var results = await SearchYearEventsAsync(new DateTime(year, 1, 1), SearchQuery);
+        var results = await SearchYearEventsAsync(new DateTime(year, 1, 1), query);
+        if (generation != Volatile.Read(ref _searchGeneration)
+            || !string.Equals(SearchQuery, query, StringComparison.Ordinal)
+            || CurrentViewMode != expectedView)
+        {
+            return false;
+        }
+
         _searchResultsYear = year;
         var selectedSearchResult = SelectedSearchResult;
         _searchResults.ReplaceAll(results);
@@ -34,23 +53,32 @@ public sealed partial class MainViewModel
         {
             SelectedEvent = null;
         }
+
         IsSearchResultsVisible = true;
         OnPropertyChanged(nameof(SearchResultsScopeText));
-        Status = string.IsNullOrWhiteSpace(SearchQuery)
+        Status = string.IsNullOrWhiteSpace(query)
             ? $"{year}年の予定を表示しています: {results.Count}件"
-            : $"「{SearchQuery.Trim()}」の検索結果: {results.Count}件";
+            : $"「{query.Trim()}」の検索結果: {results.Count}件";
+        return true;
     }
 
     public async Task RefreshCurrentYearSearchAsync()
     {
-        if (IsSearchResultsVisible)
+        if (!IsSearchResultsVisible)
         {
-            await RunSearchForYearAsync(_searchResultsYear ?? CurrentMonth.Year);
+            return;
         }
+
+        var year = _searchResultsYear ?? CurrentMonth.Year;
+        var query = SearchQuery;
+        var expectedView = CurrentViewMode;
+        var generation = Interlocked.Increment(ref _searchGeneration);
+        await RunSearchForYearAsync(year, query, generation, expectedView);
     }
 
     private void ClearCurrentYearSearch()
     {
+        Interlocked.Increment(ref _searchGeneration);
         var returnViewMode = _searchReturnViewMode;
         var selectedSearchResult = SelectedSearchResult;
         _searchReturnViewMode = null;
@@ -62,6 +90,7 @@ public sealed partial class MainViewModel
         {
             SelectedEvent = null;
         }
+
         IsSearchResultsVisible = false;
         OnPropertyChanged(nameof(SearchResultsScopeText));
 
