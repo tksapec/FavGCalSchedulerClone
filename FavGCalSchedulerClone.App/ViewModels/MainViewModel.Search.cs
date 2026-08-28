@@ -8,9 +8,11 @@ public sealed partial class MainViewModel
 
     public async Task RunCurrentYearSearchAsync()
     {
-        if (!IsSearchResultsVisible)
+        var searchWasVisible = IsSearchResultsVisible;
+        var previousView = CurrentViewMode;
+        if (!searchWasVisible || previousView != CalendarViewMode.Month)
         {
-            _searchReturnViewMode = CurrentViewMode;
+            _searchReturnViewMode = previousView;
         }
 
         if (CurrentViewMode != CalendarViewMode.Month)
