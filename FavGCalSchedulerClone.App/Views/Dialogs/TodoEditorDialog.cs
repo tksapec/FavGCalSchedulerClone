@@ -179,15 +179,18 @@ internal static class TodoEditorDialog
     {
         var options = request.AvailableCalendars.ToList();
         var requestedCalendarId = request.CalendarId;
-        if (!string.IsNullOrWhiteSpace(requestedCalendarId)
-            && options.Any(item => string.Equals(item.Id, requestedCalendarId, StringComparison.Ordinal)))
-        {
-            return (requestedCalendarId, options);
-        }
 
         if (request.IsNew)
         {
-            var fallback = options.FirstOrDefault(item => item.IsSelected) ?? options.FirstOrDefault();
+            // EditorCalendarId can reflect the last edited event, including a calendar
+            // that is currently hidden. New ToDos should default to a visible/selected
+            // calendar instead of disappearing into that transient editor target.
+            var requestedVisible = options.FirstOrDefault(item =>
+                item.IsSelected
+                && string.Equals(item.Id, requestedCalendarId, StringComparison.Ordinal));
+            var fallback = requestedVisible
+                ?? options.FirstOrDefault(item => item.IsSelected)
+                ?? options.FirstOrDefault();
             if (fallback is not null)
             {
                 return (fallback.Id, options);
@@ -202,6 +205,12 @@ internal static class TodoEditorDialog
                 Summary = FormatUnavailableCalendarSummary(fallbackId, isExisting: false)
             });
             return (fallbackId, options);
+        }
+
+        if (!string.IsNullOrWhiteSpace(requestedCalendarId)
+            && options.Any(item => string.Equals(item.Id, requestedCalendarId, StringComparison.Ordinal)))
+        {
+            return (requestedCalendarId, options);
         }
 
         if (!string.IsNullOrWhiteSpace(requestedCalendarId))
