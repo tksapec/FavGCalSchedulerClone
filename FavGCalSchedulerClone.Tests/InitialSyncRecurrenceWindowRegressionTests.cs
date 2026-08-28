@@ -1,5 +1,7 @@
+using System.Net;
 using FavGCalSchedulerClone.App.Models;
 using FavGCalSchedulerClone.App.Services;
+using Google;
 using Google.Apis.Calendar.v3.Data;
 using Microsoft.Data.Sqlite;
 
@@ -35,6 +37,25 @@ public sealed class InitialSyncRecurrenceWindowRegressionTests
         Assert.False(request.SingleEvents);
     }
 
+    [Fact]
+    public async Task SyncAsync_WhenSyncTokenExpires_RecoveryFullRequestDoesNotUseTimeMinCutoff()
+    {
+        await using var fixture = await SyncFixture.CreateAsync(throwGoneOnFirstList: true);
+        await fixture.Repository.SaveSyncTokenAsync(GoogleCalendarDefaults.PrimaryCalendarId, "expired-sync-token");
+
+        await fixture.Service.SyncAsync(fixture.Settings);
+
+        Assert.Equal(2, fixture.Client.Requests.Count);
+        var incremental = fixture.Client.Requests[0];
+        var recovery = fixture.Client.Requests[1];
+        Assert.Equal("expired-sync-token", incremental.SyncToken);
+        Assert.Null(incremental.TimeMin);
+        Assert.Null(recovery.SyncToken);
+        Assert.Null(recovery.TimeMin);
+        Assert.False(recovery.SingleEvents);
+        Assert.True(recovery.ShowDeleted);
+    }
+
     private sealed class SyncFixture : IAsyncDisposable
     {
         private readonly string _databasePath;
@@ -61,7 +82,7 @@ public sealed class InitialSyncRecurrenceWindowRegressionTests
         public GoogleCalendarSyncService Service { get; }
         public AppSettings Settings { get; }
 
-        public static async Task<SyncFixture> CreateAsync()
+        public static async Task<SyncFixture> CreateAsync(bool throwGoneOnFirstList = false)
         {
             var databasePath = Path.Combine(Path.GetTempPath(), $"initial-sync-window-{Guid.NewGuid():N}.db");
             var oauthPath = Path.Combine(Path.GetTempPath(), $"oauth-{Guid.NewGuid():N}.json");
@@ -69,7 +90,7 @@ public sealed class InitialSyncRecurrenceWindowRegressionTests
 
             var repository = new CalendarRepository(databasePath);
             await repository.InitializeAsync();
-            var client = new RecordingClient();
+            var client = new RecordingClient(throwGoneOnFirstList);
             var service = new GoogleCalendarSyncService(repository, new RecordingApi(client));
             var settings = new AppSettings
             {
@@ -109,8 +130,9 @@ public sealed class InitialSyncRecurrenceWindowRegressionTests
         public Task ClearTokensAsync() => Task.CompletedTask;
     }
 
-    private sealed class RecordingClient : IGoogleCalendarClient
+    private sealed class RecordingClient(bool throwGoneOnFirstList) : IGoogleCalendarClient
     {
+        private bool _throwGoneOnFirstList = throwGoneOnFirstList;
         public List<GoogleEventListRequest> Requests { get; } = [];
 
         public Task<IReadOnlyList<GoogleCalendarInfo>> ListCalendarsAsync(CancellationToken cancellationToken = default) =>
@@ -119,6 +141,12 @@ public sealed class InitialSyncRecurrenceWindowRegressionTests
         public Task<GoogleEventPage> ListEventsAsync(GoogleEventListRequest request, CancellationToken cancellationToken = default)
         {
             Requests.Add(request);
+            if (_throwGoneOnFirstList)
+            {
+                _throwGoneOnFirstList = false;
+                throw new GoogleApiException("calendar", "sync token expired") { HttpStatusCode = HttpStatusCode.Gone };
+            }
+
             return Task.FromResult(new GoogleEventPage([], null, "next-sync-token"));
         }
 
