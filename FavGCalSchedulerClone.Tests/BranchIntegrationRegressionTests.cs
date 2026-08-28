@@ -90,17 +90,20 @@ public sealed class BranchIntegrationRegressionTests
     }
 
     [Fact]
-    public async Task SyncDiagnostics_SerializesMutatingAndRemoteOperations()
+    public async Task SyncOperations_SerializeRemoteAndDiagnosticMutations()
     {
-        var source = await ReadAppSourceAsync("Views", "Dialogs", "SyncDialogs.cs");
+        var source = await ReadAppSourceAsync("ViewModels", "MainViewModel.Sync.cs");
 
-        Assert.Contains("var operationInProgress = false;", source, StringComparison.Ordinal);
-        Assert.Contains("if (operationInProgress)", source, StringComparison.Ordinal);
-        Assert.Contains("operationInProgress = true;", source, StringComparison.Ordinal);
-        Assert.Contains("operationInProgress = false;", source, StringComparison.Ordinal);
-        Assert.Contains("Action updateOperationState = static () => { };", source, StringComparison.Ordinal);
-        Assert.Contains("updateOperationState();", source, StringComparison.Ordinal);
-        Assert.Contains("!operationInProgress", source, StringComparison.Ordinal);
+        Assert.Contains("private readonly SemaphoreSlim _syncDataOperationGate = new(1, 1);", source, StringComparison.Ordinal);
+        Assert.Contains("RunExclusiveSyncDataOperationAsync", source, StringComparison.Ordinal);
+        Assert.Contains("ResyncDirtyItemsCoreAsync", source, StringComparison.Ordinal);
+        Assert.Contains("MarkDirtyItemsSyncedCoreAsync", source, StringComparison.Ordinal);
+        Assert.Contains("DiscardLocalChangesCoreAsync", source, StringComparison.Ordinal);
+        Assert.Contains("RefreshGoogleReminderMetadataCoreAsync", source, StringComparison.Ordinal);
+        Assert.Contains("ClearSyncDiagnosticsCoreAsync", source, StringComparison.Ordinal);
+        Assert.Contains("await _syncDataOperationGate.WaitAsync();", source, StringComparison.Ordinal);
+        Assert.Contains("_syncDataOperationGate.Release();", source, StringComparison.Ordinal);
+        Assert.Contains("var syncDataGateEntered = false;", source, StringComparison.Ordinal);
     }
 
     [Fact]
