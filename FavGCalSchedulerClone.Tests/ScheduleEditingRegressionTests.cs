@@ -47,51 +47,46 @@ public sealed class ScheduleEditingRegressionTests
     }
 
     [Fact]
-    public async Task ScheduleEditor_RestoresEditingIdentityBeforeModalReturnsToSavePath()
+    public async Task ScheduleEditor_RestoresCapturedIdentityBeforeApplyingAcceptedValues()
     {
-        var source = await ReadReliabilitySourceAsync();
-        var attach = ExtractMethod(
-            source,
-            "private void TryAttachScheduleEditorWindow",
-            "private void ScheduleEditorWindow_Closed");
-        var closed = ExtractMethod(
-            source,
-            "private void ScheduleEditorWindow_Closed",
-            "private void PreserveScheduleEditingIdentity");
-
-        Assert.Contains("window.Closed += ScheduleEditorWindow_Closed;", attach, StringComparison.Ordinal);
-        var restore = closed.IndexOf("RestoreScheduleEditingIdentity();", StringComparison.Ordinal);
-        var clear = closed.IndexOf("_activeScheduleEditingEvent = null;", StringComparison.Ordinal);
-        Assert.True(restore >= 0 && clear > restore, "The original event identity must be restored synchronously before the modal window returns to the existing save path.");
-    }
-
-    [Fact]
-    public async Task ScheduleEditor_DoesNotReplaceFallbackIdentityWithTransientSelectionWhileOpen()
-    {
-        var source = await ReadReliabilitySourceAsync();
+        var source = await File.ReadAllTextAsync(Path.Combine(AppRoot, "MainWindow.xaml.cs"));
         var method = ExtractMethod(
             source,
-            "private void PreserveScheduleEditingIdentity",
-            "private void RestoreScheduleEditingIdentity");
+            "private async Task ShowScheduleDialogAsync(bool forceNew = false)",
+            "private async Task ShowSelectedTodoDialogAsync");
 
-        var findWindow = method.IndexOf("var window = FindScheduleEditorWindow();", StringComparison.Ordinal);
-        var updateLast = method.IndexOf("_lastSelectedScheduleEvent = selected;", StringComparison.Ordinal);
-        var returnWhenNoWindow = method.IndexOf("return;", updateLast, StringComparison.Ordinal);
-        var activateFallback = method.IndexOf("_activeScheduleEditingEvent = _lastSelectedScheduleEvent;", StringComparison.Ordinal);
-        Assert.True(findWindow >= 0 && updateLast > findWindow && returnWhenNoWindow > updateLast && activateFallback > returnWhenNoWindow);
+        var restore = method.IndexOf("RestoreScheduleSaveIdentity(editingEvent);", StringComparison.Ordinal);
+        var applyCalendar = method.IndexOf("_viewModel.EditorCalendarId = result.CalendarId;", StringComparison.Ordinal);
+        var save = method.IndexOf("await _viewModel.SaveCurrentEventAsync(recurrenceScope);", StringComparison.Ordinal);
+        Assert.True(restore >= 0 && applyCalendar > restore && save > applyCalendar,
+            "The captured edit identity must be restored before accepted dialog values are applied and saved.");
     }
 
     [Fact]
-    public async Task ScheduleEditor_NewWindowNeverFallsBackToPreviousEditingIdentity()
+    public async Task ScheduleEditor_SaveIdentityHandlesBothNewAndExistingSchedules()
+    {
+        var source = await File.ReadAllTextAsync(Path.Combine(AppRoot, "MainWindow.xaml.cs"));
+        var method = ExtractMethod(
+            source,
+            "private void RestoreScheduleSaveIdentity",
+            "private async Task ShowSelectedTodoDialogAsync");
+
+        Assert.Contains("if (editingEvent is null)", method, StringComparison.Ordinal);
+        Assert.Contains("_viewModel.SelectedEvent = null;", method, StringComparison.Ordinal);
+        Assert.Contains("string.Equals(_viewModel.SelectedEvent?.Id, editingEvent.Id, StringComparison.Ordinal)", method, StringComparison.Ordinal);
+        Assert.Contains("_viewModel.SelectEvent(editingEvent, selectEventDay: false);", method, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ScheduleEditorReliability_DoesNotDependOnWindowLifecycleToPreserveIdentity()
     {
         var source = await ReadReliabilitySourceAsync();
-        var attach = ExtractMethod(
-            source,
-            "private void TryAttachScheduleEditorWindow",
-            "private void ScheduleEditorWindow_Closed");
 
-        Assert.Contains("string.Equals(window.Title, \"スケジュールの編集\", StringComparison.Ordinal)", attach, StringComparison.Ordinal);
-        Assert.Contains(": _lastSelectedScheduleEvent;", attach, StringComparison.Ordinal);
+        Assert.DoesNotContain("PropertyChanged +=", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("Deactivated +=", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("FindScheduleEditorWindow", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("ScheduleEditorWindow_Closed", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("_activeScheduleEditingEvent", source, StringComparison.Ordinal);
     }
 
     [Fact]
