@@ -123,6 +123,7 @@ public partial class App : System.Windows.Application
         _isExiting
         || !_startupInitializationCompleted
         || _interactionGuard?.IsReturnToTodaySuppressed != false
+        || MainWindow?.IsEnabled == false
         || MainWindow?.DataContext is not MainViewModel
         || Windows.OfType<Window>().Any(window =>
             window.IsActive
