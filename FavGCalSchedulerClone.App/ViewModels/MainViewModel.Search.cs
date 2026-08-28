@@ -10,6 +10,9 @@ public sealed partial class MainViewModel
     {
         var searchWasVisible = IsSearchResultsVisible;
         var previousView = CurrentViewMode;
+        _searchResultsYear = CurrentMonth.Year;
+        await RunSearchForYearAsync(_searchResultsYear.Value);
+
         if (!searchWasVisible || previousView != CalendarViewMode.Month)
         {
             _searchReturnViewMode = previousView;
@@ -19,9 +22,6 @@ public sealed partial class MainViewModel
         {
             CurrentViewMode = CalendarViewMode.Month;
         }
-
-        _searchResultsYear = CurrentMonth.Year;
-        await RunSearchForYearAsync(_searchResultsYear.Value);
     }
 
     private async Task RunSearchForYearAsync(int year)
