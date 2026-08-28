@@ -1,6 +1,7 @@
 using FavGCalSchedulerClone.App.Models;
 using FavGCalSchedulerClone.App.Services;
 using FavGCalSchedulerClone.App.ViewModels;
+using FavGCalSchedulerClone.App.Views.Dialogs;
 
 namespace FavGCalSchedulerClone.Tests;
 
@@ -31,13 +32,47 @@ public sealed class BranchIntegrationRegressionTests
         Assert.False(viewModel.IsSearchResultsVisible);
     }
 
+    [Theory]
+    [InlineData("23:30", 60, "00:30", 1)]
+    [InlineData("23:30", 120, "01:30", 1)]
+    [InlineData("10:00", 60, "11:00", 0)]
+    public void ScheduleEditor_DurationShortcutTracksDateOffset(
+        string startTime,
+        int durationMinutes,
+        string expectedEndTime,
+        int expectedDayOffset)
+    {
+        var result = ScheduleEditorDialog.TryCreateEndTimeFromDuration(
+            startTime,
+            TimeSpan.FromMinutes(durationMinutes),
+            out var endTime,
+            out var dayOffset);
+
+        Assert.True(result);
+        Assert.Equal(expectedEndTime, endTime);
+        Assert.Equal(expectedDayOffset, dayOffset);
+    }
+
     [Fact]
-    public async Task ScheduleEditor_TimeShortcutsTrackDateOffsetAcrossMidnight()
+    public void ScheduleEditor_StartTimeShiftTracksMidnightCrossing()
+    {
+        var result = ScheduleEditorDialog.TryShiftEndTimeForStartChange(
+            "22:30",
+            "23:30",
+            "23:45",
+            out var endTime,
+            out var dayOffset);
+
+        Assert.True(result);
+        Assert.Equal("00:45", endTime);
+        Assert.Equal(1, dayOffset);
+    }
+
+    [Fact]
+    public async Task ScheduleEditor_AppliesDateOffsetToTheEndDateControls()
     {
         var source = await ReadAppSourceAsync("Views", "Dialogs", "ScheduleEditorDialog.cs");
 
-        Assert.Contains("out int dayOffset", source, StringComparison.Ordinal);
-        Assert.Contains("dayOffset = end.Days;", source, StringComparison.Ordinal);
         Assert.Contains("endDate.SelectedDate = selectedStartDate.Date.AddDays(endDateOffset);", source, StringComparison.Ordinal);
         Assert.Contains("endDate.SelectedDate = selectedEndDate.Date.AddDays(endDateOffset);", source, StringComparison.Ordinal);
     }
@@ -55,13 +90,13 @@ public sealed class BranchIntegrationRegressionTests
     }
 
     [Fact]
-    public async Task AddScheduleCommand_AlwaysUsesNewSchedulePathEvenWhenAnEventIsSelected()
+    public async Task AddScheduleCommand_ClearsExistingSelectionBeforeOpeningTheNewScheduleDialog()
     {
-        var source = await ReadAppSourceAsync("MainWindow.xaml.cs");
+        var source = await ReadAppSourceAsync("ViewModels", "MainViewModel.Settings.cs");
 
-        Assert.Contains("ShowScheduleDialogAsync(forceNew: true)", source, StringComparison.Ordinal);
-        Assert.Contains("private async Task ShowScheduleDialogAsync(bool forceNew = false)", source, StringComparison.Ordinal);
-        Assert.Contains("var editingEvent = forceNew ? null : _viewModel.SelectedEvent;", source, StringComparison.Ordinal);
+        Assert.Contains("_showAddScheduleAsync = async () =>", source, StringComparison.Ordinal);
+        Assert.Contains("SelectedEvent = null;", source, StringComparison.Ordinal);
+        Assert.Contains("await showAddScheduleAsync();", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -86,13 +121,13 @@ public sealed class BranchIntegrationRegressionTests
         return viewModel;
     }
 
-    private static Task<string> ReadAppSourceAsync(params string[] parts) =>
-        File.ReadAllTextAsync(Path.Combine(
-            [
-                GetRepositoryRoot(),
-                "FavGCalSchedulerClone.App",
-                .. parts
-            ]));
+    private static Task<string> ReadAppSourceAsync(params string[] parts)
+    {
+        var pathParts = new[] { GetRepositoryRoot(), "FavGCalSchedulerClone.App" }
+            .Concat(parts)
+            .ToArray();
+        return File.ReadAllTextAsync(Path.Combine(pathParts));
+    }
 
     private static string GetRepositoryRoot()
     {
