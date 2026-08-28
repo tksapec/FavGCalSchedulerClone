@@ -6,9 +6,13 @@ public sealed partial class MainViewModel
 {
     private readonly ReminderNotificationService? _reminderService;
     private int _databaseMaintenanceInProgress;
+    private int _databaseRestartRequired;
 
     public bool IsDatabaseMaintenanceInProgress =>
         Volatile.Read(ref _databaseMaintenanceInProgress) != 0;
+
+    public bool IsDatabaseRestartRequired =>
+        Volatile.Read(ref _databaseRestartRequired) != 0;
 
     public MainViewModel(
         CalendarRepository repository,
@@ -64,6 +68,23 @@ public sealed partial class MainViewModel
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Database maintenance completion notification failed.");
+        }
+    }
+
+    private void MarkDatabaseRestartRequired()
+    {
+        if (Interlocked.Exchange(ref _databaseRestartRequired, 1) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            OnPropertyChanged(nameof(IsDatabaseRestartRequired));
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Database restart-required notification failed.");
         }
     }
 }
