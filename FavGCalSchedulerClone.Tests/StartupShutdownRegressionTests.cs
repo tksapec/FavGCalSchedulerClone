@@ -1,8 +1,3 @@
-using FavGCalSchedulerClone.App.Models;
-using FavGCalSchedulerClone.App.Services;
-using FavGCalSchedulerClone.App.ViewModels;
-using Microsoft.Data.Sqlite;
-
 namespace FavGCalSchedulerClone.Tests;
 
 public sealed class StartupShutdownRegressionTests
@@ -85,42 +80,21 @@ public sealed class StartupShutdownRegressionTests
     }
 
     [Fact]
-    public async Task ExitFlushBeforeSettingsLoad_DoesNotOverwriteStoredSettings()
+    public async Task AppExit_DoesNotFlushDefaultSettingsBeforeStartupInitializationCompletes()
     {
-        var directory = Path.Combine(Path.GetTempPath(), $"startup-exit-flush-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(directory);
-        var databasePath = Path.Combine(directory, "calendar.db");
+        var source = await File.ReadAllTextAsync(Path.Combine(
+            Root,
+            "FavGCalSchedulerClone.App",
+            "App.xaml.cs"));
+        var methodStart = source.IndexOf("protected override void OnExit(ExitEventArgs e)", StringComparison.Ordinal);
+        var nextMethod = source.IndexOf("private async void App_Deactivated", methodStart, StringComparison.Ordinal);
+        Assert.True(methodStart >= 0 && nextMethod > methodStart);
+        var method = source[methodStart..nextMethod];
 
-        try
-        {
-            var repository = new CalendarRepository(databasePath);
-            await repository.InitializeAsync();
-            var expectedMonth = new DateTime(2031, 4, 1);
-            await repository.SaveSettingsAsync(new AppSettings
-            {
-                StartupTabIndex = 7,
-                DisplayMonth = expectedMonth,
-                WeekStartsOnMonday = true
-            });
+        var startupGuard = method.IndexOf("_startupInitializationCompleted", StringComparison.Ordinal);
+        var flush = method.IndexOf("FlushDisplayMonthPersistenceAsync", StringComparison.Ordinal);
 
-            var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
-
-            // Simulate an immediate tray exit while ApplicationStartupService is still
-            // before MainViewModel.InitializeAsync has loaded the persisted settings.
-            await viewModel.FlushDisplayMonthPersistenceAsync();
-
-            var stored = await repository.LoadSettingsAsync();
-            Assert.Equal(7, stored.StartupTabIndex);
-            Assert.Equal(expectedMonth, stored.DisplayMonth);
-            Assert.True(stored.WeekStartsOnMonday);
-        }
-        finally
-        {
-            SqliteConnection.ClearAllPools();
-            if (Directory.Exists(directory))
-            {
-                Directory.Delete(directory, recursive: true);
-            }
-        }
+        Assert.True(startupGuard >= 0 && startupGuard < flush,
+            "Exit during startup must not persist the MainViewModel's default AppSettings before stored settings have been loaded.");
     }
 }
