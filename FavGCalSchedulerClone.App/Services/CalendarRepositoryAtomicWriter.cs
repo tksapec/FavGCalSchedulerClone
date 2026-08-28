@@ -24,6 +24,7 @@ internal static class CalendarRepositoryAtomicWriter
             return;
         }
 
+        var mutationSnapshots = items.Select(EventMutationSnapshot.Capture).ToArray();
         await using var connection = repository.OpenConnection();
         await using var transaction = connection.BeginTransaction();
         try
@@ -56,6 +57,10 @@ internal static class CalendarRepositoryAtomicWriter
         catch
         {
             await RollbackSafelyAsync(transaction);
+            foreach (var snapshot in mutationSnapshots)
+            {
+                snapshot.Restore();
+            }
             throw;
         }
     }
@@ -248,5 +253,39 @@ internal static class CalendarRepositoryAtomicWriter
     {
         var normalized = CalendarEvent.NormalizeReminderMinutes(minutes);
         return normalized.Count == 0 ? DBNull.Value : JsonSerializer.Serialize(normalized);
+    }
+
+    private sealed class EventMutationSnapshot
+    {
+        private readonly CalendarEvent _calendarEvent;
+        private readonly string? _googleEventId;
+        private readonly DateTimeOffset? _lastSyncedAt;
+        private readonly string? _lastSyncedGoogleEtag;
+        private readonly string? _dirtyFields;
+        private readonly DateTimeOffset _updatedAt;
+        private readonly bool _isTodoLike;
+
+        private EventMutationSnapshot(CalendarEvent calendarEvent)
+        {
+            _calendarEvent = calendarEvent;
+            _googleEventId = calendarEvent.GoogleEventId;
+            _lastSyncedAt = calendarEvent.LastSyncedAt;
+            _lastSyncedGoogleEtag = calendarEvent.LastSyncedGoogleEtag;
+            _dirtyFields = calendarEvent.DirtyFields;
+            _updatedAt = calendarEvent.UpdatedAt;
+            _isTodoLike = calendarEvent.IsTodoLike;
+        }
+
+        public static EventMutationSnapshot Capture(CalendarEvent calendarEvent) => new(calendarEvent);
+
+        public void Restore()
+        {
+            _calendarEvent.GoogleEventId = _googleEventId;
+            _calendarEvent.LastSyncedAt = _lastSyncedAt;
+            _calendarEvent.LastSyncedGoogleEtag = _lastSyncedGoogleEtag;
+            _calendarEvent.DirtyFields = _dirtyFields;
+            _calendarEvent.UpdatedAt = _updatedAt;
+            _calendarEvent.IsTodoLike = _isTodoLike;
+        }
     }
 }
