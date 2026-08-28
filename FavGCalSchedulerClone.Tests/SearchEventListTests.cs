@@ -146,6 +146,30 @@ public sealed class SearchEventListTests
     }
 
     [Fact]
+    public async Task RunCurrentYearSearchAsync_WhenSearchFails_PreservesTheCurrentView()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var repository = new CalendarRepository(directory);
+            var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository))
+            {
+                CurrentViewMode = CalendarViewMode.Week
+            };
+
+            await Assert.ThrowsAnyAsync<Exception>(() => viewModel.RunCurrentYearSearchAsync());
+
+            Assert.Equal(CalendarViewMode.Week, viewModel.CurrentViewMode);
+            Assert.False(viewModel.IsSearchResultsVisible);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void EventListDialog_ResultColumnsMatchSearchListRequirements()
     {
         Assert.Equal(
