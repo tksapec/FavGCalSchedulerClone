@@ -11,8 +11,12 @@ namespace FavGCalSchedulerClone.App.ViewModels;
 
 public sealed partial class MainViewModel
 {
+    private readonly SemaphoreSlim _syncDataOperationGate = new(1, 1);
 
-    public async Task<SyncPreview> CreateSyncPreviewAsync()
+    public Task<SyncPreview> CreateSyncPreviewAsync() =>
+        RunExclusiveSyncDataOperationAsync(CreateSyncPreviewCoreAsync);
+
+    private async Task<SyncPreview> CreateSyncPreviewCoreAsync()
     {
         await SaveOAuthPathAsync();
         await EnsureGoogleIdentityIntegrityAsync();
@@ -69,7 +73,10 @@ public sealed partial class MainViewModel
         return await _syncService.LoadDiagnosticsAsync(CreateSettingsSnapshot());
     }
 
-    public async Task<int> RefreshGoogleReminderMetadataAsync()
+    public Task<int> RefreshGoogleReminderMetadataAsync() =>
+        RunExclusiveSyncDataOperationAsync(RefreshGoogleReminderMetadataCoreAsync);
+
+    private async Task<int> RefreshGoogleReminderMetadataCoreAsync()
     {
         await SaveOAuthPathAsync();
         var now = DateTimeOffset.Now;
@@ -83,7 +90,10 @@ public sealed partial class MainViewModel
         return updated;
     }
 
-    public async Task<SyncResult> ResyncDirtyItemsAsync(IReadOnlyCollection<string> localIds)
+    public Task<SyncResult> ResyncDirtyItemsAsync(IReadOnlyCollection<string> localIds) =>
+        RunExclusiveSyncDataOperationAsync(() => ResyncDirtyItemsCoreAsync(localIds));
+
+    private async Task<SyncResult> ResyncDirtyItemsCoreAsync(IReadOnlyCollection<string> localIds)
     {
         await SaveOAuthPathAsync();
         var targetIds = localIds.ToHashSet(StringComparer.Ordinal);
@@ -112,7 +122,10 @@ public sealed partial class MainViewModel
         return await ResyncDirtyItemsAsync(targets);
     }
 
-    public async Task<int> MarkDirtyItemsSyncedAsync(IReadOnlyCollection<string> localIds)
+    public Task<int> MarkDirtyItemsSyncedAsync(IReadOnlyCollection<string> localIds) =>
+        RunExclusiveSyncDataOperationAsync(() => MarkDirtyItemsSyncedCoreAsync(localIds));
+
+    private async Task<int> MarkDirtyItemsSyncedCoreAsync(IReadOnlyCollection<string> localIds)
     {
         await CreateDiagnosticsBulkBackupAsync();
         var updated = await _repository.MarkSyncedByIdsAsync(localIds);
@@ -121,7 +134,10 @@ public sealed partial class MainViewModel
         return updated;
     }
 
-    public async Task<SyncResult> DiscardLocalChangesAsync(IReadOnlyCollection<string> localIds)
+    public Task<SyncResult> DiscardLocalChangesAsync(IReadOnlyCollection<string> localIds) =>
+        RunExclusiveSyncDataOperationAsync(() => DiscardLocalChangesCoreAsync(localIds));
+
+    private async Task<SyncResult> DiscardLocalChangesCoreAsync(IReadOnlyCollection<string> localIds)
     {
         await CreateDiagnosticsBulkBackupAsync();
         await SaveOAuthPathAsync();
@@ -131,7 +147,10 @@ public sealed partial class MainViewModel
         return result;
     }
 
-    public async Task ClearSyncDiagnosticsAsync()
+    public Task ClearSyncDiagnosticsAsync() =>
+        RunExclusiveSyncDataOperationAsync(ClearSyncDiagnosticsCoreAsync);
+
+    private async Task ClearSyncDiagnosticsCoreAsync()
     {
         await _syncService.ClearSyncDiagnosticsAsync();
     }
@@ -213,8 +232,23 @@ public sealed partial class MainViewModel
             return null;
         }
 
+        var syncDataGateEntered = false;
         try
         {
+            await _syncDataOperationGate.WaitAsync();
+            syncDataGateEntered = true;
+
+            // A diagnostic operation can keep the gate busy long enough for restore
+            // maintenance to begin after the earlier checks. Re-check after acquiring it.
+            if (Volatile.Read(ref _databaseMaintenanceInProgress) != 0)
+            {
+                if (reportErrors)
+                {
+                    Status = "データベースのリストア中はGoogle同期を開始できません。";
+                }
+                return null;
+            }
+
             await SaveOAuthPathAsync();
             var syncSettings = CreateSettingsSnapshot();
             if (!CanSynchronize(syncSettings))
@@ -288,6 +322,11 @@ public sealed partial class MainViewModel
         }
         finally
         {
+            if (syncDataGateEntered)
+            {
+                _syncDataOperationGate.Release();
+            }
+
             Interlocked.Exchange(ref _syncInProgress, 0);
             IsSynchronizing = false;
             var pendingInvocationKind = Interlocked.Exchange(ref _pendingSyncInvocationKind, NoPendingSyncInvocationKind);
@@ -304,6 +343,32 @@ public sealed partial class MainViewModel
                     _logger?.LogError(rerunEx, "Queued Google calendar sync rerun failed.");
                 }
             }
+        }
+    }
+
+    private async Task RunExclusiveSyncDataOperationAsync(Func<Task> operation)
+    {
+        await _syncDataOperationGate.WaitAsync();
+        try
+        {
+            await operation();
+        }
+        finally
+        {
+            _syncDataOperationGate.Release();
+        }
+    }
+
+    private async Task<T> RunExclusiveSyncDataOperationAsync<T>(Func<Task<T>> operation)
+    {
+        await _syncDataOperationGate.WaitAsync();
+        try
+        {
+            return await operation();
+        }
+        finally
+        {
+            _syncDataOperationGate.Release();
         }
     }
 
