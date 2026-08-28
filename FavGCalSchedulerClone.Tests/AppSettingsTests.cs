@@ -18,6 +18,33 @@ public sealed class AppSettingsTests
     }
 
     [Fact]
+    public void AppSettings_DeserializesLegacyReturnToTodaySettingWithoutReserializingLegacyName()
+    {
+        var settings = JsonSerializer.Deserialize<AppSettings>("{\"ReturnToTodayOnDeactivate\":false}");
+
+        Assert.NotNull(settings);
+        Assert.False(settings.ReturnToTodayWhenDeactivated);
+
+        var serialized = JsonSerializer.Serialize(settings);
+        Assert.Contains("\"ReturnToTodayWhenDeactivated\":false", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"ReturnToTodayOnDeactivate\"", serialized, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AppSettings_CurrentReturnToTodaySettingTakesPrecedenceOverLegacyAlias()
+    {
+        var settings = JsonSerializer.Deserialize<AppSettings>("""
+            {
+              "ReturnToTodayWhenDeactivated": true,
+              "ReturnToTodayOnDeactivate": false
+            }
+            """);
+
+        Assert.NotNull(settings);
+        Assert.True(settings.ReturnToTodayWhenDeactivated);
+    }
+
+    [Fact]
     public void Normalize_RepairsNullCollectionsAndInvalidEnumValues()
     {
         var settings = JsonSerializer.Deserialize<AppSettings>("""
