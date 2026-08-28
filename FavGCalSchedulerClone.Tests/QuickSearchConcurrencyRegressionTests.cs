@@ -92,18 +92,16 @@ public sealed class QuickSearchConcurrencyRegressionTests
             var databasePath = Path.Combine(Path.GetTempPath(), $"quick-search-race-{Guid.NewGuid():N}.db");
             var repository = new CalendarRepository(databasePath);
             await repository.InitializeAsync();
+            var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+            var searchYear = viewModel.CurrentMonth.Year;
             await repository.SaveEventAsync(new CalendarEvent
             {
                 Id = "alpha-event",
                 CalendarId = "primary",
                 Title = "alpha",
-                Start = new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.Zero),
-                End = new DateTimeOffset(2026, 5, 15, 10, 0, 0, TimeSpan.Zero)
+                Start = new DateTimeOffset(searchYear, 5, 15, 9, 0, 0, TimeSpan.Zero),
+                End = new DateTimeOffset(searchYear, 5, 15, 10, 0, 0, TimeSpan.Zero)
             });
-            var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository))
-            {
-                CurrentMonth = new DateTime(2026, 5, 1)
-            };
             return new SearchFixture(databasePath, repository, viewModel);
         }
 
