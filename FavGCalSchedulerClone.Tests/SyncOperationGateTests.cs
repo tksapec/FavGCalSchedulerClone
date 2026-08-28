@@ -1,4 +1,5 @@
 using System.Reflection;
+using FavGCalSchedulerClone.App.Models;
 using FavGCalSchedulerClone.App.Services;
 using FavGCalSchedulerClone.App.ViewModels;
 
@@ -107,9 +108,10 @@ public sealed class SyncOperationGateTests
     }
 
     [Fact]
-    public async Task ClearTokensAsync_WaitsForExistingGoogleOperation()
+    public async Task ClearTokensAsync_WaitsForExistingGoogleOperationWithoutTouchingRealTokenStore()
     {
-        var viewModel = await CreateViewModelAsync();
+        var googleApi = new RecordingGoogleCalendarApi();
+        var viewModel = await CreateViewModelAsync(googleApi);
         var gate = GetSyncDataOperationGate(viewModel);
         await gate.WaitAsync();
         Task clearTokensTask;
@@ -117,6 +119,7 @@ public sealed class SyncOperationGateTests
         {
             clearTokensTask = viewModel.ClearTokensAsync();
             Assert.False(clearTokensTask.IsCompleted);
+            Assert.Equal(0, googleApi.ClearTokensCallCount);
         }
         finally
         {
@@ -124,6 +127,7 @@ public sealed class SyncOperationGateTests
         }
 
         await clearTokensTask;
+        Assert.Equal(1, googleApi.ClearTokensCallCount);
     }
 
     [Fact]
@@ -169,6 +173,33 @@ public sealed class SyncOperationGateTests
     }
 
     [Fact]
+    public async Task RestoreAllCalendarsAsync_ReinitializesWithoutReenteringTheOwnedSyncGate()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"restore-sync-gate-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var sourcePath = Path.Combine(directory, "source.db");
+        var targetPath = Path.Combine(directory, "target.db");
+        var backupPath = Path.Combine(directory, "backup.zip");
+        var backupService = new BackupService();
+
+        var sourceRepository = new CalendarRepository(sourcePath);
+        await sourceRepository.InitializeAsync();
+        await sourceRepository.SaveSettingsAsync(new AppSettings { StartupTabIndex = 3 });
+        await backupService.CreateBackupAsync(sourcePath, backupPath);
+
+        var targetRepository = new CalendarRepository(targetPath);
+        await targetRepository.InitializeAsync();
+        var viewModel = new MainViewModel(targetRepository, new GoogleCalendarSyncService(targetRepository, new RecordingGoogleCalendarApi()));
+        await viewModel.InitializeAsync();
+
+        await viewModel.RestoreAllCalendarsAsync(backupPath).WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(3, viewModel.StartupTabIndex);
+        Assert.Equal(1, GetSyncDataOperationGate(viewModel).CurrentCount);
+        Assert.Equal(0, GetDatabaseMaintenanceState(viewModel));
+    }
+
+    [Fact]
     public async Task SyncDataOperation_IsRejectedWhileRestoreMaintenanceIsActive()
     {
         var viewModel = await CreateViewModelAsync();
@@ -189,12 +220,15 @@ public sealed class SyncOperationGateTests
         }
     }
 
-    private static async Task<MainViewModel> CreateViewModelAsync()
+    private static async Task<MainViewModel> CreateViewModelAsync(IGoogleCalendarApi? googleApi = null)
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
         var repository = new CalendarRepository(dbPath);
         await repository.InitializeAsync();
-        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        var syncService = googleApi is null
+            ? new GoogleCalendarSyncService(repository)
+            : new GoogleCalendarSyncService(repository, googleApi);
+        var viewModel = new MainViewModel(repository, syncService);
         await viewModel.InitializeAsync();
         return viewModel;
     }
@@ -215,5 +249,23 @@ public sealed class SyncOperationGateTests
             BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(field);
         return Assert.IsType<int>(field!.GetValue(viewModel));
+    }
+
+    private sealed class RecordingGoogleCalendarApi : IGoogleCalendarApi
+    {
+        public int ClearTokensCallCount { get; private set; }
+
+        public Task<IGoogleCalendarClient> CreateClientAsync(string clientJsonPath, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("A Google client should not be created in this gate test.");
+
+        public Task<IReadOnlyDictionary<string, EventDisplayColors>> LoadEventColorPaletteAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyDictionary<string, EventDisplayColors>>(
+                new Dictionary<string, EventDisplayColors>(StringComparer.Ordinal));
+
+        public Task ClearTokensAsync()
+        {
+            ClearTokensCallCount++;
+            return Task.CompletedTask;
+        }
     }
 }
