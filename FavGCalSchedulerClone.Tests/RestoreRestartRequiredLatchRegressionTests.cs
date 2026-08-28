@@ -94,4 +94,52 @@ public sealed class RestoreRestartRequiredLatchRegressionTests
         Assert.True(persistStart >= 0 && restartCheck > persistStart && save > restartCheck,
             "Queued settings writes must be discarded after a partial restore reload failure.");
     }
+
+    [Fact]
+    public async Task Restore_CancelsCalendarBackgroundWorkBeforeDatabaseMaintenanceAndAfterPartialReloadFailure()
+    {
+        var source = await File.ReadAllTextAsync(Path.Combine(
+            AppRoot, "ViewModels", "MainViewModel.BackupRestore.cs"));
+        var restoreStart = source.IndexOf("public async Task<RestoreResult> RestoreAllCalendarsAsync", StringComparison.Ordinal);
+        var beginRepositoryMaintenance = source.IndexOf("await _repository.BeginMaintenanceAsync();", restoreStart, StringComparison.Ordinal);
+        var firstCancellation = source.IndexOf("CancelCalendarBackgroundWorkForDatabaseMaintenance();", restoreStart, StringComparison.Ordinal);
+        var reloadCall = source.IndexOf("ReloadRestoredViewModelStateAsync", beginRepositoryMaintenance, StringComparison.Ordinal);
+        var reloadCatch = source.IndexOf("catch (Exception ex)", reloadCall, StringComparison.Ordinal);
+        var secondCancellation = source.IndexOf("CancelCalendarBackgroundWorkForDatabaseMaintenance();", reloadCatch, StringComparison.Ordinal);
+        var restartLatch = source.IndexOf("MarkDatabaseRestartRequired();", reloadCatch, StringComparison.Ordinal);
+
+        Assert.True(restoreStart >= 0 && firstCancellation > restoreStart && firstCancellation < beginRepositoryMaintenance,
+            "Restore must cancel stale calendar refresh/prefetch work before repository maintenance begins.");
+        Assert.True(reloadCatch > reloadCall && secondCancellation > reloadCatch && secondCancellation < restartLatch,
+            "A partial post-restore reload failure must cancel any refresh/prefetch work started during reconstruction before the restart latch is exposed.");
+    }
+
+    [Fact]
+    public async Task OperationalStatusRefresh_DoesNotReadReminderDiagnosticsDuringRestoreOrRestartRequiredState()
+    {
+        var source = await File.ReadAllTextAsync(Path.Combine(AppRoot, "MainWindow.xaml.cs"));
+        var methodStart = source.IndexOf("private async Task RefreshOperationalStatusAsync()", StringComparison.Ordinal);
+        var diagnosticsRead = source.IndexOf("_reminderService.LoadDiagnosticsAsync()", methodStart, StringComparison.Ordinal);
+        var maintenanceCheck = source.IndexOf("_viewModel.IsDatabaseMaintenanceInProgress", methodStart, StringComparison.Ordinal);
+        var restartCheck = source.IndexOf("_viewModel.IsDatabaseRestartRequired", methodStart, StringComparison.Ordinal);
+
+        Assert.True(methodStart >= 0 && diagnosticsRead > methodStart);
+        Assert.True(maintenanceCheck > methodStart && maintenanceCheck < diagnosticsRead,
+            "Operational status refresh must skip reminder DB diagnostics while restore maintenance is active.");
+        Assert.True(restartCheck > methodStart && restartCheck < diagnosticsRead,
+            "Operational status refresh must remain disabled after a partial restore until restart.");
+    }
+
+    [Fact]
+    public async Task AppDeactivation_DoesNotNavigateCalendarDuringRestoreOrRestartRequiredState()
+    {
+        var source = await File.ReadAllTextAsync(Path.Combine(AppRoot, "App.xaml.cs"));
+        var methodStart = source.IndexOf("private bool ShouldSkipReturnToToday()", StringComparison.Ordinal);
+        var nextMethod = source.IndexOf("private async Task CompleteStartupInitializationAsync", methodStart, StringComparison.Ordinal);
+        Assert.True(methodStart >= 0 && nextMethod > methodStart);
+        var method = source[methodStart..nextMethod];
+
+        Assert.Contains("viewModel.IsDatabaseMaintenanceInProgress", method, StringComparison.Ordinal);
+        Assert.Contains("viewModel.IsDatabaseRestartRequired", method, StringComparison.Ordinal);
+    }
 }
