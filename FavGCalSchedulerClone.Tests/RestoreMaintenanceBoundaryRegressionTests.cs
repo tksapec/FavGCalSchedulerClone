@@ -96,7 +96,9 @@ public sealed class RestoreMaintenanceBoundaryRegressionTests
 
             Assert.Contains("DBの復元は完了", exception.Message, StringComparison.Ordinal);
             Assert.Contains("再起動", exception.Message, StringComparison.Ordinal);
-            Assert.Equal(4, (await targetRepository.LoadSettingsAsync()).StartupTabIndex);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => targetRepository.LoadSettingsAsync());
+            var restoredSettings = await targetRepository.RunWithMaintenanceAccessAsync(targetRepository.LoadSettingsAsync);
+            Assert.Equal(4, restoredSettings.StartupTabIndex);
             Assert.False(viewModel.IsDatabaseMaintenanceInProgress);
             Assert.True(viewModel.IsDatabaseRestartRequired);
         }
