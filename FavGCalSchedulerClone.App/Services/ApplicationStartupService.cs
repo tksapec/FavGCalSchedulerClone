@@ -30,74 +30,88 @@ public sealed class ApplicationStartupService : IApplicationStartupService, IDis
             return;
         }
 
+        var ownerWasEnabled = owner.IsEnabled;
+        owner.IsEnabled = false;
         try
         {
-            await _viewModel.InitializeAsync();
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Main view model initialization failed.");
+            try
+            {
+                await _viewModel.InitializeAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Main view model initialization failed.");
+                if (_disposed)
+                {
+                    return;
+                }
+
+                MessageBox.Show(owner, ex.Message, "初期化エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+                throw;
+            }
+
             if (_disposed)
             {
                 return;
             }
 
-            MessageBox.Show(owner, ex.Message, "初期化エラー", MessageBoxButton.OK, MessageBoxImage.Error);
-            throw;
-        }
+            try
+            {
+                _reminderService.SetNotifier(notifierFactory());
+                await _reminderService.StartAsync();
+                if (_disposed)
+                {
+                    _reminderService.Stop();
+                    return;
+                }
 
-        if (_disposed)
-        {
-            return;
-        }
+                _viewModel.Status = "通知監視を開始しました";
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine(ex);
+                _logger?.LogError(ex, "Reminder monitoring startup failed.");
+                if (_disposed)
+                {
+                    return;
+                }
 
-        try
-        {
-            _reminderService.SetNotifier(notifierFactory());
-            await _reminderService.StartAsync();
+                MessageBox.Show(owner, $"通知監視を開始できませんでした。\n{ex.Message}", "通知エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+
             if (_disposed)
             {
-                _reminderService.Stop();
                 return;
             }
 
-            _viewModel.Status = "通知監視を開始しました";
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine(ex);
-            _logger?.LogError(ex, "Reminder monitoring startup failed.");
-            if (_disposed)
+            try
             {
-                return;
+                _automaticSyncTimer.Start();
+                if (_disposed)
+                {
+                    _automaticSyncTimer.Stop();
+                    return;
+                }
+
+                if (owner is MainWindow mainWindow)
+                {
+                    mainWindow.StartOperationalStatusRefresh();
+                }
             }
-
-            MessageBox.Show(owner, $"通知監視を開始できませんでした。\n{ex.Message}", "通知エラー", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-
-        if (_disposed)
-        {
-            return;
-        }
-
-        try
-        {
-            _automaticSyncTimer.Start();
-            if (_disposed)
+            catch (Exception ex)
             {
-                _automaticSyncTimer.Stop();
-                return;
-            }
-
-            if (owner is MainWindow mainWindow)
-            {
-                mainWindow.StartOperationalStatusRefresh();
+                Debug.WriteLine(ex);
+                _logger?.LogError(ex, "Post-startup timer initialization failed.");
             }
         }
-        catch (Exception ex)
+        finally
         {
-            Debug.WriteLine(ex);
-            _logger?.LogError(ex, "Post-startup timer initialization failed.");
+            if (!_disposed
+                && !_viewModel.IsDatabaseMaintenanceInProgress
+                && !_viewModel.IsDatabaseRestartRequired)
+            {
+                owner.IsEnabled = ownerWasEnabled;
+            }
         }
     }
 
