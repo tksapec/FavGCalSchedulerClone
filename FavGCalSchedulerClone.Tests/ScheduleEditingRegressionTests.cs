@@ -105,7 +105,7 @@ public sealed class ScheduleEditingRegressionTests
         var restore = ExtractMethod(
             source,
             "private void RestoreScheduleEditingIdentity",
-            "private Window? FindScheduleEditorWindow");
+            "private void EnsureScheduleSaveIdentity");
 
         Assert.Contains("_scheduleEditorIsNew = string.Equals(window.Title, \"スケジュールの追加\", StringComparison.Ordinal);", attach, StringComparison.Ordinal);
         Assert.Contains("if (_scheduleEditorIsNew)", restore, StringComparison.Ordinal);
@@ -115,19 +115,19 @@ public sealed class ScheduleEditingRegressionTests
     [Fact]
     public async Task ScheduleEditor_ChoosesRecurrenceScopeAndStabilizesIdentityBeforeApplyingResult()
     {
-        var source = await File.ReadAllTextAsync(Path.Combine(AppRoot, "MainWindow.xaml.cs"));
+        var source = await ReadReliabilitySourceAsync();
         var method = ExtractMethod(
             source,
-            "private async Task ShowScheduleDialogAsync",
-            "private async Task ShowSelectedTodoDialogAsync");
+            "private async Task ShowScheduleDialogAsync()",
+            "private void ApplyScheduleEditorResult");
 
         var prompt = method.IndexOf("recurrenceScope = PromptRecurrenceScope(false);", StringComparison.Ordinal);
         var stabilize = method.IndexOf("EnsureScheduleSaveIdentity(editingEvent);", StringComparison.Ordinal);
-        var apply = method.IndexOf("_viewModel.EditorCalendarId = result.CalendarId;", StringComparison.Ordinal);
+        var apply = method.IndexOf("ApplyScheduleEditorResult(result);", StringComparison.Ordinal);
         var save = method.IndexOf("await _viewModel.SaveCurrentEventAsync(recurrenceScope);", StringComparison.Ordinal);
 
         Assert.True(prompt >= 0 && stabilize > prompt && apply > stabilize && save > apply,
-            "Recurring scope cancellation must happen before editor state is changed, and the original/new identity must be stabilized immediately before applying the accepted result.");
+            "Recurring scope cancellation must happen before editor state is changed, and the original identity must be stabilized immediately before applying the accepted result.");
     }
 
     [Fact]
@@ -153,6 +153,7 @@ public sealed class ScheduleEditingRegressionTests
 
         Assert.Contains("_viewModel.ResolveScheduleEditorCalendarId(editingEvent)", mainWindowSource, StringComparison.Ordinal);
         Assert.Contains("_viewModel.CreateScheduleEditorCalendarOptions(editingEvent, scheduleCalendarId)", mainWindowSource, StringComparison.Ordinal);
+        Assert.Contains("_viewModel.CreateScheduleEditorCalendarOptions(editingEvent, scheduleCalendarId)", reliabilitySource, StringComparison.Ordinal);
         Assert.DoesNotContain("EnsureScheduleEditorCalendarSelection", reliabilitySource, StringComparison.Ordinal);
         Assert.DoesNotContain("FindVisualDescendants<ComboBox>", reliabilitySource, StringComparison.Ordinal);
     }
