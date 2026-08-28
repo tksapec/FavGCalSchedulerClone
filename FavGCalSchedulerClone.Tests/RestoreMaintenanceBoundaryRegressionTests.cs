@@ -13,30 +13,21 @@ public sealed class RestoreMaintenanceBoundaryRegressionTests
         "FavGCalSchedulerClone.App"));
 
     [Fact]
-    public async Task RestoreUi_DisablesMainWindowAroundAwaitAndReenablesBeforeDialogs()
+    public async Task RestoreUi_DisablesMainWindowForEntireDatabaseMaintenanceWindow()
     {
-        var source = await File.ReadAllTextAsync(Path.Combine(AppRoot, "MainWindow.xaml.cs"));
-        var method = ExtractMethod(
-            source,
-            "private async Task RestoreAllCalendarsAsync()",
-            "private async Task ImportCsvAsync()");
+        var maintenanceSource = await File.ReadAllTextAsync(Path.Combine(
+            AppRoot, "ViewModels", "MainViewModel.Maintenance.cs"));
+        var interactionPath = Path.Combine(AppRoot, "MainWindow.RestoreMaintenance.cs");
 
-        var rememberEnabled = method.IndexOf("var wasEnabled = IsEnabled;", StringComparison.Ordinal);
-        var disable = method.IndexOf("IsEnabled = false;", StringComparison.Ordinal);
-        var restore = method.IndexOf("await _viewModel.RestoreAllCalendarsAsync(dialog.FileName);", StringComparison.Ordinal);
-        var finallyIndex = method.IndexOf("finally", restore, StringComparison.Ordinal);
-        var reenable = method.IndexOf("IsEnabled = wasEnabled;", finallyIndex, StringComparison.Ordinal);
-        var successMessage = method.IndexOf("\"リストア完了\"", StringComparison.Ordinal);
-        var failureMessage = method.IndexOf("\"リストア失敗\"", StringComparison.Ordinal);
+        Assert.True(File.Exists(interactionPath),
+            "MainWindow must observe the ViewModel maintenance state without modifying the large primary window source file.");
+        var interactionSource = await File.ReadAllTextAsync(interactionPath);
 
-        Assert.True(rememberEnabled >= 0
-                    && disable > rememberEnabled
-                    && restore > disable
-                    && finallyIndex > restore
-                    && reenable > finallyIndex,
-            "MainWindow input must stay disabled for the awaited database restore and be restored in finally.");
-        Assert.True(successMessage > reenable && failureMessage > reenable,
-            "Completion and error dialogs must be shown only after the owner window is enabled again.");
+        Assert.Contains("public bool IsDatabaseMaintenanceInProgress", maintenanceSource, StringComparison.Ordinal);
+        Assert.Contains("nameof(IsDatabaseMaintenanceInProgress)", maintenanceSource, StringComparison.Ordinal);
+        Assert.Contains("nameof(MainViewModel.IsDatabaseMaintenanceInProgress)", interactionSource, StringComparison.Ordinal);
+        Assert.Contains("IsEnabled = false;", interactionSource, StringComparison.Ordinal);
+        Assert.Contains("IsEnabled = wasEnabled;", interactionSource, StringComparison.Ordinal);
     }
 
     [Fact]
