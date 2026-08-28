@@ -49,6 +49,15 @@ internal static class BulkEventUpdateDialog
             calendar.IsEnabled = calendarEnabled.IsChecked == true;
             color.IsEnabled = colorEnabled.IsChecked == true;
             reminderPanel.IsEnabled = reminderEnabled.IsChecked == true;
+            var reminderHasTime = minutes.SelectedValue is int;
+            appReminder.IsEnabled = reminderEnabled.IsChecked == true && reminderHasTime;
+            emailReminder.IsEnabled = reminderEnabled.IsChecked == true && reminderHasTime;
+            if (reminderEnabled.IsChecked == true && !reminderHasTime)
+            {
+                appReminder.IsChecked = false;
+                emailReminder.IsChecked = false;
+            }
+
             ok.IsEnabled = calendarEnabled.IsChecked == true && calendar.SelectedItem is string
                 || colorEnabled.IsChecked == true
                 || reminderEnabled.IsChecked == true;
@@ -62,6 +71,7 @@ internal static class BulkEventUpdateDialog
         reminderEnabled.Checked += (_, _) => UpdateApplyState();
         reminderEnabled.Unchecked += (_, _) => UpdateApplyState();
         minutes.SelectionChanged += (_, _) => UpdateApplyState();
+        UpdateApplyState();
 
         BulkEventUpdateRequest? result = null;
         ok.Click += (_, _) =>
