@@ -22,6 +22,18 @@ public sealed class BulkEventUpdateDialogSourceTests
         Assert.Contains("selectedReminderMinutes is null ? false : emailReminder.IsChecked == true", source, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void ReminderNone_DisablesAndClearsReminderChannelCheckboxesInTheUi()
+    {
+        var source = ReadSource();
+
+        Assert.Contains("var reminderHasTime = minutes.SelectedValue is int;", source, StringComparison.Ordinal);
+        Assert.Contains("appReminder.IsEnabled = reminderEnabled.IsChecked == true && reminderHasTime;", source, StringComparison.Ordinal);
+        Assert.Contains("emailReminder.IsEnabled = reminderEnabled.IsChecked == true && reminderHasTime;", source, StringComparison.Ordinal);
+        Assert.Contains("appReminder.IsChecked = false;", source, StringComparison.Ordinal);
+        Assert.Contains("emailReminder.IsChecked = false;", source, StringComparison.Ordinal);
+    }
+
     private static string ReadSource() => File.ReadAllText(Path.Combine(
         GetRepositoryRoot(),
         "FavGCalSchedulerClone.App",
