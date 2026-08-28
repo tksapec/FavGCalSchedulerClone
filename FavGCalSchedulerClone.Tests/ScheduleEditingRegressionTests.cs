@@ -95,18 +95,15 @@ public sealed class ScheduleEditingRegressionTests
     }
 
     [Fact]
-    public async Task ScheduleEditor_UsesOriginalPrimaryAliasForExistingEventInsteadOfForcingCalendarMove()
+    public async Task ScheduleEditor_CalendarSelectionIsPreparedBeforeModalAttachment()
     {
-        var source = await ReadReliabilitySourceAsync();
-        var method = ExtractMethod(
-            source,
-            "private void EnsureScheduleEditorCalendarSelection",
-            "private Window? FindScheduleEditorWindow");
+        var reliabilitySource = await ReadReliabilitySourceAsync();
+        var mainWindowSource = await File.ReadAllTextAsync(Path.Combine(AppRoot, "MainWindow.xaml.cs"));
 
-        Assert.Contains("editingEvent.CalendarId", method, StringComparison.Ordinal);
-        Assert.Contains("CreateScheduleEditorCalendarOptions", method, StringComparison.Ordinal);
-        Assert.Contains("calendarSelector.ItemsSource = calendarOptions;", method, StringComparison.Ordinal);
-        Assert.Contains("calendarSelector.SelectedValue = calendarId;", method, StringComparison.Ordinal);
+        Assert.Contains("_viewModel.ResolveScheduleEditorCalendarId(editingEvent)", mainWindowSource, StringComparison.Ordinal);
+        Assert.Contains("_viewModel.CreateScheduleEditorCalendarOptions(editingEvent, scheduleCalendarId)", mainWindowSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("EnsureScheduleEditorCalendarSelection", reliabilitySource, StringComparison.Ordinal);
+        Assert.DoesNotContain("FindVisualDescendants<ComboBox>", reliabilitySource, StringComparison.Ordinal);
     }
 
     [Fact]
