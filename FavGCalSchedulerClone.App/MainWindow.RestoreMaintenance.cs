@@ -35,7 +35,8 @@ public partial class MainWindow
 
     private void MainViewModel_DatabaseMaintenancePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (!string.Equals(e.PropertyName, nameof(MainViewModel.IsDatabaseMaintenanceInProgress), StringComparison.Ordinal))
+        if (!string.Equals(e.PropertyName, nameof(MainViewModel.IsDatabaseMaintenanceInProgress), StringComparison.Ordinal)
+            && !string.Equals(e.PropertyName, nameof(MainViewModel.IsDatabaseRestartRequired), StringComparison.Ordinal))
         {
             return;
         }
@@ -51,7 +52,7 @@ public partial class MainWindow
 
     private void ApplyDatabaseMaintenanceInteractionState()
     {
-        if (_viewModel.IsDatabaseMaintenanceInProgress)
+        if (_viewModel.IsDatabaseMaintenanceInProgress || _viewModel.IsDatabaseRestartRequired)
         {
             if (_mainWindowEnabledBeforeDatabaseMaintenance is null)
             {
