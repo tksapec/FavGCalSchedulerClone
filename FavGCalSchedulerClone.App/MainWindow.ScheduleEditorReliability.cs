@@ -6,6 +6,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using FavGCalSchedulerClone.App.Models;
 using FavGCalSchedulerClone.App.Services;
+using FavGCalSchedulerClone.App.Views.Dialogs;
 
 namespace FavGCalSchedulerClone.App;
 
@@ -103,6 +104,104 @@ public partial class MainWindow
             _activeScheduleEditingEvent = null;
             _scheduleEditorIsNew = false;
         }
+    }
+
+    // All implicit edit entry points resolve to this exact parameterless overload.
+    // The existing bool overload in MainWindow.xaml.cs remains the explicit new-item path.
+    private async Task ShowScheduleDialogAsync()
+    {
+        var editingEvent = _viewModel.SelectedEvent;
+        if (editingEvent is null)
+        {
+            await ShowScheduleDialogAsync(forceNew: false);
+            return;
+        }
+
+        if (editingEvent.IsTodoLike)
+        {
+            return;
+        }
+
+        var scheduleCalendarId = string.IsNullOrWhiteSpace(editingEvent.CalendarId)
+            ? _viewModel.ResolveScheduleEditorCalendarId(editingEvent)
+            : editingEvent.CalendarId;
+        var scheduleCalendarOptions = _viewModel.CreateScheduleEditorCalendarOptions(editingEvent, scheduleCalendarId);
+        var result = ScheduleEditorDialog.Show(
+            DialogUi,
+            new ScheduleEditorRequest(
+                false,
+                editingEvent.Start.Date,
+                editingEvent.IsAllDay ? editingEvent.End.Date.AddDays(-1) : editingEvent.End.Date,
+                editingEvent.Start.ToString("HH:mm"),
+                editingEvent.End.ToString("HH:mm"),
+                editingEvent.IsAllDay,
+                editingEvent.ReminderMinutesBeforeStart,
+                editingEvent.IsAppReminderEnabled,
+                editingEvent.IsGoogleEmailReminderEnabled,
+                editingEvent.Location,
+                scheduleCalendarId,
+                editingEvent.ColorId,
+                editingEvent.Title,
+                editingEvent.Description ?? string.Empty,
+                await _viewModel.LoadScheduleLocationHistoryAsync(),
+                await _viewModel.LoadScheduleTitleHistoryAsync(),
+                scheduleCalendarOptions,
+                _viewModel.ReminderOptions,
+                GoogleReminderDisplayFormatter.FormatEmailReminderText(editingEvent.GoogleReminderMetadata),
+                editingEvent.EffectiveAppReminderMinutesBeforeStart,
+                editingEvent.EffectiveGoogleEmailReminderMinutesBeforeStart),
+            () =>
+            {
+                if (!_viewModel.HideMainWindowWhileEditingSchedule)
+                {
+                    return false;
+                }
+
+                Hide();
+                return true;
+            },
+            () =>
+            {
+                Show();
+                Activate();
+            });
+        if (result is null)
+        {
+            return;
+        }
+
+        RecurrenceEditScope? recurrenceScope = null;
+        if (editingEvent.IsRecurringSeriesItem)
+        {
+            recurrenceScope = PromptRecurrenceScope(false);
+            if (recurrenceScope is null)
+            {
+                return;
+            }
+        }
+
+        EnsureScheduleSaveIdentity(editingEvent);
+        ApplyScheduleEditorResult(result);
+        await _viewModel.SaveCurrentEventAsync(recurrenceScope);
+    }
+
+    private void ApplyScheduleEditorResult(ScheduleEditorResult result)
+    {
+        _viewModel.EditorCalendarId = result.CalendarId;
+        _viewModel.EditorColorId = result.ColorId;
+        _viewModel.StartDate = result.StartDate;
+        _viewModel.EndDate = result.EndDate;
+        _viewModel.StartTime = result.StartTime;
+        _viewModel.EndTime = result.EndTime;
+        _viewModel.IsAllDay = result.IsAllDay;
+        _viewModel.ReminderMinutesBeforeStart = result.ReminderMinutesBeforeStart;
+        _viewModel.AppReminderMinutesBeforeStart = result.AppReminderMinutesBeforeStart ?? [];
+        _viewModel.GoogleEmailReminderMinutesBeforeStart = result.GoogleEmailReminderMinutesBeforeStart ?? [];
+        _viewModel.IsAppReminderEnabled = result.IsAppReminderEnabled;
+        _viewModel.IsGoogleEmailReminderEnabled = result.IsGoogleEmailReminderEnabled;
+        _viewModel.Location = result.Location;
+        _viewModel.Title = result.Title;
+        _viewModel.Description = result.Description;
     }
 
     private void ScheduleEditorReliability_Deactivated(object? sender, EventArgs e)
