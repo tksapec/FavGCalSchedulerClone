@@ -40,6 +40,7 @@ public sealed partial class MainViewModel
         var previousSelectedTabIndex = SelectedTabIndex;
         var previousSelectedTodoTabIndex = SelectedTodoTabIndex;
         var previousViewMode = CurrentViewMode;
+        var previousOAuthClientJsonPath = OAuthClientJsonPath;
         string savedOAuthClientJsonPath;
         lock (_settingsStateLock)
         {
@@ -96,6 +97,11 @@ public sealed partial class MainViewModel
         }
 
         OAuthClientJsonPath = savedOAuthClientJsonPath;
+        if (!string.Equals(previousOAuthClientJsonPath, savedOAuthClientJsonPath, StringComparison.Ordinal))
+        {
+            await ReloadAvailableCalendarsAsync();
+        }
+
         await RefreshCalendarAsync();
         Status = "アプリ設定を保存しました。";
     }
