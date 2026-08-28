@@ -317,8 +317,8 @@
             <MenuItem Header="編集(_E)">
                 <MenuItem Header="元に戻す(_U)" InputGestureText="Ctrl+Z" Command="{Binding UndoLastChangeCommand}" />
                 <Separator />
-                <MenuItem Header="スケジュールの追加(_A)" Command="{Binding AddScheduleCommand}" />
-                <MenuItem Header="ToDoの追加(_D)" Command="{Binding AddTodoCommand}" />
+                <MenuItem Header="スケジュールの追加(_A)" InputGestureText="Ctrl+N" Command="{Binding AddScheduleCommand}" />
+                <MenuItem Header="ToDoの追加(_D)" InputGestureText="Ctrl+Shift+N" Command="{Binding AddTodoCommand}" />
                 <Separator />
                 <MenuItem Header="スケジュール一覧(_L)" Command="{Binding ShowScheduleListCommand}" />
             </MenuItem>
@@ -338,7 +338,7 @@
                 <Separator />
                 <MenuItem Header="年月を指定して移動(_G)..." InputGestureText="Ctrl+G" Command="{Binding ShowMonthJumpCommand}" />
             </MenuItem>
-            <MenuItem Header="検索(_S)" Command="{Binding SearchCommand}" />
+            <MenuItem Header="詳細検索(_S)..." Command="{Binding SearchCommand}" ToolTip="上部のクイック検索欄へはCtrl+Fで移動できます" />
             <MenuItem Header="Googleカレンダー(_G)">
                 <MenuItem Header="OAuth JSONを選択..." Command="{Binding BrowseOAuthClientCommand}" />
                 <MenuItem Header="Google認証" Command="{Binding AuthorizeCommand}" />
