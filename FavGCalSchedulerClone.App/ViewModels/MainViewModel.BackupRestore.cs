@@ -75,6 +75,10 @@ public sealed partial class MainViewModel
                 await _reminderService.PauseForMaintenanceAsync();
             }
 
+            // Navigation refresh/prefetch workers bypass the sync-data gate and can carry
+            // an old snapshot beyond the database swap. Cancel and invalidate them before
+            // repository maintenance so no pre-restore result can be applied afterward.
+            CancelCalendarBackgroundWorkForDatabaseMaintenance();
             await _repository.BeginMaintenanceAsync();
             repositoryMaintenanceStarted = true;
             var result = await _backupService.RestoreBackupAsync(backupZipPath, _repository.DatabasePath);
@@ -92,6 +96,9 @@ public sealed partial class MainViewModel
             }
             catch (Exception ex)
             {
+                // Reload can itself launch a new calendar prefetch before a later reload
+                // step fails. Cancel that work before exposing the restart-required state.
+                CancelCalendarBackgroundWorkForDatabaseMaintenance();
                 // Clear the reminder service's maintenance pause in finally, but do not
                 // restart monitoring against a partially rebuilt in-memory state.
                 reminderWasRunning = false;
@@ -163,6 +170,14 @@ public sealed partial class MainViewModel
                 throw new InvalidOperationException(message, reminderResumeFailure);
             }
         }
+    }
+
+    private void CancelCalendarBackgroundWorkForDatabaseMaintenance()
+    {
+        var deferredRefresh = Interlocked.Exchange(ref _deferredCalendarRefreshCts, null);
+        deferredRefresh?.Cancel();
+        deferredRefresh?.Dispose();
+        CancelActiveCalendarRefresh();
     }
 
     private void ResetTransientStateAfterDatabaseRestore()
