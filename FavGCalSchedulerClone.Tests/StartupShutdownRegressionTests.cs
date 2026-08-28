@@ -1,3 +1,8 @@
+using FavGCalSchedulerClone.App.Models;
+using FavGCalSchedulerClone.App.Services;
+using FavGCalSchedulerClone.App.ViewModels;
+using Microsoft.Data.Sqlite;
+
 namespace FavGCalSchedulerClone.Tests;
 
 public sealed class StartupShutdownRegressionTests
@@ -77,5 +82,45 @@ public sealed class StartupShutdownRegressionTests
             "Tray exit must refuse shutdown before latching _isExiting while restore/database maintenance is still active.");
         Assert.True(shutdown > exitingLatch,
             "Shutdown must only be reached after the maintenance guard has allowed exit.");
+    }
+
+    [Fact]
+    public async Task ExitFlushBeforeSettingsLoad_DoesNotOverwriteStoredSettings()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"startup-exit-flush-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var databasePath = Path.Combine(directory, "calendar.db");
+
+        try
+        {
+            var repository = new CalendarRepository(databasePath);
+            await repository.InitializeAsync();
+            var expectedMonth = new DateTime(2031, 4, 1);
+            await repository.SaveSettingsAsync(new AppSettings
+            {
+                StartupTabIndex = 7,
+                DisplayMonth = expectedMonth,
+                WeekStartsOnMonday = true
+            });
+
+            var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+
+            // Simulate an immediate tray exit while ApplicationStartupService is still
+            // before MainViewModel.InitializeAsync has loaded the persisted settings.
+            await viewModel.FlushDisplayMonthPersistenceAsync();
+
+            var stored = await repository.LoadSettingsAsync();
+            Assert.Equal(7, stored.StartupTabIndex);
+            Assert.Equal(expectedMonth, stored.DisplayMonth);
+            Assert.True(stored.WeekStartsOnMonday);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
     }
 }
