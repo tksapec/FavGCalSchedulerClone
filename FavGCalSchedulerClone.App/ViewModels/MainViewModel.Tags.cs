@@ -100,9 +100,12 @@ public sealed partial class MainViewModel
 
         RefreshCalendarNames();
         SettingsPersistenceRequest settingsSnapshot;
+        AppSettings previousSettings;
+        var previousEditorCalendarId = EditorCalendarId;
         string activeCalendarId;
         lock (_settingsStateLock)
         {
+            previousSettings = CreateSettingsPersistenceSnapshotUnsafe();
             _settings.VisibleCalendarIds = AvailableCalendars.Where(item => item.IsSelected).Select(item => item.Id).ToList();
             _settings.ActiveCalendarId = _settings.VisibleCalendarIds.FirstOrDefault() ?? ResolveEditorCalendarId();
             activeCalendarId = _settings.ActiveCalendarId;
@@ -119,6 +122,21 @@ public sealed partial class MainViewModel
         }
         catch (Exception ex)
         {
+            var restored = false;
+            lock (_settingsStateLock)
+            {
+                if (_settingsRevision == settingsSnapshot.Revision)
+                {
+                    _settings = previousSettings;
+                    restored = true;
+                }
+            }
+
+            if (restored)
+            {
+                RestoreCalendarSelection(previousSettings, previousEditorCalendarId);
+            }
+
             Status = $"表示カレンダー設定を保存できませんでした: {ex.Message}";
             throw new InvalidOperationException(Status, ex);
         }
@@ -142,6 +160,32 @@ public sealed partial class MainViewModel
             Debug.WriteLine(ex);
             Status = $"表示カレンダーを更新しました。状態表示の更新に失敗しました: {ex.Message}";
         }
+    }
+
+    private void RestoreCalendarSelection(AppSettings previousSettings, string previousEditorCalendarId)
+    {
+        IReadOnlyCollection<string> selectedIds = previousSettings.VisibleCalendarIds.Count == 0
+            ? new[] { string.IsNullOrWhiteSpace(previousSettings.ActiveCalendarId)
+                ? GoogleCalendarDefaults.PrimaryCalendarId
+                : previousSettings.ActiveCalendarId }
+            : previousSettings.VisibleCalendarIds;
+
+        foreach (var calendar in AvailableCalendars)
+        {
+            calendar.IsSelected = selectedIds.Contains(calendar.Id, StringComparer.Ordinal);
+        }
+
+        if (!AvailableCalendars.Any(item => item.IsSelected) && AvailableCalendars.Count > 0)
+        {
+            var fallback = AvailableCalendars.FirstOrDefault(item => item.Id == previousSettings.ActiveCalendarId)
+                ?? AvailableCalendars[0];
+            fallback.IsSelected = true;
+        }
+
+        RefreshCalendarNames();
+        EditorCalendarId = AvailableCalendars.Any(item => item.IsSelected && item.Id == previousEditorCalendarId)
+            ? previousEditorCalendarId
+            : ResolveEditorCalendarId();
     }
 
     private void ApplyDisplayColors(IEnumerable<CalendarEvent> events)
