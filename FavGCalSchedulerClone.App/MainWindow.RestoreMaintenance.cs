@@ -7,6 +7,7 @@ namespace FavGCalSchedulerClone.App;
 public partial class MainWindow
 {
     private bool? _mainWindowEnabledBeforeDatabaseMaintenance;
+    private bool? _operationalStatusTimerEnabledBeforeDatabaseMaintenance;
     private bool _databaseMaintenanceObserverAttached;
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -61,7 +62,22 @@ public partial class MainWindow
                 IsEnabled = false;
             }
 
+            if (_operationalStatusTimerEnabledBeforeDatabaseMaintenance is null)
+            {
+                _operationalStatusTimerEnabledBeforeDatabaseMaintenance = _operationalStatusTimer.IsEnabled;
+                _operationalStatusTimer.Stop();
+            }
+
             return;
+        }
+
+        if (_operationalStatusTimerEnabledBeforeDatabaseMaintenance is { } wasTimerEnabled)
+        {
+            _operationalStatusTimerEnabledBeforeDatabaseMaintenance = null;
+            if (wasTimerEnabled)
+            {
+                _operationalStatusTimer.Start();
+            }
         }
 
         if (_mainWindowEnabledBeforeDatabaseMaintenance is { } wasEnabled)
