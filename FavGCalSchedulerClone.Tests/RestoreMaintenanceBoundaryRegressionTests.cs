@@ -174,6 +174,45 @@ public sealed class RestoreMaintenanceBoundaryRegressionTests
         }
     }
 
+    [Fact]
+    public async Task RestoreAllCalendarsAsync_WhenMaintenanceObserverThrows_DoesNotLeaveMaintenanceStateSet()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"restore-observer-failure-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var targetPath = Path.Combine(directory, "calendar.db");
+        var missingBackupPath = Path.Combine(directory, "missing.zip");
+
+        try
+        {
+            var targetRepository = new CalendarRepository(targetPath);
+            await targetRepository.InitializeAsync();
+            var viewModel = new MainViewModel(targetRepository, new GoogleCalendarSyncService(targetRepository));
+            await viewModel.InitializeAsync();
+            viewModel.PropertyChanged += (_, args) =>
+            {
+                if (args.PropertyName == nameof(MainViewModel.IsDatabaseMaintenanceInProgress)
+                    && viewModel.IsDatabaseMaintenanceInProgress)
+                {
+                    throw new InvalidOperationException("forced maintenance observer failure");
+                }
+            };
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                viewModel.RestoreAllCalendarsAsync(missingBackupPath));
+
+            Assert.Equal("forced maintenance observer failure", exception.Message);
+            Assert.False(viewModel.IsDatabaseMaintenanceInProgress);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
     private static string ExtractMethod(string source, string startMarker, string nextMarker)
     {
         var start = source.IndexOf(startMarker, StringComparison.Ordinal);
