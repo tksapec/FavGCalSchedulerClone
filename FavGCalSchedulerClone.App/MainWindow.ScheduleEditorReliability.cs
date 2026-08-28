@@ -137,7 +137,6 @@ public partial class MainWindow
         }
 
         RestoreScheduleEditingIdentity();
-        EnsureScheduleEditorCalendarSelection(window);
     }
 
     private void ScheduleEditorWindow_Closed(object? sender, EventArgs e)
@@ -202,36 +201,6 @@ public partial class MainWindow
         }
     }
 
-    private void EnsureScheduleEditorCalendarSelection(Window scheduleWindow)
-    {
-        var editingEvent = _activeScheduleEditingEvent;
-        var calendarId = editingEvent is not null && !string.IsNullOrWhiteSpace(editingEvent.CalendarId)
-            ? editingEvent.CalendarId
-            : _viewModel.ResolveScheduleEditorCalendarId(editingEvent);
-        if (string.IsNullOrWhiteSpace(calendarId))
-        {
-            return;
-        }
-
-        var calendarSelector = FindVisualDescendants<ComboBox>(scheduleWindow)
-            .FirstOrDefault(combo => ReferenceEquals(combo.ItemsSource, _viewModel.AvailableCalendars));
-        if (calendarSelector is null)
-        {
-            return;
-        }
-
-        var calendarOptions = _viewModel.CreateScheduleEditorCalendarOptions(editingEvent, calendarId);
-        calendarSelector.ItemsSource = calendarOptions;
-        calendarSelector.SelectedValue = calendarId;
-        if (calendarSelector.SelectedIndex < 0 && calendarOptions.Count > 0)
-        {
-            calendarSelector.SelectedIndex = 0;
-            calendarId = calendarOptions[0].Id;
-        }
-
-        _viewModel.EditorCalendarId = calendarId;
-    }
-
     private Window? FindScheduleEditorWindow() =>
         Application.Current.Windows.OfType<Window>().FirstOrDefault(window =>
             ReferenceEquals(window.Owner, this)
@@ -255,23 +224,5 @@ public partial class MainWindow
         }
 
         return null;
-    }
-
-    private static IEnumerable<T> FindVisualDescendants<T>(DependencyObject root)
-        where T : DependencyObject
-    {
-        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
-        {
-            var child = VisualTreeHelper.GetChild(root, index);
-            if (child is T match)
-            {
-                yield return match;
-            }
-
-            foreach (var descendant in FindVisualDescendants<T>(child))
-            {
-                yield return descendant;
-            }
-        }
     }
 }
