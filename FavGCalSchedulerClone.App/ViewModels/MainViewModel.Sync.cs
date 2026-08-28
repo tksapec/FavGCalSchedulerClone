@@ -12,6 +12,7 @@ namespace FavGCalSchedulerClone.App.ViewModels;
 public sealed partial class MainViewModel
 {
     private readonly SemaphoreSlim _syncDataOperationGate = new(1, 1);
+    private int _manualSyncFlowInProgress;
 
     public Task<SyncPreview> CreateSyncPreviewAsync() =>
         RunExclusiveSyncDataOperationAsync(CreateSyncPreviewCoreAsync);
@@ -35,18 +36,31 @@ public sealed partial class MainViewModel
 
     public async Task<SyncResult?> SynchronizeManuallyWithPreviewAsync()
     {
-        var settings = CreateSettingsSnapshot();
-        if (settings.ShowSyncPreviewBeforeManualSync && _confirmManualSyncPreviewAsync is not null)
+        if (Interlocked.Exchange(ref _manualSyncFlowInProgress, 1) != 0)
         {
-            var preview = await CreateSyncPreviewAsync();
-            if (!await _confirmManualSyncPreviewAsync(preview))
-            {
-                Status = "同期をキャンセルしました。";
-                return null;
-            }
+            Status = "手動同期の確認または実行中です。";
+            return null;
         }
 
-        return await SynchronizeManuallyAsync();
+        try
+        {
+            var settings = CreateSettingsSnapshot();
+            if (settings.ShowSyncPreviewBeforeManualSync && _confirmManualSyncPreviewAsync is not null)
+            {
+                var preview = await CreateSyncPreviewAsync();
+                if (!await _confirmManualSyncPreviewAsync(preview))
+                {
+                    Status = "同期をキャンセルしました。";
+                    return null;
+                }
+            }
+
+            return await SynchronizeManuallyAsync();
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _manualSyncFlowInProgress, 0);
+        }
     }
 
     public async Task<SyncResult> SynchronizeDirtyOnlyAsync()
@@ -157,6 +171,11 @@ public sealed partial class MainViewModel
 
     public async Task RunAutomaticSyncIfDueAsync()
     {
+        if (Volatile.Read(ref _manualSyncFlowInProgress) != 0)
+        {
+            return;
+        }
+
         var settings = CreateSettingsSnapshot();
         if (settings.AutomaticSyncIntervalMinutes is not int interval
             || !CanSynchronize(settings)
