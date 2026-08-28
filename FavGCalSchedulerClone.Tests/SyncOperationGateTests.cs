@@ -27,6 +27,66 @@ public sealed class SyncOperationGateTests
     }
 
     [Fact]
+    public async Task SynchronizeDirtyOnlyAsync_WaitsBeforeSelectingDirtyTargets()
+    {
+        var viewModel = await CreateViewModelAsync();
+        var gate = GetSyncDataOperationGate(viewModel);
+        await gate.WaitAsync();
+        Task syncTask;
+        try
+        {
+            syncTask = viewModel.SynchronizeDirtyOnlyAsync();
+            Assert.False(syncTask.IsCompleted);
+        }
+        finally
+        {
+            gate.Release();
+        }
+
+        await syncTask;
+    }
+
+    [Fact]
+    public async Task ResyncFailedItemsAsync_WaitsBeforeFilteringCurrentDirtyTargets()
+    {
+        var viewModel = await CreateViewModelAsync();
+        var gate = GetSyncDataOperationGate(viewModel);
+        await gate.WaitAsync();
+        Task retryTask;
+        try
+        {
+            retryTask = viewModel.ResyncFailedItemsAsync(["missing-id"]);
+            Assert.False(retryTask.IsCompleted);
+        }
+        finally
+        {
+            gate.Release();
+        }
+
+        await retryTask;
+    }
+
+    [Fact]
+    public async Task LoadSyncDiagnosticsAsync_WaitsForStableSyncDataSnapshot()
+    {
+        var viewModel = await CreateViewModelAsync();
+        var gate = GetSyncDataOperationGate(viewModel);
+        await gate.WaitAsync();
+        Task diagnosticsTask;
+        try
+        {
+            diagnosticsTask = viewModel.LoadSyncDiagnosticsAsync();
+            Assert.False(diagnosticsTask.IsCompleted);
+        }
+        finally
+        {
+            gate.Release();
+        }
+
+        await diagnosticsTask;
+    }
+
+    [Fact]
     public async Task RestoreAllCalendarsAsync_WaitsForExistingSyncDataOperationBeforeReadingBackup()
     {
         var viewModel = await CreateViewModelAsync();
