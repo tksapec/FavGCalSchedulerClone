@@ -90,13 +90,18 @@ public sealed class BranchIntegrationRegressionTests
     }
 
     [Fact]
-    public async Task AddScheduleCommand_ClearsExistingSelectionBeforeOpeningTheNewScheduleDialog()
+    public async Task ExplicitAddScheduleEntryPoints_AlwaysForceTheNewSchedulePath()
     {
-        var source = await ReadAppSourceAsync("ViewModels", "MainViewModel.Settings.cs");
+        var mainWindow = await ReadAppSourceAsync("MainWindow.xaml.cs");
+        var settings = await ReadAppSourceAsync("ViewModels", "MainViewModel.Settings.cs");
 
-        Assert.Contains("_showAddScheduleAsync = async () =>", source, StringComparison.Ordinal);
-        Assert.Contains("SelectedEvent = null;", source, StringComparison.Ordinal);
-        Assert.Contains("await showAddScheduleAsync();", source, StringComparison.Ordinal);
+        Assert.Contains("private async Task ShowScheduleDialogAsync(bool forceNew = false)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("var editingEvent = forceNew ? null : _viewModel.SelectedEvent;", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("() => RunAsOwnedModalAsync(() => ShowScheduleDialogAsync(forceNew: true))", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("RunUiActionAsync(() => ShowScheduleDialogAsync(forceNew: true), \"ContextMenu.AddSchedule\")", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("RunUiActionAsync(() => ShowScheduleDialogAsync(forceNew: true), nameof(AddScheduleMenu_Click))", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("_showAddScheduleAsync = showAddScheduleAsync;", settings, StringComparison.Ordinal);
+        Assert.DoesNotContain("SelectedEvent = null;\n            await showAddScheduleAsync();", settings, StringComparison.Ordinal);
     }
 
     [Fact]
