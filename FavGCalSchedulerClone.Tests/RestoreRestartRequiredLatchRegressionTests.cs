@@ -49,7 +49,9 @@ public sealed class RestoreRestartRequiredLatchRegressionTests
 
             Assert.True(viewModel.IsDatabaseRestartRequired);
             Assert.False(viewModel.IsDatabaseMaintenanceInProgress);
-            Assert.Equal(7, (await targetRepository.LoadSettingsAsync()).StartupTabIndex);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => targetRepository.LoadSettingsAsync());
+            var restoredSettings = await targetRepository.RunWithMaintenanceAccessAsync(targetRepository.LoadSettingsAsync);
+            Assert.Equal(7, restoredSettings.StartupTabIndex);
 
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 viewModel.SynchronizeDirtyOnlyAsync());
