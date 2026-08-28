@@ -170,6 +170,48 @@ public sealed class SearchEventListTests
     }
 
     [Fact]
+    public async Task RunCurrentYearSearchAsync_WhenVisibleSearchFails_PreservesDisplayedScopeYear()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var databasePath = Path.Combine(directory, "calendar.db");
+        try
+        {
+            var repository = new CalendarRepository(databasePath);
+            await repository.InitializeAsync();
+            await repository.SaveEventAsync(Event("2026 target", isTodo: false, start: new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.Zero)));
+            var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository))
+            {
+                CurrentMonth = new DateTime(2026, 5, 1)
+            };
+
+            await viewModel.RunCurrentYearSearchAsync();
+            Assert.Equal("2026年の検索結果", viewModel.SearchResultsScopeText);
+            Assert.Single(viewModel.SearchResults);
+
+            viewModel.CurrentMonth = new DateTime(2027, 5, 1);
+            await repository.BeginMaintenanceAsync();
+            try
+            {
+                await Assert.ThrowsAsync<InvalidOperationException>(() => viewModel.RunCurrentYearSearchAsync());
+
+                Assert.True(viewModel.IsSearchResultsVisible);
+                Assert.Equal("2026年の検索結果", viewModel.SearchResultsScopeText);
+                Assert.Single(viewModel.SearchResults);
+            }
+            finally
+            {
+                repository.EndMaintenance();
+            }
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void EventListDialog_ResultColumnsMatchSearchListRequirements()
     {
         Assert.Equal(
