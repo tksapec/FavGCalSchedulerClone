@@ -247,6 +247,14 @@ public sealed partial class MainViewModel
         await _settingsPersistenceGate.WaitAsync().ConfigureAwait(false);
         try
         {
+            // A partial post-restore ViewModel reload makes the in-memory settings
+            // snapshot untrustworthy. The UI is locked and a process restart is required,
+            // so queued/delayed settings writes must not mutate the already-restored DB.
+            if (IsDatabaseRestartRequired)
+            {
+                return;
+            }
+
             lock (_settingsStateLock)
             {
                 if (request.Revision <= _persistedSettingsRevision)
