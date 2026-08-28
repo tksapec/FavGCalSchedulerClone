@@ -90,6 +90,20 @@ public sealed class BranchIntegrationRegressionTests
     }
 
     [Fact]
+    public async Task SyncDiagnostics_SerializesMutatingAndRemoteOperations()
+    {
+        var source = await ReadAppSourceAsync("Views", "Dialogs", "SyncDialogs.cs");
+
+        Assert.Contains("var operationInProgress = false;", source, StringComparison.Ordinal);
+        Assert.Contains("if (operationInProgress)", source, StringComparison.Ordinal);
+        Assert.Contains("operationInProgress = true;", source, StringComparison.Ordinal);
+        Assert.Contains("operationInProgress = false;", source, StringComparison.Ordinal);
+        Assert.Contains("Action updateOperationState = static () => { };", source, StringComparison.Ordinal);
+        Assert.Contains("updateOperationState();", source, StringComparison.Ordinal);
+        Assert.Contains("!operationInProgress", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ExplicitAddScheduleEntryPoints_AlwaysForceTheNewSchedulePath()
     {
         var mainWindow = await ReadAppSourceAsync("MainWindow.xaml.cs");
