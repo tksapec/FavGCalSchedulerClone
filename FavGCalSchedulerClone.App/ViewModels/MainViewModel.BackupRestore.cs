@@ -12,7 +12,10 @@ namespace FavGCalSchedulerClone.App.ViewModels;
 public sealed partial class MainViewModel
 {
 
-    public async Task<BackupResult> BackupAllCalendarsAsync(string backupZipPath)
+    public Task<BackupResult> BackupAllCalendarsAsync(string backupZipPath) =>
+        RunExclusiveSyncDataOperationAsync(() => BackupAllCalendarsCoreAsync(backupZipPath));
+
+    private async Task<BackupResult> BackupAllCalendarsCoreAsync(string backupZipPath)
     {
         await _repository.InitializeAsync();
         var result = await _backupService.CreateBackupAsync(_repository.DatabasePath, backupZipPath);
@@ -28,7 +31,7 @@ public sealed partial class MainViewModel
         }
 
         var reminderWasRunning = false;
-        var reminderPaused = false;
+        var reminderResumeRequired = false;
         var repositoryMaintenanceStarted = false;
         var syncDataGateEntered = false;
         var displayMonthPersistenceGateEntered = false;
@@ -62,8 +65,12 @@ public sealed partial class MainViewModel
 
             if (_reminderService is not null)
             {
-                reminderWasRunning = await _reminderService.PauseForMaintenanceAsync();
-                reminderPaused = true;
+                // PauseForMaintenanceAsync stops the timer before persisting diagnostics.
+                // Mark recovery as required before awaiting it so a diagnostics write failure
+                // cannot leave reminder monitoring permanently paused.
+                reminderWasRunning = _reminderService.IsRunning;
+                reminderResumeRequired = true;
+                await _reminderService.PauseForMaintenanceAsync();
             }
 
             await _repository.BeginMaintenanceAsync();
@@ -76,7 +83,16 @@ public sealed partial class MainViewModel
             // cache and setting has been reloaded from the restored database. This flow
             // already owns _syncDataOperationGate, so the calendar-list reload must call
             // its core implementation rather than re-entering the public gated wrapper.
-            await _repository.RunWithMaintenanceAccessAsync(ReloadRestoredViewModelStateAsync);
+            try
+            {
+                await _repository.RunWithMaintenanceAccessAsync(ReloadRestoredViewModelStateAsync);
+            }
+            catch (Exception ex)
+            {
+                const string message = "バックアップDBの復元は完了しましたが、画面状態の再読み込みに失敗しました。アプリを再起動してください。";
+                Status = message;
+                throw new InvalidOperationException(message, ex);
+            }
 
             _repository.EndMaintenance();
             repositoryMaintenanceStarted = false;
@@ -93,7 +109,7 @@ public sealed partial class MainViewModel
                     _repository.EndMaintenance();
                 }
 
-                if (reminderPaused)
+                if (reminderResumeRequired)
                 {
                     await _reminderService!.ResumeAfterMaintenanceAsync(reminderWasRunning);
                 }
