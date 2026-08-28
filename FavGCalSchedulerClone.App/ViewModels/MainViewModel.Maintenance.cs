@@ -98,9 +98,4 @@ public sealed partial class MainViewModel
             _logger?.LogError(ex, "Database restart-required notification failed.");
         }
     }
-
-    private string GetDatabaseOperationBlockedMessage() =>
-        IsDatabaseRestartRequired
-            ? "バックアップDBの復元後に画面状態を完全に再読み込みできなかったため、アプリを再起動するまでデータ操作を開始できません。"
-            : "データベースのリストア中はデータ操作を開始できません。";
 }
