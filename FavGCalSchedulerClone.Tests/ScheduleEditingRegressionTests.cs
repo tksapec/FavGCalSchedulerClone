@@ -113,6 +113,39 @@ public sealed class ScheduleEditingRegressionTests
     }
 
     [Fact]
+    public async Task ScheduleEditor_ChoosesRecurrenceScopeAndStabilizesIdentityBeforeApplyingResult()
+    {
+        var source = await File.ReadAllTextAsync(Path.Combine(AppRoot, "MainWindow.xaml.cs"));
+        var method = ExtractMethod(
+            source,
+            "private async Task ShowScheduleDialogAsync",
+            "private async Task ShowSelectedTodoDialogAsync");
+
+        var prompt = method.IndexOf("recurrenceScope = PromptRecurrenceScope(false);", StringComparison.Ordinal);
+        var stabilize = method.IndexOf("EnsureScheduleSaveIdentity(editingEvent);", StringComparison.Ordinal);
+        var apply = method.IndexOf("_viewModel.EditorCalendarId = result.CalendarId;", StringComparison.Ordinal);
+        var save = method.IndexOf("await _viewModel.SaveCurrentEventAsync(recurrenceScope);", StringComparison.Ordinal);
+
+        Assert.True(prompt >= 0 && stabilize > prompt && apply > stabilize && save > apply,
+            "Recurring scope cancellation must happen before editor state is changed, and the original/new identity must be stabilized immediately before applying the accepted result.");
+    }
+
+    [Fact]
+    public async Task ScheduleEditor_SaveBoundaryHandlesNewAndExistingIdentityExplicitly()
+    {
+        var source = await ReadReliabilitySourceAsync();
+        var method = ExtractMethod(
+            source,
+            "private void EnsureScheduleSaveIdentity",
+            "private static bool SameScheduleOccurrence");
+
+        Assert.Contains("if (editingEvent is null)", method, StringComparison.Ordinal);
+        Assert.Contains("_viewModel.SelectedEvent = null;", method, StringComparison.Ordinal);
+        Assert.Contains("SameScheduleOccurrence(current, editingEvent)", method, StringComparison.Ordinal);
+        Assert.Contains("_viewModel.SelectEvent(editingEvent, selectEventDay: false);", method, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ScheduleEditor_CalendarSelectionIsPreparedBeforeModalAttachment()
     {
         var reliabilitySource = await ReadReliabilitySourceAsync();
