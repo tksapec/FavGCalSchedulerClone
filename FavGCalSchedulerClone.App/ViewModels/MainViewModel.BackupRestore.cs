@@ -25,7 +25,7 @@ public sealed partial class MainViewModel
 
     public async Task<RestoreResult> RestoreAllCalendarsAsync(string backupZipPath)
     {
-        if (Interlocked.CompareExchange(ref _databaseMaintenanceInProgress, 1, 0) != 0)
+        if (!TryBeginDatabaseMaintenanceState())
         {
             throw new InvalidOperationException("データベースのメンテナンス処理が既に実行中です。");
         }
@@ -121,7 +121,6 @@ public sealed partial class MainViewModel
                     MarkRestoredSettingsPersistenceBaseline();
                 }
 
-                Interlocked.Exchange(ref _databaseMaintenanceInProgress, 0);
                 if (settingsPersistenceGateEntered)
                 {
                     _settingsPersistenceGate.Release();
@@ -134,6 +133,7 @@ public sealed partial class MainViewModel
                 {
                     _syncDataOperationGate.Release();
                 }
+                EndDatabaseMaintenanceState();
             }
         }
     }
