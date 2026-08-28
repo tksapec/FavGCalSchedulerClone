@@ -105,6 +105,7 @@ internal static class SettingsDialog
         colorGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         colorGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         AddText(colorGrid, "Color", 0, 0);
+        AddText(colorGrid, "ID", 0, 1);
         AddText(colorGrid, "Label", 0, 2);
         AddText(colorGrid, "Enabled", 0, 3);
 
