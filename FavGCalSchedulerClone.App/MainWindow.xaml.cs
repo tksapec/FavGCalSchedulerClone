@@ -1182,6 +1182,11 @@ public partial class MainWindow : Window
             _viewModel.BeginNewEvent(date);
         }
 
+        var scheduleCalendarId = editingEvent is not null && !string.IsNullOrWhiteSpace(editingEvent.CalendarId)
+            ? editingEvent.CalendarId
+            : _viewModel.ResolveScheduleEditorCalendarId(editingEvent);
+        var scheduleCalendarOptions = _viewModel.CreateScheduleEditorCalendarOptions(editingEvent, scheduleCalendarId);
+
         var result = ScheduleEditorDialog.Show(
             DialogUi,
             new ScheduleEditorRequest(
@@ -1195,13 +1200,13 @@ public partial class MainWindow : Window
                 editingEvent?.IsAppReminderEnabled ?? _viewModel.IsAppReminderEnabled,
                 editingEvent?.IsGoogleEmailReminderEnabled ?? _viewModel.IsGoogleEmailReminderEnabled,
                 editingEvent?.Location ?? _viewModel.Location,
-                editingEvent?.CalendarId ?? _viewModel.EditorCalendarId,
+                scheduleCalendarId,
                 editingEvent?.ColorId,
                 editingEvent?.Title ?? _viewModel.Title,
                 editingEvent?.Description ?? string.Empty,
                 await _viewModel.LoadScheduleLocationHistoryAsync(),
                 await _viewModel.LoadScheduleTitleHistoryAsync(),
-                _viewModel.AvailableCalendars,
+                scheduleCalendarOptions,
                 _viewModel.ReminderOptions,
                 GoogleReminderDisplayFormatter.FormatEmailReminderText(editingEvent?.GoogleReminderMetadata),
                 editingEvent?.EffectiveAppReminderMinutesBeforeStart ?? _viewModel.AppReminderMinutesBeforeStart,
