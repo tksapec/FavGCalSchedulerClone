@@ -13,19 +13,22 @@ public sealed class RestoreMaintenanceBoundaryRegressionTests
         "FavGCalSchedulerClone.App"));
 
     [Fact]
-    public async Task RestoreUi_DisablesMainWindowForEntireDatabaseMaintenanceWindow()
+    public async Task RestoreUi_DisablesMainWindowForMaintenanceAndPartialReloadFailure()
     {
         var maintenanceSource = await File.ReadAllTextAsync(Path.Combine(
             AppRoot, "ViewModels", "MainViewModel.Maintenance.cs"));
         var interactionPath = Path.Combine(AppRoot, "MainWindow.RestoreMaintenance.cs");
 
         Assert.True(File.Exists(interactionPath),
-            "MainWindow must observe the ViewModel maintenance state without modifying the large primary window source file.");
+            "MainWindow must observe restore safety state without modifying the large primary window source file.");
         var interactionSource = await File.ReadAllTextAsync(interactionPath);
 
         Assert.Contains("public bool IsDatabaseMaintenanceInProgress", maintenanceSource, StringComparison.Ordinal);
+        Assert.Contains("public bool IsDatabaseRestartRequired", maintenanceSource, StringComparison.Ordinal);
         Assert.Contains("nameof(IsDatabaseMaintenanceInProgress)", maintenanceSource, StringComparison.Ordinal);
         Assert.Contains("nameof(MainViewModel.IsDatabaseMaintenanceInProgress)", interactionSource, StringComparison.Ordinal);
+        Assert.Contains("nameof(MainViewModel.IsDatabaseRestartRequired)", interactionSource, StringComparison.Ordinal);
+        Assert.Contains("Dispatcher.Invoke(ApplyDatabaseMaintenanceInteractionState)", interactionSource, StringComparison.Ordinal);
         Assert.Contains("IsEnabled = false;", interactionSource, StringComparison.Ordinal);
         Assert.Contains("IsEnabled = wasEnabled;", interactionSource, StringComparison.Ordinal);
     }
@@ -64,7 +67,7 @@ public sealed class RestoreMaintenanceBoundaryRegressionTests
     }
 
     [Fact]
-    public async Task RestoreAllCalendarsAsync_WhenReloadFails_ReportsDatabaseAlreadyRestored()
+    public async Task RestoreAllCalendarsAsync_WhenReloadFails_ReportsDatabaseAlreadyRestoredAndRequiresRestart()
     {
         var directory = Path.Combine(Path.GetTempPath(), $"restore-reload-failure-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
@@ -94,6 +97,8 @@ public sealed class RestoreMaintenanceBoundaryRegressionTests
             Assert.Contains("DBの復元は完了", exception.Message, StringComparison.Ordinal);
             Assert.Contains("再起動", exception.Message, StringComparison.Ordinal);
             Assert.Equal(4, (await targetRepository.LoadSettingsAsync()).StartupTabIndex);
+            Assert.False(viewModel.IsDatabaseMaintenanceInProgress);
+            Assert.True(viewModel.IsDatabaseRestartRequired);
         }
         finally
         {
@@ -106,7 +111,7 @@ public sealed class RestoreMaintenanceBoundaryRegressionTests
     }
 
     [Fact]
-    public async Task RestoreAllCalendarsAsync_WhenReminderRestartFails_ReportsDatabaseAlreadyRestored()
+    public async Task RestoreAllCalendarsAsync_WhenReminderRestartFails_ReportsDatabaseAlreadyRestoredWithoutLockingUi()
     {
         var directory = Path.Combine(Path.GetTempPath(), $"restore-reminder-restart-failure-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
@@ -130,10 +135,12 @@ public sealed class RestoreMaintenanceBoundaryRegressionTests
             await targetRepository.InitializeAsync();
             await targetRepository.SaveSettingsAsync(new AppSettings { StartupTabIndex = 1 });
 
-            reminderRepository = new CalendarRepository(reminderPath);
-            await reminderRepository.InitializeAsync();
-            reminderService = new ReminderNotificationService(reminderRepository, new RecordingNotifier());
-            await reminderService.StartAsync();
+            var localReminderRepository = new CalendarRepository(reminderPath);
+            reminderRepository = localReminderRepository;
+            await localReminderRepository.InitializeAsync();
+            var localReminderService = new ReminderNotificationService(localReminderRepository, new RecordingNotifier());
+            reminderService = localReminderService;
+            await localReminderService.StartAsync();
 
             var viewModel = new MainViewModel(
                 targetRepository,
@@ -142,11 +149,11 @@ public sealed class RestoreMaintenanceBoundaryRegressionTests
                 new CalendarCsvService(),
                 new FavGCalSchedulerImportService(targetRepository),
                 logger: null,
-                reminderService: reminderService);
+                reminderService: localReminderService);
             await viewModel.InitializeAsync();
             viewModel.BeforeLoadCalendarSnapshotAsync = async (_, _) =>
             {
-                await reminderRepository.BeginMaintenanceAsync();
+                await localReminderRepository.BeginMaintenanceAsync();
                 reminderMaintenanceStarted = true;
             };
 
@@ -158,6 +165,7 @@ public sealed class RestoreMaintenanceBoundaryRegressionTests
             Assert.Contains("再起動", exception.Message, StringComparison.Ordinal);
             Assert.Equal(5, (await targetRepository.LoadSettingsAsync()).StartupTabIndex);
             Assert.False(viewModel.IsDatabaseMaintenanceInProgress);
+            Assert.False(viewModel.IsDatabaseRestartRequired);
         }
         finally
         {
@@ -202,6 +210,7 @@ public sealed class RestoreMaintenanceBoundaryRegressionTests
 
             Assert.Equal("forced maintenance observer failure", exception.Message);
             Assert.False(viewModel.IsDatabaseMaintenanceInProgress);
+            Assert.False(viewModel.IsDatabaseRestartRequired);
         }
         finally
         {
