@@ -105,6 +105,75 @@ public sealed class RestoreMaintenanceBoundaryRegressionTests
         }
     }
 
+    [Fact]
+    public async Task RestoreAllCalendarsAsync_WhenReminderRestartFails_ReportsDatabaseAlreadyRestored()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"restore-reminder-restart-failure-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var sourcePath = Path.Combine(directory, "source.db");
+        var targetPath = Path.Combine(directory, "calendar.db");
+        var reminderPath = Path.Combine(directory, "reminder.db");
+        var backupPath = Path.Combine(directory, "backup.zip");
+        var backupService = new BackupService();
+        CalendarRepository? reminderRepository = null;
+        ReminderNotificationService? reminderService = null;
+        var reminderMaintenanceStarted = false;
+
+        try
+        {
+            var sourceRepository = new CalendarRepository(sourcePath);
+            await sourceRepository.InitializeAsync();
+            await sourceRepository.SaveSettingsAsync(new AppSettings { StartupTabIndex = 5 });
+            await backupService.CreateBackupAsync(sourcePath, backupPath);
+
+            var targetRepository = new CalendarRepository(targetPath);
+            await targetRepository.InitializeAsync();
+            await targetRepository.SaveSettingsAsync(new AppSettings { StartupTabIndex = 1 });
+
+            reminderRepository = new CalendarRepository(reminderPath);
+            await reminderRepository.InitializeAsync();
+            reminderService = new ReminderNotificationService(reminderRepository, new RecordingNotifier());
+            await reminderService.StartAsync();
+
+            var viewModel = new MainViewModel(
+                targetRepository,
+                new GoogleCalendarSyncService(targetRepository),
+                backupService,
+                new CalendarCsvService(),
+                new FavGCalSchedulerImportService(targetRepository),
+                logger: null,
+                reminderService: reminderService);
+            await viewModel.InitializeAsync();
+            viewModel.BeforeLoadCalendarSnapshotAsync = async (_, _) =>
+            {
+                await reminderRepository.BeginMaintenanceAsync();
+                reminderMaintenanceStarted = true;
+            };
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                viewModel.RestoreAllCalendarsAsync(backupPath));
+
+            Assert.Contains("DBの復元は完了", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("通知監視", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("再起動", exception.Message, StringComparison.Ordinal);
+            Assert.Equal(5, (await targetRepository.LoadSettingsAsync()).StartupTabIndex);
+            Assert.False(viewModel.IsDatabaseMaintenanceInProgress);
+        }
+        finally
+        {
+            if (reminderMaintenanceStarted)
+            {
+                reminderRepository!.EndMaintenance();
+            }
+            reminderService?.Dispose();
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
     private static string ExtractMethod(string source, string startMarker, string nextMarker)
     {
         var start = source.IndexOf(startMarker, StringComparison.Ordinal);
@@ -112,5 +181,11 @@ public sealed class RestoreMaintenanceBoundaryRegressionTests
         var end = source.IndexOf(nextMarker, start + startMarker.Length, StringComparison.Ordinal);
         Assert.True(end > start, $"{nextMarker} was not found after {startMarker}.");
         return source[start..end];
+    }
+
+    private sealed class RecordingNotifier : IReminderNotifier
+    {
+        public Task ShowAsync(ReminderNotification notification, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
     }
 }
