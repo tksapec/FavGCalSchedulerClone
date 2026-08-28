@@ -12,6 +12,7 @@ internal static class SettingsDialog
     public static Task<SettingsDialogResult?> ShowAsync(DialogUiFactory ui, SettingsDialogRequest request)
     {
         var settings = request.Settings;
+        var persistedOAuthClientJsonPath = NormalizeOAuthPath(request.OAuthClientJsonPath);
         var window = ui.CreateOwnedDialog("アプリ設定", 760, 610);
         window.ResizeMode = ResizeMode.CanResize;
         var root = new DockPanel { Margin = new Thickness(10) };
@@ -252,17 +253,20 @@ internal static class SettingsDialog
         authorize.Click += async (_, _) => await RunGoogleOperationAsync(window, "Google認証", "Google認証が完了しました。", "Google認証エラー", async () =>
         {
             await request.SetOAuthClientJsonPathAsync(oauthPath.Text);
+            persistedOAuthClientJsonPath = NormalizeOAuthPath(oauthPath.Text);
             await request.AuthorizeGoogleAsync();
         });
         clearToken.Click += async (_, _) => await RunGoogleOperationAsync(window, "トークン削除", "保存済みGoogleトークンを削除しました。", "トークン削除エラー", request.ClearTokensAsync);
         reloadCalendars.Click += async (_, _) => await RunGoogleOperationAsync(window, "カレンダー一覧", "カレンダー一覧を更新しました。", "カレンダー一覧更新エラー", async () =>
         {
             await request.SetOAuthClientJsonPathAsync(oauthPath.Text);
+            persistedOAuthClientJsonPath = NormalizeOAuthPath(oauthPath.Text);
             await request.ReloadAvailableCalendarsAsync();
         });
         refreshReminders.Click += async (_, _) => await RunGoogleOperationAsync(window, "Google通知設定", "Google通知設定を再取得しました。", "Google通知設定エラー", async () =>
         {
             await request.SetOAuthClientJsonPathAsync(oauthPath.Text);
+            persistedOAuthClientJsonPath = NormalizeOAuthPath(oauthPath.Text);
             var updated = await request.RefreshGoogleRemindersAsync();
             MessageBox.Show(window, $"更新しました: {updated} 件", "Google通知設定", MessageBoxButton.OK, MessageBoxImage.Information);
         }, showSuccessMessage: false);
@@ -331,8 +335,10 @@ internal static class SettingsDialog
                 IsEnabled = item.IsEnabled.IsChecked == true
             })
             .ToList();
-        return Task.FromResult<SettingsDialogResult?>(new SettingsDialogResult(settings, oauthPath.Text));
+        return Task.FromResult<SettingsDialogResult?>(new SettingsDialogResult(settings, persistedOAuthClientJsonPath));
     }
+
+    private static string NormalizeOAuthPath(string path) => string.IsNullOrWhiteSpace(path) ? "" : path.Trim();
 
     private static void AddText(Grid grid, string text, int row, int column)
     {
