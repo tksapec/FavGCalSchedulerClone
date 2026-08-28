@@ -27,8 +27,25 @@ public static class RecurrenceExpansionService
             var seriesExceptions = recurrenceExceptions
                 .Where(item => BelongsToMaster(item, master))
                 .ToArray();
+            var occurrenceStarts = ExpandMasterOccurrencesSafely(master, rangeStart, rangeEnd);
+            if (occurrenceStarts is null)
+            {
+                // Preserve malformed persisted data in the visible calendar so the user
+                // can inspect and repair it instead of silently losing the whole series.
+                if (master.Start < rangeEnd && master.End > rangeStart)
+                {
+                    results.Add(Clone(master));
+                }
 
-            foreach (var occurrenceStart in ExpandMasterOccurrencesSafely(master, rangeStart, rangeEnd))
+                foreach (var exception in seriesExceptions.Where(item => !item.IsDeleted && item.Start < rangeEnd && item.End > rangeStart))
+                {
+                    results.Add(Clone(exception));
+                }
+
+                continue;
+            }
+
+            foreach (var occurrenceStart in occurrenceStarts)
             {
                 var exception = seriesExceptions
                     .Where(item => item.OriginalStart is not null)
@@ -75,20 +92,18 @@ public static class RecurrenceExpansionService
             .ToArray();
     }
 
-    private static IReadOnlyList<DateTimeOffset> ExpandMasterOccurrencesSafely(
+    private static IReadOnlyList<DateTimeOffset>? ExpandMasterOccurrencesSafely(
         CalendarEvent master,
         DateTimeOffset rangeStart,
         DateTimeOffset rangeEnd)
     {
         try
         {
-            return RecurrenceRuleHelper.ExpandOccurrences(master, rangeStart, rangeEnd).ToArray();
+            return RecurrenceSetExpander.ExpandOccurrences(master, rangeStart, rangeEnd);
         }
         catch
         {
-            // A single malformed persisted RRULE must not prevent unrelated events
-            // from rendering. The source master remains stored and can still be edited.
-            return [];
+            return null;
         }
     }
 
