@@ -38,6 +38,14 @@ public sealed partial class MainViewModel
         catch
         {
             Interlocked.Exchange(ref _databaseMaintenanceInProgress, 0);
+            try
+            {
+                OnPropertyChanged(nameof(IsDatabaseMaintenanceInProgress));
+            }
+            catch (Exception rollbackNotificationException)
+            {
+                _logger?.LogError(rollbackNotificationException, "Database maintenance rollback notification failed.");
+            }
             throw;
         }
     }
