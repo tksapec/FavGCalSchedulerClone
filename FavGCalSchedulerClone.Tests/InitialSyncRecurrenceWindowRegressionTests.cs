@@ -17,10 +17,7 @@ public sealed class InitialSyncRecurrenceWindowRegressionTests
         await fixture.Service.SyncAsync(fixture.Settings);
 
         var request = Assert.Single(fixture.Client.Requests);
-        Assert.Null(request.SyncToken);
-        Assert.Null(request.TimeMin);
-        Assert.False(request.SingleEvents);
-        Assert.True(request.ShowDeleted);
+        AssertFullParentRequestWithoutTimeMin(request);
     }
 
     [Fact]
@@ -50,10 +47,40 @@ public sealed class InitialSyncRecurrenceWindowRegressionTests
         var recovery = fixture.Client.Requests[1];
         Assert.Equal("expired-sync-token", incremental.SyncToken);
         Assert.Null(incremental.TimeMin);
-        Assert.Null(recovery.SyncToken);
-        Assert.Null(recovery.TimeMin);
-        Assert.False(recovery.SingleEvents);
-        Assert.True(recovery.ShowDeleted);
+        AssertFullParentRequestWithoutTimeMin(recovery);
+    }
+
+    [Fact]
+    public async Task PullAsync_InitialParentEventRequest_DoesNotUseTimeMinCutoff()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+
+        await fixture.Service.PullAsync(fixture.Settings);
+
+        var request = Assert.Single(fixture.Client.Requests);
+        AssertFullParentRequestWithoutTimeMin(request);
+    }
+
+    [Fact]
+    public async Task PullAsync_WhenSyncTokenExpires_RecoveryFullRequestDoesNotUseTimeMinCutoff()
+    {
+        await using var fixture = await SyncFixture.CreateAsync(throwGoneOnFirstList: true);
+        await fixture.Repository.SaveSyncTokenAsync(GoogleCalendarDefaults.PrimaryCalendarId, "expired-pull-token");
+
+        await fixture.Service.PullAsync(fixture.Settings);
+
+        Assert.Equal(2, fixture.Client.Requests.Count);
+        Assert.Equal("expired-pull-token", fixture.Client.Requests[0].SyncToken);
+        Assert.Null(fixture.Client.Requests[0].TimeMin);
+        AssertFullParentRequestWithoutTimeMin(fixture.Client.Requests[1]);
+    }
+
+    private static void AssertFullParentRequestWithoutTimeMin(GoogleEventListRequest request)
+    {
+        Assert.Null(request.SyncToken);
+        Assert.Null(request.TimeMin);
+        Assert.False(request.SingleEvents);
+        Assert.True(request.ShowDeleted);
     }
 
     private sealed class SyncFixture : IAsyncDisposable
