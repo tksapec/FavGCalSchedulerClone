@@ -56,4 +56,26 @@ public sealed class StartupShutdownRegressionTests
             source,
             StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task TrayExit_DoesNotDisposeApplicationServicesWhileDatabaseMaintenanceIsRunning()
+    {
+        var source = await File.ReadAllTextAsync(Path.Combine(
+            Root,
+            "FavGCalSchedulerClone.App",
+            "App.xaml.cs"));
+        var methodStart = source.IndexOf("private void ExitFromTray()", StringComparison.Ordinal);
+        var nextMethod = source.IndexOf("private void UpdateTrayDateIcon()", methodStart, StringComparison.Ordinal);
+        Assert.True(methodStart >= 0 && nextMethod > methodStart);
+        var method = source[methodStart..nextMethod];
+
+        var maintenanceCheck = method.IndexOf("IsDatabaseMaintenanceInProgress", StringComparison.Ordinal);
+        var exitingLatch = method.IndexOf("_isExiting = true;", StringComparison.Ordinal);
+        var shutdown = method.IndexOf("Shutdown();", StringComparison.Ordinal);
+
+        Assert.True(maintenanceCheck >= 0 && maintenanceCheck < exitingLatch,
+            "Tray exit must refuse shutdown before latching _isExiting while restore/database maintenance is still active.");
+        Assert.True(shutdown > exitingLatch,
+            "Shutdown must only be reached after the maintenance guard has allowed exit.");
+    }
 }
