@@ -37,6 +37,8 @@ public sealed partial class MainViewModel
         var displayMonthPersistenceGateEntered = false;
         var settingsPersistenceGateEntered = false;
         var databaseReplaced = false;
+        Exception? restoreFailure = null;
+        Exception? reminderResumeFailure = null;
         try
         {
             if (Volatile.Read(ref _syncInProgress) != 0)
@@ -100,6 +102,11 @@ public sealed partial class MainViewModel
             Status = "バックアップからリストアしました。Google認証は必要に応じて再実行してください。";
             return result;
         }
+        catch (Exception ex)
+        {
+            restoreFailure = ex;
+            throw;
+        }
         finally
         {
             try
@@ -111,7 +118,15 @@ public sealed partial class MainViewModel
 
                 if (reminderResumeRequired)
                 {
-                    await _reminderService!.ResumeAfterMaintenanceAsync(reminderWasRunning);
+                    try
+                    {
+                        await _reminderService!.ResumeAfterMaintenanceAsync(reminderWasRunning);
+                    }
+                    catch (Exception ex)
+                    {
+                        reminderResumeFailure = ex;
+                        _logger?.LogError(ex, "Failed to resume reminder monitoring after database restore maintenance.");
+                    }
                 }
             }
             finally
@@ -134,6 +149,13 @@ public sealed partial class MainViewModel
                     _syncDataOperationGate.Release();
                 }
                 EndDatabaseMaintenanceState();
+            }
+
+            if (reminderResumeFailure is not null && restoreFailure is null && databaseReplaced)
+            {
+                const string message = "バックアップDBの復元は完了しましたが、通知監視の再開に失敗しました。アプリを再起動してください。";
+                Status = message;
+                throw new InvalidOperationException(message, reminderResumeFailure);
             }
         }
     }
