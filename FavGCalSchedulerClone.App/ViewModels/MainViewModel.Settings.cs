@@ -18,16 +18,11 @@ public sealed partial class MainViewModel
         bool defaultNewEventIsAllDay)
     {
         _ = closeButtonExitsApplication;
-        SettingsPersistenceRequest snapshot;
-        lock (_settingsStateLock)
-        {
-            _settings.StartupTabIndex = AppSettingsNormalizer.NormalizeTabIndex(startupTabIndex);
-            _settings.ConfirmBeforeDelete = confirmBeforeDelete;
-            _settings.DefaultNewEventIsAllDay = defaultNewEventIsAllDay;
-            snapshot = CreateSettingsPersistenceRequestUnsafe();
-        }
-
-        await SaveApplicationSettingsAsync(snapshot.Settings);
+        var settings = CreateSettingsSnapshot();
+        settings.StartupTabIndex = AppSettingsNormalizer.NormalizeTabIndex(startupTabIndex);
+        settings.ConfirmBeforeDelete = confirmBeforeDelete;
+        settings.DefaultNewEventIsAllDay = defaultNewEventIsAllDay;
+        await SaveApplicationSettingsAsync(settings);
     }
 
     public AppSettings CreateSettingsSnapshot()
@@ -41,24 +36,56 @@ public sealed partial class MainViewModel
     public async Task SaveApplicationSettingsAsync(AppSettings settings)
     {
         SettingsPersistenceRequest snapshot;
+        AppSettings previousSettings;
+        var previousSelectedTabIndex = SelectedTabIndex;
+        var previousSelectedTodoTabIndex = SelectedTodoTabIndex;
+        var previousViewMode = CurrentViewMode;
+        string savedOAuthClientJsonPath;
         lock (_settingsStateLock)
         {
+            previousSettings = CreateSettingsPersistenceSnapshotUnsafe();
             var displayMonth = _settings.DisplayMonth;
             // The settings dialog retains its own mutable instance. Clone it before
             // normalization so later dialog edits cannot mutate the ViewModel state.
             _settings = AppSettingsNormalizer.Normalize(DeepCloneSettings(settings));
             _settings.DisplayMonth = displayMonth;
             snapshot = CreateSettingsPersistenceRequestUnsafe();
+            savedOAuthClientJsonPath = _settings.OAuthClientJsonPath ?? "";
         }
         SelectedTabIndex = _settings.StartupTabIndex;
         SelectedTodoTabIndex = _settings.StartupTodoTabIndex;
         CurrentViewMode = _settings.StartupCalendarViewMode;
-        await PersistSettingsAsync(snapshot);
+        try
+        {
+            await PersistSettingsAsync(snapshot);
+        }
+        catch
+        {
+            var restored = false;
+            lock (_settingsStateLock)
+            {
+                if (_settingsRevision == snapshot.Revision)
+                {
+                    _settings = previousSettings;
+                    restored = true;
+                }
+            }
+
+            if (restored)
+            {
+                SelectedTabIndex = previousSelectedTabIndex;
+                SelectedTodoTabIndex = previousSelectedTodoTabIndex;
+                CurrentViewMode = previousViewMode;
+            }
+
+            throw;
+        }
 
         foreach (var propertyName in new[]
         {
-            nameof(StartupTabIndex), nameof(StartupCalendarViewMode), nameof(ConfirmBeforeDelete),
-            nameof(DefaultNewEventIsAllDay), nameof(HideMainWindowWhileEditingSchedule), nameof(ReuseLastScheduleInput),
+            nameof(StartupTabIndex), nameof(StartupCalendarViewMode), nameof(ReturnToTodayWhenDeactivated),
+            nameof(ConfirmBeforeDelete), nameof(DefaultNewEventIsAllDay),
+            nameof(HideMainWindowWhileEditingSchedule), nameof(ReuseLastScheduleInput),
             nameof(DefaultScheduleReminderMinutes), nameof(CalendarLabelFontSize),
             nameof(SideListFontSize), nameof(WindowOpacity), nameof(WeekdayHeaders),
             nameof(EnableReminderSound), nameof(ReminderSoundFilePath),
@@ -68,6 +95,7 @@ public sealed partial class MainViewModel
             OnPropertyChanged(propertyName);
         }
 
+        OAuthClientJsonPath = savedOAuthClientJsonPath;
         await RefreshCalendarAsync();
         Status = "アプリ設定を保存しました。";
     }
@@ -95,14 +123,50 @@ public sealed partial class MainViewModel
 
     private async Task SetOAuthClientJsonPathCoreAsync(string path)
     {
-        OAuthClientJsonPath = path;
-        SettingsPersistenceRequest snapshot;
+        var normalizedPath = string.IsNullOrWhiteSpace(path) ? null : path.Trim();
+        var previousPublicPath = OAuthClientJsonPath;
+        string? previousStoredPath;
+        SettingsPersistenceRequest? snapshot = null;
         lock (_settingsStateLock)
         {
-            _settings.OAuthClientJsonPath = string.IsNullOrWhiteSpace(path) ? null : path.Trim();
-            snapshot = CreateSettingsPersistenceRequestUnsafe();
+            previousStoredPath = _settings.OAuthClientJsonPath;
+            if (!string.Equals(previousStoredPath, normalizedPath, StringComparison.Ordinal))
+            {
+                _settings.OAuthClientJsonPath = normalizedPath;
+                snapshot = CreateSettingsPersistenceRequestUnsafe();
+            }
         }
-        await PersistSettingsAsync(snapshot);
+
+        OAuthClientJsonPath = normalizedPath ?? "";
+        if (snapshot is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await PersistSettingsAsync(snapshot);
+        }
+        catch
+        {
+            var restored = false;
+            lock (_settingsStateLock)
+            {
+                if (_settingsRevision == snapshot.Revision)
+                {
+                    _settings.OAuthClientJsonPath = previousStoredPath;
+                    restored = true;
+                }
+            }
+
+            if (restored)
+            {
+                OAuthClientJsonPath = previousPublicPath;
+            }
+
+            throw;
+        }
+
         await ReloadAvailableCalendarsCoreAsync();
     }
 
@@ -198,14 +262,32 @@ public sealed partial class MainViewModel
     private async Task SaveOAuthPathAsync()
     {
         SettingsPersistenceRequest snapshot;
+        AppSettings previousSettings;
         lock (_settingsStateLock)
         {
+            previousSettings = CreateSettingsPersistenceSnapshotUnsafe();
             _settings.OAuthClientJsonPath = string.IsNullOrWhiteSpace(OAuthClientJsonPath) ? null : OAuthClientJsonPath.Trim();
             _settings.VisibleCalendarIds = AvailableCalendars.Where(item => item.IsSelected).Select(item => item.Id).ToList();
             _settings.ActiveCalendarId = ResolveEditorCalendarId();
             snapshot = CreateSettingsPersistenceRequestUnsafe();
         }
-        await PersistSettingsAsync(snapshot);
+
+        try
+        {
+            await PersistSettingsAsync(snapshot);
+        }
+        catch
+        {
+            lock (_settingsStateLock)
+            {
+                if (_settingsRevision == snapshot.Revision)
+                {
+                    _settings = previousSettings;
+                }
+            }
+
+            throw;
+        }
     }
 
     private async Task<AppSettings> LoadSettingsSafelyAsync()
