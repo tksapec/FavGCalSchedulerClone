@@ -46,7 +46,10 @@ public sealed partial class MainViewModel
         }
     }
 
-    public async Task ReloadAvailableCalendarsAsync()
+    public Task ReloadAvailableCalendarsAsync() =>
+        RunExclusiveSyncDataOperationAsync(ReloadAvailableCalendarsCoreAsync);
+
+    private async Task ReloadAvailableCalendarsCoreAsync()
     {
         var calendars = await LoadAvailableCalendarsCoreAsync();
 
