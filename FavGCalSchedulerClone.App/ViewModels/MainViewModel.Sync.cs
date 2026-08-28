@@ -346,11 +346,21 @@ public sealed partial class MainViewModel
         }
     }
 
+    private void EnsureSyncDataOperationAllowed()
+    {
+        if (Volatile.Read(ref _databaseMaintenanceInProgress) != 0)
+        {
+            throw new InvalidOperationException("データベースのリストア中は同期データ操作を開始できません。");
+        }
+    }
+
     private async Task RunExclusiveSyncDataOperationAsync(Func<Task> operation)
     {
+        EnsureSyncDataOperationAllowed();
         await _syncDataOperationGate.WaitAsync();
         try
         {
+            EnsureSyncDataOperationAllowed();
             await operation();
         }
         finally
@@ -361,9 +371,11 @@ public sealed partial class MainViewModel
 
     private async Task<T> RunExclusiveSyncDataOperationAsync<T>(Func<Task<T>> operation)
     {
+        EnsureSyncDataOperationAllowed();
         await _syncDataOperationGate.WaitAsync();
         try
         {
+            EnsureSyncDataOperationAllowed();
             return await operation();
         }
         finally
