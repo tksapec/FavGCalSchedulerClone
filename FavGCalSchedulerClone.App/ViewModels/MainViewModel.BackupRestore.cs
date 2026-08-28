@@ -30,8 +30,19 @@ public sealed partial class MainViewModel
         var reminderWasRunning = false;
         var reminderPaused = false;
         var repositoryMaintenanceStarted = false;
+        var syncDataGateEntered = false;
         try
         {
+            if (Volatile.Read(ref _syncInProgress) != 0)
+            {
+                throw new InvalidOperationException("Google同期中はバックアップをリストアできません。同期完了後に再実行してください。");
+            }
+
+            // Diagnostic resync/discard operations do not use _syncInProgress, but they
+            // mutate the same sync/event data. Wait for them before replacing the DB.
+            await _syncDataOperationGate.WaitAsync();
+            syncDataGateEntered = true;
+
             if (Volatile.Read(ref _syncInProgress) != 0)
             {
                 throw new InvalidOperationException("Google同期中はバックアップをリストアできません。同期完了後に再実行してください。");
@@ -75,6 +86,10 @@ public sealed partial class MainViewModel
             finally
             {
                 Interlocked.Exchange(ref _databaseMaintenanceInProgress, 0);
+                if (syncDataGateEntered)
+                {
+                    _syncDataOperationGate.Release();
+                }
             }
         }
     }
