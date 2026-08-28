@@ -119,6 +119,17 @@ public sealed class BranchIntegrationRegressionTests
     }
 
     [Fact]
+    public async Task ManualSyncPreviewFlow_SuppressesAutomaticSyncUntilDecisionCompletes()
+    {
+        var source = await ReadAppSourceAsync("ViewModels", "MainViewModel.Sync.cs");
+
+        Assert.Contains("private int _manualSyncFlowInProgress;", source, StringComparison.Ordinal);
+        Assert.Contains("Interlocked.Exchange(ref _manualSyncFlowInProgress, 1)", source, StringComparison.Ordinal);
+        Assert.Contains("Interlocked.Exchange(ref _manualSyncFlowInProgress, 0)", source, StringComparison.Ordinal);
+        Assert.Contains("Volatile.Read(ref _manualSyncFlowInProgress) != 0", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ExplicitAddScheduleEntryPoints_AlwaysForceTheNewSchedulePath()
     {
         var mainWindow = await ReadAppSourceAsync("MainWindow.xaml.cs");
