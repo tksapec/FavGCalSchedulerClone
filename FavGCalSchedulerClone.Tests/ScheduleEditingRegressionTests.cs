@@ -95,6 +95,24 @@ public sealed class ScheduleEditingRegressionTests
     }
 
     [Fact]
+    public async Task ScheduleEditor_NewWindowKeepsSelectedEventNullWhileOpen()
+    {
+        var source = await ReadReliabilitySourceAsync();
+        var attach = ExtractMethod(
+            source,
+            "private void TryAttachScheduleEditorWindow",
+            "private void ScheduleEditorWindow_Closed");
+        var restore = ExtractMethod(
+            source,
+            "private void RestoreScheduleEditingIdentity",
+            "private Window? FindScheduleEditorWindow");
+
+        Assert.Contains("_scheduleEditorIsNew = string.Equals(window.Title, \"スケジュールの追加\", StringComparison.Ordinal);", attach, StringComparison.Ordinal);
+        Assert.Contains("if (_scheduleEditorIsNew)", restore, StringComparison.Ordinal);
+        Assert.Contains("_viewModel.SelectedEvent = null;", restore, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ScheduleEditor_CalendarSelectionIsPreparedBeforeModalAttachment()
     {
         var reliabilitySource = await ReadReliabilitySourceAsync();
