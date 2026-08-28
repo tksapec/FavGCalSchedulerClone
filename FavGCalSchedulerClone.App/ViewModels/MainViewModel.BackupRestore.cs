@@ -79,18 +79,22 @@ public sealed partial class MainViewModel
             repositoryMaintenanceStarted = true;
             var result = await _backupService.RestoreBackupAsync(backupZipPath, _repository.DatabasePath);
             databaseReplaced = true;
-            ResetTransientStateAfterDatabaseRestore();
 
-            // Keep normal repository callers blocked until every view-model collection,
-            // cache and setting has been reloaded from the restored database. This flow
-            // already owns _syncDataOperationGate, so the calendar-list reload must call
-            // its core implementation rather than re-entering the public gated wrapper.
+            // Once RestoreBackupAsync returns, the live database has already been replaced.
+            // Any failure while resetting transient state or rebuilding the ViewModel must
+            // therefore be reported as "DB restored, restart required" rather than as a
+            // generic restore failure. Keep normal repository callers blocked until this
+            // whole post-replacement reconstruction succeeds.
             try
             {
+                ResetTransientStateAfterDatabaseRestore();
                 await _repository.RunWithMaintenanceAccessAsync(ReloadRestoredViewModelStateAsync);
             }
             catch (Exception ex)
             {
+                // Clear the reminder service's maintenance pause in finally, but do not
+                // restart monitoring against a partially rebuilt in-memory state.
+                reminderWasRunning = false;
                 MarkDatabaseRestartRequired();
                 const string message = "バックアップDBの復元は完了しましたが、画面状態の再読み込みに失敗しました。アプリを再起動してください。";
                 Status = message;
