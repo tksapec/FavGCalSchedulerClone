@@ -244,7 +244,10 @@ public sealed partial class MainViewModel
 
         if (Interlocked.Exchange(ref _syncInProgress, 1) != 0)
         {
-            RequestSyncRerun(invocationKind);
+            if (invocationKind != SyncInvocationKind.Automatic)
+            {
+                RequestSyncRerun(invocationKind);
+            }
             return null;
         }
 
