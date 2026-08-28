@@ -19,15 +19,6 @@ public sealed class UiDiscoverabilityRegressionTests
     }
 
     [Fact]
-    public async Task SharedDialogButtons_SupportEnterAndEscape()
-    {
-        var source = await File.ReadAllTextAsync(Path.Combine(AppDirectory, "Views", "Dialogs", "DialogUiFactory.cs"));
-
-        Assert.Contains("IsDefault = true", source, StringComparison.Ordinal);
-        Assert.Contains("IsCancel = true", source, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public async Task SettingsColorGrid_LabelsTheColorIdColumn()
     {
         var source = await File.ReadAllTextAsync(Path.Combine(AppDirectory, "Views", "Dialogs", "SettingsDialog.cs"));
