@@ -30,15 +30,32 @@ public sealed partial class MainViewModel
             return false;
         }
 
-        OnPropertyChanged(nameof(IsDatabaseMaintenanceInProgress));
-        return true;
+        try
+        {
+            OnPropertyChanged(nameof(IsDatabaseMaintenanceInProgress));
+            return true;
+        }
+        catch
+        {
+            Interlocked.Exchange(ref _databaseMaintenanceInProgress, 0);
+            throw;
+        }
     }
 
     private void EndDatabaseMaintenanceState()
     {
-        if (Interlocked.Exchange(ref _databaseMaintenanceInProgress, 0) != 0)
+        if (Interlocked.Exchange(ref _databaseMaintenanceInProgress, 0) == 0)
+        {
+            return;
+        }
+
+        try
         {
             OnPropertyChanged(nameof(IsDatabaseMaintenanceInProgress));
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Database maintenance completion notification failed.");
         }
     }
 }
