@@ -61,7 +61,7 @@ public partial class App : System.Windows.Application
     {
         _isExiting = true;
         _deactivationCancellation?.Cancel();
-        if (_serviceProvider is not null)
+        if (_serviceProvider is not null && _startupInitializationCompleted)
         {
             try
             {
