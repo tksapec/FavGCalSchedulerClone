@@ -26,11 +26,13 @@ internal static class SettingsDialog
 
         static StackPanel Page() => new() { Margin = new Thickness(14) };
         static TabItem Tab(string header, Panel content) => new() { Header = header, Content = new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } };
-        static ComboBox Options(IEnumerable<object> items, object? selected) => new() { ItemsSource = items, SelectedItem = selected, MinWidth = 200, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 10) };
+        static ComboBox Options<T>(IEnumerable<T> items, T selected) => new() { ItemsSource = items, SelectedItem = selected, MinWidth = 200, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 10) };
 
         var appPage = Page();
-        var startupView = Options(Enum.GetValues<CalendarViewMode>().Cast<object>(), settings.StartupCalendarViewMode);
-        var startupTodo = Options(new object[] { "未処理ToDo", "処理済みToDo" }, settings.StartupTodoTabIndex == 0 ? "未処理ToDo" : "処理済みToDo");
+        var startupView = Options(
+            SettingsDisplayOptions.CalendarViewModes,
+            SettingsDisplayOptions.Select(SettingsDisplayOptions.CalendarViewModes, settings.StartupCalendarViewMode));
+        var startupTodo = Options(new[] { "未処理ToDo", "処理済みToDo" }, settings.StartupTodoTabIndex == 0 ? "未処理ToDo" : "処理済みToDo");
         var returnToTodayWhenDeactivated = new CheckBox { Content = "アプリが非アクティブになったときに今日へ戻る", IsChecked = settings.ReturnToTodayWhenDeactivated, Margin = new Thickness(0, 6, 0, 6) };
         var confirmDelete = new CheckBox { Content = "スケジュールを削除する際に確認ポップアップを表示する", IsChecked = settings.ConfirmBeforeDelete, Margin = new Thickness(0, 6, 0, 6) };
         var hideEditor = new CheckBox { Content = "スケジュール編集時にメインウィンドウを非表示にする", IsChecked = settings.HideMainWindowWhileEditingSchedule, Margin = new Thickness(0, 6, 0, 6) };
@@ -70,9 +72,15 @@ internal static class SettingsDialog
         tabs.Items.Add(Tab("アプリ設定", appPage));
 
         var displayPage = Page();
-        var calendarFont = Options(new object[] { 1, 2, 3 }, settings.CalendarLabelFontSizeIndex);
-        var sideFont = Options(new object[] { 1, 2, 3 }, settings.SideListFontSizeIndex);
-        var weekdayType = Options(Enum.GetValues<WeekdayDisplayType>().Cast<object>(), settings.WeekdayDisplayType);
+        var calendarFont = Options(
+            SettingsDisplayOptions.FontSizes,
+            SettingsDisplayOptions.Select(SettingsDisplayOptions.FontSizes, settings.CalendarLabelFontSizeIndex));
+        var sideFont = Options(
+            SettingsDisplayOptions.FontSizes,
+            SettingsDisplayOptions.Select(SettingsDisplayOptions.FontSizes, settings.SideListFontSizeIndex));
+        var weekdayType = Options(
+            SettingsDisplayOptions.WeekdayDisplayTypes,
+            SettingsDisplayOptions.Select(SettingsDisplayOptions.WeekdayDisplayTypes, settings.WeekdayDisplayType));
         var mondayStart = new CheckBox { Content = "カレンダーを月曜始まりにする", IsChecked = settings.WeekStartsOnMonday, Margin = new Thickness(0, 8, 0, 14) };
         var opacity = new Slider { Minimum = 64, Maximum = 255, Value = settings.WindowOpacity, TickFrequency = 1, IsSnapToTickEnabled = true };
         var opacityLabel = new TextBlock { Text = $"透明度 ({settings.WindowOpacity})" };
@@ -147,12 +155,15 @@ internal static class SettingsDialog
         tabs.Items.Add(Tab("予定色", colorPage));
 
         var todoPage = Page();
-        var periods = new object[] { 0, 1, 3, 6, 12 };
-        var incompletePeriod = Options(periods, settings.IncompleteTodoDisplayPeriodMonths);
-        var completedPeriod = Options(periods, settings.CompletedTodoDisplayPeriodMonths);
-        todoPage.Children.Add(new TextBlock { Text = "ToDo（未処理）の表示期間（月数、0 = 全て）" });
+        var incompletePeriod = Options(
+            SettingsDisplayOptions.TodoPeriods,
+            SettingsDisplayOptions.Select(SettingsDisplayOptions.TodoPeriods, settings.IncompleteTodoDisplayPeriodMonths));
+        var completedPeriod = Options(
+            SettingsDisplayOptions.TodoPeriods,
+            SettingsDisplayOptions.Select(SettingsDisplayOptions.TodoPeriods, settings.CompletedTodoDisplayPeriodMonths));
+        todoPage.Children.Add(new TextBlock { Text = "ToDo（未処理）の表示期間" });
         todoPage.Children.Add(incompletePeriod);
-        todoPage.Children.Add(new TextBlock { Text = "ToDo（処理済み）の表示期間（月数、0 = 全て）" });
+        todoPage.Children.Add(new TextBlock { Text = "ToDo（処理済み）の表示期間" });
         todoPage.Children.Add(completedPeriod);
         tabs.Items.Add(Tab("ToDo設定", todoPage));
 
@@ -263,9 +274,11 @@ internal static class SettingsDialog
         var syncPage = Page();
         var syncPreview = new CheckBox { Content = "手動同期前にプレビューを表示する", IsChecked = settings.ShowSyncPreviewBeforeManualSync, Margin = new Thickness(0, 8, 0, 8) };
         var syncDiagnostics = new CheckBox { Content = "同期診断ログを保存する", IsChecked = settings.EnableSyncDiagnostics, Margin = new Thickness(0, 0, 0, 12) };
-        var conflictPolicy = Options(Enum.GetValues<SyncConflictPolicy>().Cast<object>(), settings.SyncConflictPolicy);
+        var conflictPolicy = Options(
+            SettingsDisplayOptions.ConflictPolicies,
+            SettingsDisplayOptions.Select(SettingsDisplayOptions.ConflictPolicies, settings.SyncConflictPolicy));
         var syncAfterChange = new CheckBox { Content = "スケジュールの追加／編集／削除時にGoogleカレンダーと同期を行う", IsChecked = settings.SyncAfterLocalChange, Margin = new Thickness(0, 8, 0, 18) };
-        var syncInterval = Options(new object[] { "自動同期しない", "30分", "1時間", "2時間", "6時間" }, settings.AutomaticSyncIntervalMinutes switch { 30 => "30分", 60 => "1時間", 120 => "2時間", 360 => "6時間", _ => "自動同期しない" });
+        var syncInterval = Options(new[] { "自動同期しない", "30分", "1時間", "2時間", "6時間" }, settings.AutomaticSyncIntervalMinutes switch { 30 => "30分", 60 => "1時間", 120 => "2時間", 360 => "6時間", _ => "自動同期しない" });
         syncPage.Children.Add(syncAfterChange);
         syncPage.Children.Add(syncPreview);
         syncPage.Children.Add(syncDiagnostics);
@@ -287,20 +300,20 @@ internal static class SettingsDialog
         }
 
         request.StopPreviewSound();
-        settings.StartupCalendarViewMode = startupView.SelectedItem is CalendarViewMode mode ? mode : CalendarViewMode.Month;
+        settings.StartupCalendarViewMode = startupView.SelectedItem is SettingsDisplayOption<CalendarViewMode> mode ? mode.Value : CalendarViewMode.Month;
         settings.StartupTodoTabIndex = startupTodo.SelectedIndex;
         settings.ReturnToTodayWhenDeactivated = returnToTodayWhenDeactivated.IsChecked == true;
         settings.ConfirmBeforeDelete = confirmDelete.IsChecked == true;
         settings.HideMainWindowWhileEditingSchedule = hideEditor.IsChecked == true;
         settings.ReuseLastScheduleInput = noReuse.IsChecked != true;
         settings.DefaultScheduleReminderMinutes = defaultReminder.SelectedValue as int?;
-        settings.CalendarLabelFontSizeIndex = calendarFont.SelectedItem is int cf ? cf : 2;
-        settings.SideListFontSizeIndex = sideFont.SelectedItem is int sf ? sf : 2;
-        settings.WeekdayDisplayType = weekdayType.SelectedItem is WeekdayDisplayType weekday ? weekday : WeekdayDisplayType.EnglishShort;
+        settings.CalendarLabelFontSizeIndex = calendarFont.SelectedItem is SettingsDisplayOption<int> cf ? cf.Value : 2;
+        settings.SideListFontSizeIndex = sideFont.SelectedItem is SettingsDisplayOption<int> sf ? sf.Value : 2;
+        settings.WeekdayDisplayType = weekdayType.SelectedItem is SettingsDisplayOption<WeekdayDisplayType> weekday ? weekday.Value : WeekdayDisplayType.EnglishShort;
         settings.WeekStartsOnMonday = mondayStart.IsChecked == true;
         settings.WindowOpacity = (int)opacity.Value;
-        settings.IncompleteTodoDisplayPeriodMonths = incompletePeriod.SelectedItem is int incomplete ? incomplete : 0;
-        settings.CompletedTodoDisplayPeriodMonths = completedPeriod.SelectedItem is int completed ? completed : 0;
+        settings.IncompleteTodoDisplayPeriodMonths = incompletePeriod.SelectedItem is SettingsDisplayOption<int> incomplete ? incomplete.Value : 0;
+        settings.CompletedTodoDisplayPeriodMonths = completedPeriod.SelectedItem is SettingsDisplayOption<int> completed ? completed.Value : 0;
         settings.EnableReminderSound = soundEnabled.IsChecked == true;
         settings.ReminderSoundFilePath = string.IsNullOrWhiteSpace(soundPath.Text) ? null : soundPath.Text.Trim();
         settings.ReminderSoundVolume = (int)volume.Value;
@@ -308,7 +321,7 @@ internal static class SettingsDialog
         settings.SyncAfterLocalChange = syncAfterChange.IsChecked == true;
         settings.ShowSyncPreviewBeforeManualSync = syncPreview.IsChecked == true;
         settings.EnableSyncDiagnostics = syncDiagnostics.IsChecked == true;
-        settings.SyncConflictPolicy = conflictPolicy.SelectedItem is SyncConflictPolicy policy ? policy : SyncConflictPolicy.SkipLocalDirty;
+        settings.SyncConflictPolicy = conflictPolicy.SelectedItem is SettingsDisplayOption<SyncConflictPolicy> policy ? policy.Value : SyncConflictPolicy.SkipLocalDirty;
         settings.AutomaticSyncIntervalMinutes = syncInterval.SelectedIndex switch { 1 => 30, 2 => 60, 3 => 120, 4 => 360, _ => null };
         settings.EventColorSettings = colorControls
             .Select(item => new EventColorSetting
