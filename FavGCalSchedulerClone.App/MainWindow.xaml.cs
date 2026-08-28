@@ -57,7 +57,7 @@ public partial class MainWindow : Window
         _viewModel.SetManualSyncPreviewConfirmation(preview => Task.FromResult(
             RunAsOwnedModal(() => SyncDialogs.ShowPreview(this, preview) == true)));
         _viewModel.SetWindowCommandHandlers(
-            () => RunAsOwnedModalAsync(ShowScheduleDialogAsync),
+            () => RunAsOwnedModalAsync(() => ShowScheduleDialogAsync(forceNew: true)),
             () => RunAsOwnedModalAsync(ShowTodoDialogAsync),
             () => RunAsOwnedModalAsync(BackupAllCalendarsAsync),
             () => RunAsOwnedModalAsync(RestoreAllCalendarsAsync),
@@ -687,7 +687,7 @@ public partial class MainWindow : Window
         var menu = new ContextMenu { PlacementTarget = placementTarget };
 
         var addSchedule = new MenuItem { Header = "スケジュールの追加" };
-        addSchedule.Click += async (_, _) => await RunUiActionAsync(ShowScheduleDialogAsync, "ContextMenu.AddSchedule");
+        addSchedule.Click += async (_, _) => await RunUiActionAsync(() => ShowScheduleDialogAsync(forceNew: true), "ContextMenu.AddSchedule");
         menu.Items.Add(addSchedule);
 
         var addTodo = new MenuItem { Header = "ToDoの追加" };
@@ -781,7 +781,7 @@ public partial class MainWindow : Window
 
     private async void AddScheduleMenu_Click(object sender, RoutedEventArgs e)
     {
-        await RunUiActionAsync(ShowScheduleDialogAsync, nameof(AddScheduleMenu_Click));
+        await RunUiActionAsync(() => ShowScheduleDialogAsync(forceNew: true), nameof(AddScheduleMenu_Click));
     }
 
     private async void AddTodoMenu_Click(object sender, RoutedEventArgs e)
@@ -1173,10 +1173,10 @@ public partial class MainWindow : Window
         Close();
     }
 
-    private async Task ShowScheduleDialogAsync()
+    private async Task ShowScheduleDialogAsync(bool forceNew = false)
     {
         var date = _viewModel.SelectedDay?.Date ?? DateTime.Today;
-        var editingEvent = _viewModel.SelectedEvent;
+        var editingEvent = forceNew ? null : _viewModel.SelectedEvent;
         if (editingEvent is null)
         {
             _viewModel.BeginNewEvent(date);
