@@ -38,15 +38,43 @@ internal interface IConditionalGoogleCalendarClient : IGoogleCalendarClient
         string? ifMatchETag);
 }
 
-public sealed record GoogleEventListRequest(
-    string CalendarId,
-    string? SyncToken,
-    string? PageToken,
-    DateTimeOffset? TimeMin,
-    bool ShowDeleted,
-    bool SingleEvents,
-    int MaxResults,
-    DateTimeOffset? TimeMax = null);
+public sealed record GoogleEventListRequest
+{
+    public GoogleEventListRequest(
+        string CalendarId,
+        string? SyncToken,
+        string? PageToken,
+        DateTimeOffset? TimeMin,
+        bool ShowDeleted,
+        bool SingleEvents,
+        int MaxResults,
+        DateTimeOffset? TimeMax = null)
+    {
+        this.CalendarId = CalendarId;
+        this.SyncToken = SyncToken;
+        this.PageToken = PageToken;
+        this.ShowDeleted = ShowDeleted;
+        this.SingleEvents = SingleEvents;
+        this.MaxResults = MaxResults;
+        this.TimeMax = TimeMax;
+
+        // Parent-event full synchronization must not use a lower TimeMin bound.
+        // A series can start many years ago and still have current/future instances;
+        // filtering the parent list would make that entire series disappear locally.
+        this.TimeMin = ShowDeleted && !SingleEvents && TimeMax is null
+            ? null
+            : TimeMin;
+    }
+
+    public string CalendarId { get; init; }
+    public string? SyncToken { get; init; }
+    public string? PageToken { get; init; }
+    public DateTimeOffset? TimeMin { get; init; }
+    public bool ShowDeleted { get; init; }
+    public bool SingleEvents { get; init; }
+    public int MaxResults { get; init; }
+    public DateTimeOffset? TimeMax { get; init; }
+}
 
 public sealed record GoogleEventPage(
     IReadOnlyList<Event> Items,
