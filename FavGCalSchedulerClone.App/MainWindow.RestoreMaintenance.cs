@@ -42,7 +42,7 @@ public partial class MainWindow
 
         if (!Dispatcher.CheckAccess())
         {
-            _ = Dispatcher.BeginInvoke(new Action(ApplyDatabaseMaintenanceInteractionState));
+            Dispatcher.Invoke(ApplyDatabaseMaintenanceInteractionState);
             return;
         }
 
