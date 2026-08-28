@@ -124,11 +124,7 @@ public sealed partial class MainViewModel
         Func<Task> showAboutAsync,
         Func<Task>? showMonthJumpAsync = null)
     {
-        _showAddScheduleAsync = async () =>
-        {
-            SelectedEvent = null;
-            await showAddScheduleAsync();
-        };
+        _showAddScheduleAsync = showAddScheduleAsync;
         _showAddTodoAsync = showAddTodoAsync;
         _backupAllCalendarsAsync = backupAllCalendarsAsync;
         _restoreAllCalendarsAsync = restoreAllCalendarsAsync;
