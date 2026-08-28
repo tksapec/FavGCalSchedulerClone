@@ -90,7 +90,10 @@ public sealed partial class MainViewModel
         _scheduleLocationHistory = [];
     }
 
-    public async Task SetOAuthClientJsonPathAsync(string path)
+    public Task SetOAuthClientJsonPathAsync(string path) =>
+        RunExclusiveSyncDataOperationAsync(() => SetOAuthClientJsonPathCoreAsync(path));
+
+    private async Task SetOAuthClientJsonPathCoreAsync(string path)
     {
         OAuthClientJsonPath = path;
         SettingsPersistenceRequest snapshot;
@@ -100,13 +103,10 @@ public sealed partial class MainViewModel
             snapshot = CreateSettingsPersistenceRequestUnsafe();
         }
         await PersistSettingsAsync(snapshot);
-        await ReloadAvailableCalendarsAsync();
+        await ReloadAvailableCalendarsCoreAsync();
     }
 
-    public async Task AuthorizeGoogleAsync()
-    {
-        await AuthorizeAsync();
-    }
+    public Task AuthorizeGoogleAsync() => AuthorizeAsync();
 
     public void SetWindowCommandHandlers(
         Func<Task> showAddScheduleAsync,
@@ -160,20 +160,15 @@ public sealed partial class MainViewModel
 
         if (dialog.ShowDialog() == true)
         {
-            OAuthClientJsonPath = dialog.FileName;
-            SettingsPersistenceRequest snapshot;
-            lock (_settingsStateLock)
-            {
-                _settings.OAuthClientJsonPath = dialog.FileName;
-                snapshot = CreateSettingsPersistenceRequestUnsafe();
-            }
-            await PersistSettingsAsync(snapshot);
-            await ReloadAvailableCalendarsAsync();
+            await SetOAuthClientJsonPathAsync(dialog.FileName);
             Status = "OAuth client JSONを保存しました。";
         }
     }
 
-    private async Task AuthorizeAsync()
+    private Task AuthorizeAsync() =>
+        RunExclusiveSyncDataOperationAsync(AuthorizeCoreAsync);
+
+    private async Task AuthorizeCoreAsync()
     {
         await SaveOAuthPathAsync();
         var settings = CreateSettingsSnapshot();
@@ -186,12 +181,15 @@ public sealed partial class MainViewModel
         Status = "ブラウザーでGoogle認証を続行してください。";
         await _syncService.AuthorizeAsync(settings.OAuthClientJsonPath);
         _eventColorPalette = await _syncService.RefreshEventColorPaletteAsync();
-        await ReloadAvailableCalendarsAsync();
+        await ReloadAvailableCalendarsCoreAsync();
         await RefreshCalendarAsync();
         Status = "Google認証が完了しました。";
     }
 
-    public async Task ClearTokensAsync()
+    public Task ClearTokensAsync() =>
+        RunExclusiveSyncDataOperationAsync(ClearTokensCoreAsync);
+
+    private async Task ClearTokensCoreAsync()
     {
         await _syncService.ClearTokensAsync();
         Status = "保存済みGoogleトークンを削除しました。";
