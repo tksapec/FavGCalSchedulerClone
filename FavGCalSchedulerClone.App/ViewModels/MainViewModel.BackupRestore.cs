@@ -123,7 +123,10 @@ public sealed partial class MainViewModel
         {
             try
             {
-                if (repositoryMaintenanceStarted)
+                // A partial post-swap reload leaves both the in-memory ViewModel and any
+                // future direct repository caller untrusted. Keep repository maintenance
+                // latched as a second line of defense until the process is restarted.
+                if (repositoryMaintenanceStarted && !IsDatabaseRestartRequired)
                 {
                     _repository.EndMaintenance();
                 }
