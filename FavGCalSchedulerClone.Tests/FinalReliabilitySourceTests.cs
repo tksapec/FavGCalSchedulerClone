@@ -29,7 +29,7 @@ public sealed class FinalReliabilitySourceTests
 
         var leaseIndex = source.IndexOf("BeginMaintenanceAsync", StringComparison.Ordinal);
         var restoreIndex = source.IndexOf("RestoreBackupAsync", StringComparison.Ordinal);
-        var initializeIndex = source.IndexOf("RunWithMaintenanceAccessAsync(InitializeAsync)", restoreIndex, StringComparison.Ordinal);
+        var initializeIndex = source.IndexOf("RunWithMaintenanceAccessAsync(ReloadRestoredViewModelStateAsync)", restoreIndex, StringComparison.Ordinal);
         var endMaintenanceIndex = source.IndexOf("EndMaintenance", restoreIndex, StringComparison.Ordinal);
         Assert.True(leaseIndex >= 0 && restoreIndex > leaseIndex);
         Assert.True(initializeIndex > restoreIndex);
