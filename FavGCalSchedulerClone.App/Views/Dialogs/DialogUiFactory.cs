@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
 using FavGCalSchedulerClone.App.Models;
+using FavGCalSchedulerClone.App.Services;
 using FavGCalSchedulerClone.App.ViewModels;
 
 namespace FavGCalSchedulerClone.App.Views.Dialogs;
@@ -92,7 +93,7 @@ internal sealed class DialogUiFactory
     {
         var combo = new ComboBox
         {
-            ItemsSource = _eventColorOptions,
+            ItemsSource = EnsureSelectedColorOption(_eventColorOptions, selectedColorId),
             SelectedValuePath = nameof(EventColorSelectionItem.Id),
             SelectedValue = selectedColorId,
             MinWidth = X(200)
@@ -117,6 +118,30 @@ internal sealed class DialogUiFactory
         combo.ItemTemplate = template;
         combo.SelectedIndex = string.IsNullOrWhiteSpace(selectedColorId) ? 0 : combo.SelectedIndex;
         return combo;
+    }
+
+    internal static IReadOnlyList<EventColorSelectionItem> EnsureSelectedColorOption(
+        IReadOnlyList<EventColorSelectionItem> options,
+        string? selectedColorId)
+    {
+        if (string.IsNullOrWhiteSpace(selectedColorId)
+            || options.Any(item => string.Equals(item.Id, selectedColorId, StringComparison.Ordinal)))
+        {
+            return options;
+        }
+
+        var colors = TagService.DefaultEventColorPalette.TryGetValue(selectedColorId, out var paletteColors)
+            ? paletteColors
+            : new EventDisplayColors(TagService.DefaultDisplayColor, TagService.DefaultDisplayForegroundColor);
+        return options
+            .Concat([
+                new EventColorSelectionItem(
+                    selectedColorId,
+                    $"色 {selectedColorId}（現在の予定）",
+                    colors.Background,
+                    colors.Foreground)
+            ])
+            .ToArray();
     }
 
     public DatePicker CreateDatePickerWithTodayButton(DateTime selectedDate, out FrameworkElement editor)
@@ -240,9 +265,9 @@ internal sealed class DialogUiFactory
             Margin = new Thickness(0, 8, 0, 0)
         };
 
-        var ok = new Button { Content = okText, MinWidth = 96 };
+        var ok = new Button { Content = okText, MinWidth = 96, IsDefault = true };
         ok.Click += (_, _) => window.DialogResult = true;
-        var cancel = new Button { Content = cancelText, MinWidth = 96 };
+        var cancel = new Button { Content = cancelText, MinWidth = 96, IsCancel = true };
         cancel.Click += (_, _) => window.DialogResult = false;
 
         panel.Children.Add(ok);
