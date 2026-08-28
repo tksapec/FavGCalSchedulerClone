@@ -25,6 +25,22 @@ public sealed class TodoEditorCalendarSelectionRegressionTests
     }
 
     [Fact]
+    public void NewTodo_RegisteredButUnselectedTransientEditorCalendar_UsesSelectedCalendar()
+    {
+        var calendars = new[]
+        {
+            new GoogleCalendarSelectionItem { Id = "calendar-a", Summary = "A", IsSelected = true },
+            new GoogleCalendarSelectionItem { Id = "calendar-b", Summary = "B", IsSelected = false }
+        };
+        var request = CreateRequest(true, "calendar-b", calendars);
+
+        var selection = TodoEditorDialog.ResolveCalendarSelection(request);
+
+        Assert.Equal("calendar-a", selection.CalendarId);
+        Assert.True(Assert.Single(selection.Options, item => item.Id == "calendar-a").IsSelected);
+    }
+
+    [Fact]
     public void ExistingTodo_PrimaryAliasMissingFromList_RemainsSelectableWithoutCalendarMove()
     {
         var calendars = new[]
