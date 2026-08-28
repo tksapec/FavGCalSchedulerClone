@@ -159,4 +159,27 @@ public sealed class RestoreRestartRequiredLatchRegressionTests
 
         Assert.Contains("MainWindow?.IsEnabled == false", method, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task RestoreUi_RestartRequiredWarningDoesNotUseDisabledMainWindowAsMessageBoxOwner()
+    {
+        var source = await File.ReadAllTextAsync(Path.Combine(AppRoot, "MainWindow.xaml.cs"));
+        var methodStart = source.IndexOf("private async Task RestoreAllCalendarsAsync()", StringComparison.Ordinal);
+        var nextMethod = source.IndexOf("private async Task ImportCsvAsync()", methodStart, StringComparison.Ordinal);
+        Assert.True(methodStart >= 0 && nextMethod > methodStart);
+        var method = source[methodStart..nextMethod];
+
+        var catchStart = method.IndexOf("catch (Exception ex)", StringComparison.Ordinal);
+        var restartCheck = method.IndexOf("_viewModel.IsDatabaseRestartRequired", catchStart, StringComparison.Ordinal);
+        var restartTitle = method.IndexOf("リストア後の再起動が必要", catchStart, StringComparison.Ordinal);
+        var ownerlessWarning = method.IndexOf("MessageBox.Show(\n                ex.Message", catchStart, StringComparison.Ordinal);
+        var ownedFailure = method.IndexOf("MessageBox.Show(this, ex.Message, \"リストア失敗\"", catchStart, StringComparison.Ordinal);
+
+        Assert.True(catchStart >= 0 && restartCheck > catchStart,
+            "The restore UI must distinguish a completed DB restore that requires process restart from a true restore failure.");
+        Assert.True(restartTitle > restartCheck && ownerlessWarning > restartCheck,
+            "Restart-required warnings must be shown without the disabled MainWindow as owner.");
+        Assert.True(ownedFailure > restartCheck,
+            "Ordinary pre-replacement restore failures should retain the owned error dialog.");
+    }
 }
