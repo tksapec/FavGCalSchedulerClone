@@ -849,6 +849,16 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            if (_viewModel.IsDatabaseRestartRequired)
+            {
+                MessageBox.Show(
+                    ex.Message,
+                    "リストア後の再起動が必要",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
             MessageBox.Show(this, ex.Message, "リストア失敗", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
