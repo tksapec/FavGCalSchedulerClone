@@ -115,23 +115,39 @@ public sealed class RestoreRestartRequiredLatchRegressionTests
     }
 
     [Fact]
-    public async Task OperationalStatusRefresh_DoesNotReadReminderDiagnosticsDuringRestoreOrRestartRequiredState()
+    public async Task OperationalStatusTimer_IsStoppedForRestoreAndOnlyRestartsAfterNormalMaintenanceCompletion()
     {
-        var source = await File.ReadAllTextAsync(Path.Combine(AppRoot, "MainWindow.xaml.cs"));
-        var methodStart = source.IndexOf("private async Task RefreshOperationalStatusAsync()", StringComparison.Ordinal);
-        var diagnosticsRead = source.IndexOf("_reminderService.LoadDiagnosticsAsync()", methodStart, StringComparison.Ordinal);
-        var maintenanceCheck = source.IndexOf("_viewModel.IsDatabaseMaintenanceInProgress", methodStart, StringComparison.Ordinal);
-        var restartCheck = source.IndexOf("_viewModel.IsDatabaseRestartRequired", methodStart, StringComparison.Ordinal);
+        var source = await File.ReadAllTextAsync(Path.Combine(AppRoot, "MainWindow.RestoreMaintenance.cs"));
+        var applyStart = source.IndexOf("private void ApplyDatabaseMaintenanceInteractionState()", StringComparison.Ordinal);
+        var blockedBranch = source.IndexOf("if (_viewModel.IsDatabaseMaintenanceInProgress || _viewModel.IsDatabaseRestartRequired)", applyStart, StringComparison.Ordinal);
+        var stopTimer = source.IndexOf("_operationalStatusTimer.Stop();", blockedBranch, StringComparison.Ordinal);
+        var blockedReturn = source.IndexOf("return;", blockedBranch, StringComparison.Ordinal);
+        var restartTimer = source.IndexOf("_operationalStatusTimer.Start();", blockedReturn, StringComparison.Ordinal);
 
-        Assert.True(methodStart >= 0 && diagnosticsRead > methodStart);
-        Assert.True(maintenanceCheck > methodStart && maintenanceCheck < diagnosticsRead,
-            "Operational status refresh must skip reminder DB diagnostics while restore maintenance is active.");
-        Assert.True(restartCheck > methodStart && restartCheck < diagnosticsRead,
-            "Operational status refresh must remain disabled after a partial restore until restart.");
+        Assert.True(applyStart >= 0 && blockedBranch > applyStart);
+        Assert.True(stopTimer > blockedBranch && stopTimer < blockedReturn,
+            "Operational status polling must stop before restore/restart-required interaction returns.");
+        Assert.True(restartTimer > blockedReturn,
+            "Operational status polling may restart only after the blocked state has cleared normally.");
     }
 
     [Fact]
-    public async Task AppDeactivation_DoesNotNavigateCalendarDuringRestoreOrRestartRequiredState()
+    public async Task Startup_DisablesMainWindowUntilInitializationFinishes()
+    {
+        var source = await File.ReadAllTextAsync(Path.Combine(AppRoot, "Services", "ApplicationStartupService.cs"));
+        var initializeStart = source.IndexOf("public async Task InitializeAsync", StringComparison.Ordinal);
+        var disableOwner = source.IndexOf("owner.IsEnabled = false;", initializeStart, StringComparison.Ordinal);
+        var initializeViewModel = source.IndexOf("await _viewModel.InitializeAsync();", initializeStart, StringComparison.Ordinal);
+        var restoreOwner = source.IndexOf("owner.IsEnabled = ownerWasEnabled;", initializeViewModel, StringComparison.Ordinal);
+
+        Assert.True(initializeStart >= 0 && disableOwner > initializeStart && disableOwner < initializeViewModel,
+            "The user must not be able to start restore while startup initialization is still using the database.");
+        Assert.True(restoreOwner > initializeViewModel,
+            "The original interaction state must be restored after startup initialization finishes.");
+    }
+
+    [Fact]
+    public async Task AppDeactivation_DoesNotNavigateCalendarWhileMainWindowIsInteractionBlocked()
     {
         var source = await File.ReadAllTextAsync(Path.Combine(AppRoot, "App.xaml.cs"));
         var methodStart = source.IndexOf("private bool ShouldSkipReturnToToday()", StringComparison.Ordinal);
@@ -139,7 +155,6 @@ public sealed class RestoreRestartRequiredLatchRegressionTests
         Assert.True(methodStart >= 0 && nextMethod > methodStart);
         var method = source[methodStart..nextMethod];
 
-        Assert.Contains("viewModel.IsDatabaseMaintenanceInProgress", method, StringComparison.Ordinal);
-        Assert.Contains("viewModel.IsDatabaseRestartRequired", method, StringComparison.Ordinal);
+        Assert.Contains("MainWindow?.IsEnabled == false", method, StringComparison.Ordinal);
     }
 }
