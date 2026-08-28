@@ -31,6 +31,9 @@ public sealed partial class MainViewModel
         var reminderPaused = false;
         var repositoryMaintenanceStarted = false;
         var syncDataGateEntered = false;
+        var displayMonthPersistenceGateEntered = false;
+        var settingsPersistenceGateEntered = false;
+        var databaseReplaced = false;
         try
         {
             if (Volatile.Read(ref _syncInProgress) != 0)
@@ -48,6 +51,15 @@ public sealed partial class MainViewModel
                 throw new InvalidOperationException("Google同期中はバックアップをリストアできません。同期完了後に再実行してください。");
             }
 
+            // A delayed DisplayMonth save captures a full settings snapshot before it
+            // reaches _settingsPersistenceGate. Drain it first, then block all remaining
+            // settings writes so no pre-restore snapshot can be applied to the restored DB.
+            // Keep the same lock order used by PersistDisplayMonthAsync: display -> settings.
+            await _displayMonthPersistenceGate.WaitAsync();
+            displayMonthPersistenceGateEntered = true;
+            await _settingsPersistenceGate.WaitAsync();
+            settingsPersistenceGateEntered = true;
+
             if (_reminderService is not null)
             {
                 reminderWasRunning = await _reminderService.PauseForMaintenanceAsync();
@@ -57,6 +69,7 @@ public sealed partial class MainViewModel
             await _repository.BeginMaintenanceAsync();
             repositoryMaintenanceStarted = true;
             var result = await _backupService.RestoreBackupAsync(backupZipPath, _repository.DatabasePath);
+            databaseReplaced = true;
 
             // Keep normal repository callers blocked until every view-model collection,
             // cache and setting has been reloaded from the restored database. This flow
@@ -86,12 +99,35 @@ public sealed partial class MainViewModel
             }
             finally
             {
+                if (databaseReplaced)
+                {
+                    MarkRestoredSettingsPersistenceBaseline();
+                }
+
                 Interlocked.Exchange(ref _databaseMaintenanceInProgress, 0);
+                if (settingsPersistenceGateEntered)
+                {
+                    _settingsPersistenceGate.Release();
+                }
+                if (displayMonthPersistenceGateEntered)
+                {
+                    _displayMonthPersistenceGate.Release();
+                }
                 if (syncDataGateEntered)
                 {
                     _syncDataOperationGate.Release();
                 }
             }
+        }
+    }
+
+    private void MarkRestoredSettingsPersistenceBaseline()
+    {
+        lock (_settingsStateLock)
+        {
+            // All requests created before the database replacement are now obsolete.
+            // A future post-restore edit increments _settingsRevision and can persist normally.
+            _persistedSettingsRevision = Math.Max(_persistedSettingsRevision, _settingsRevision);
         }
     }
 
