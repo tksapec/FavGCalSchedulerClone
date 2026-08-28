@@ -317,7 +317,7 @@ public sealed partial class MainViewModel
             try
             {
                 _eventColorPalette = await _syncService.RefreshEventColorPaletteAsync();
-                await ReloadAvailableCalendarsAsync();
+                await ReloadAvailableCalendarsCoreAsync();
                 await RefreshCalendarAsync();
             }
             catch (Exception reloadEx)
