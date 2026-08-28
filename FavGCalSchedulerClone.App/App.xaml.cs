@@ -226,6 +226,16 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        if (MainWindow?.DataContext is MainViewModel { IsDatabaseMaintenanceInProgress: true })
+        {
+            MessageBox.Show(
+                "データベースのメンテナンス処理中のため終了できません。処理完了後にもう一度終了してください。",
+                "FavGCalSchedulerClone",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
         _isExiting = true;
         if (MainWindow is MainWindow mainWindow)
         {
