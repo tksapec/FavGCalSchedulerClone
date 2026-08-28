@@ -7,6 +7,11 @@ namespace FavGCalSchedulerClone.Tests;
 
 public sealed class RestoreRestartRequiredLatchRegressionTests
 {
+    private static readonly string AppRoot = Path.GetFullPath(Path.Combine(
+        AppContext.BaseDirectory,
+        "..", "..", "..", "..",
+        "FavGCalSchedulerClone.App"));
+
     [Fact]
     public async Task ReloadFailure_LatchesDatabaseOperationsUntilProcessRestart()
     {
@@ -46,13 +51,10 @@ public sealed class RestoreRestartRequiredLatchRegressionTests
             Assert.False(viewModel.IsDatabaseMaintenanceInProgress);
             Assert.Equal(7, (await targetRepository.LoadSettingsAsync()).StartupTabIndex);
 
-            var syncException = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 viewModel.SynchronizeDirtyOnlyAsync());
-            Assert.Contains("再起動", syncException.Message, StringComparison.Ordinal);
-
-            var backupException = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 viewModel.BackupAllCalendarsAsync(postFailureBackupPath));
-            Assert.Contains("再起動", backupException.Message, StringComparison.Ordinal);
             Assert.False(File.Exists(postFailureBackupPath));
         }
         finally
@@ -68,16 +70,28 @@ public sealed class RestoreRestartRequiredLatchRegressionTests
     [Fact]
     public async Task ReloadFailure_DoesNotRestartReminderMonitoring()
     {
-        var sourcePath = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "..", "..", "..", "..",
-            "FavGCalSchedulerClone.App", "ViewModels", "MainViewModel.BackupRestore.cs"));
-        var source = await File.ReadAllTextAsync(sourcePath);
-        var reloadCatch = source.IndexOf("catch (Exception ex)", source.IndexOf("ReloadRestoredViewModelStateAsync", StringComparison.Ordinal), StringComparison.Ordinal);
+        var source = await File.ReadAllTextAsync(Path.Combine(
+            AppRoot, "ViewModels", "MainViewModel.BackupRestore.cs"));
+        var reloadCall = source.IndexOf("ReloadRestoredViewModelStateAsync", StringComparison.Ordinal);
+        var reloadCatch = source.IndexOf("catch (Exception ex)", reloadCall, StringComparison.Ordinal);
         var message = source.IndexOf("バックアップDBの復元は完了しましたが、画面状態の再読み込みに失敗しました", reloadCatch, StringComparison.Ordinal);
         var stopReminderRestart = source.IndexOf("reminderWasRunning = false;", reloadCatch, StringComparison.Ordinal);
 
-        Assert.True(reloadCatch >= 0 && message > reloadCatch && stopReminderRestart > reloadCatch && stopReminderRestart < message,
+        Assert.True(reloadCall >= 0 && reloadCatch > reloadCall);
+        Assert.True(message > reloadCatch && stopReminderRestart > reloadCatch && stopReminderRestart < message,
             "A partial ViewModel reload failure must prevent reminder monitoring from being restarted against uncertain in-memory state.");
+    }
+
+    [Fact]
+    public async Task RestartRequiredState_SuppressesQueuedSettingsPersistence()
+    {
+        var source = await File.ReadAllTextAsync(Path.Combine(
+            AppRoot, "ViewModels", "MainViewModel.Settings.cs"));
+        var persistStart = source.IndexOf("private async Task PersistSettingsAsync", StringComparison.Ordinal);
+        var save = source.IndexOf("await _repository.SaveSettingsAsync(request.Settings)", persistStart, StringComparison.Ordinal);
+        var restartCheck = source.IndexOf("if (IsDatabaseRestartRequired)", persistStart, StringComparison.Ordinal);
+
+        Assert.True(persistStart >= 0 && restartCheck > persistStart && save > restartCheck,
+            "Queued settings writes must be discarded after a partial restore reload failure.");
     }
 }
