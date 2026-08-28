@@ -105,6 +105,18 @@ public sealed class BranchIntegrationRegressionTests
     }
 
     [Fact]
+    public async Task ScheduleEditor_ResolvesCalendarBeforeTheModalWindowIsShown()
+    {
+        var source = await ReadAppSourceAsync("MainWindow.xaml.cs");
+
+        Assert.Contains("var scheduleCalendarId =", source, StringComparison.Ordinal);
+        Assert.Contains("_viewModel.ResolveScheduleEditorCalendarId(editingEvent)", source, StringComparison.Ordinal);
+        Assert.Contains("_viewModel.CreateScheduleEditorCalendarOptions(editingEvent, scheduleCalendarId)", source, StringComparison.Ordinal);
+        Assert.Contains("scheduleCalendarId,", source, StringComparison.Ordinal);
+        Assert.Contains("scheduleCalendarOptions,", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task SettingsDialog_UsesFriendlyDisplayOptionsInsteadOfRawEnumsAndNumbers()
     {
         var source = await ReadAppSourceAsync("Views", "Dialogs", "SettingsDialog.cs");
