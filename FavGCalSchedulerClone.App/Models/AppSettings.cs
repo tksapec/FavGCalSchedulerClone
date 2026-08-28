@@ -4,6 +4,9 @@ namespace FavGCalSchedulerClone.App.Models;
 
 public sealed class AppSettings
 {
+    private bool _returnToTodayWhenDeactivated = true;
+    private bool _returnToTodayWhenDeactivatedWasSet;
+
     public string? OAuthClientJsonPath { get; set; }
     public string ActiveCalendarId { get; set; } = GoogleCalendarDefaults.PrimaryCalendarId;
     public List<string> VisibleCalendarIds { get; set; } = [];
@@ -11,7 +14,33 @@ public sealed class AppSettings
     public int StartupTabIndex { get; set; }
     public CalendarViewMode StartupCalendarViewMode { get; set; } = CalendarViewMode.Month;
     public int StartupTodoTabIndex { get; set; }
-    public bool ReturnToTodayWhenDeactivated { get; set; } = true;
+    public bool ReturnToTodayWhenDeactivated
+    {
+        get => _returnToTodayWhenDeactivated;
+        set
+        {
+            _returnToTodayWhenDeactivated = value;
+            _returnToTodayWhenDeactivatedWasSet = true;
+        }
+    }
+
+    // Compatibility with the temporary feature branch that used the older JSON name.
+    // Read the legacy name, but never write it back out. If both names are present,
+    // the current property wins regardless of JSON property order.
+    [JsonPropertyName("ReturnToTodayOnDeactivate")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? LegacyReturnToTodayOnDeactivate
+    {
+        get => null;
+        set
+        {
+            if (value is bool legacyValue && !_returnToTodayWhenDeactivatedWasSet)
+            {
+                _returnToTodayWhenDeactivated = legacyValue;
+            }
+        }
+    }
+
     public bool ConfirmBeforeDelete { get; set; } = true;
     // Compatibility-only facade for callers compiled against older versions.
     // Window close always minimizes to the notification area unless explicit exit is requested.
