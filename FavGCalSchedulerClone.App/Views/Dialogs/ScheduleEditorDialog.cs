@@ -134,11 +134,20 @@ internal static class ScheduleEditorDialog
             }
 
             var updatedStartTime = NormalizeTimeText(startTime.Text);
-            if (TryShiftEndTimeForStartChange(previousStartTime, updatedStartTime, endTime.Text, out var shiftedEndTime))
+            if (TryShiftEndTimeForStartChange(
+                    previousStartTime,
+                    updatedStartTime,
+                    endTime.Text,
+                    out var shiftedEndTime,
+                    out var endDateOffset))
             {
                 shiftingEndTime = true;
                 startTime.Text = updatedStartTime;
                 endTime.Text = shiftedEndTime;
+                if (endDateOffset != 0 && endDate.SelectedDate is { } selectedEndDate)
+                {
+                    endDate.SelectedDate = selectedEndDate.Date.AddDays(endDateOffset);
+                }
                 shiftingEndTime = false;
             }
 
@@ -150,10 +159,12 @@ internal static class ScheduleEditorDialog
 
         void ApplyDurationShortcut(TimeSpan duration)
         {
-            if (TryCreateEndTimeFromDuration(startTime.Text, duration, out var endTimeText))
+            if (startDate.SelectedDate is { } selectedStartDate
+                && TryCreateEndTimeFromDuration(startTime.Text, duration, out var endTimeText, out var endDateOffset))
             {
                 startTime.Text = NormalizeTimeText(startTime.Text);
                 endTime.Text = endTimeText;
+                endDate.SelectedDate = selectedStartDate.Date.AddDays(endDateOffset);
                 isAllDay.IsChecked = false;
             }
         }
@@ -611,7 +622,17 @@ internal static class ScheduleEditorDialog
 
     internal static bool TryCreateEndTimeFromDuration(string? startTime, TimeSpan duration, out string endTime)
     {
+        return TryCreateEndTimeFromDuration(startTime, duration, out endTime, out _);
+    }
+
+    internal static bool TryCreateEndTimeFromDuration(
+        string? startTime,
+        TimeSpan duration,
+        out string endTime,
+        out int dayOffset)
+    {
         endTime = startTime ?? "";
+        dayOffset = 0;
         var normalized = NormalizeTimeText(startTime);
         if (!TimeSpan.TryParseExact(
                 normalized,
@@ -627,6 +648,7 @@ internal static class ScheduleEditorDialog
         }
 
         var end = start.Add(duration);
+        dayOffset = end.Days;
         endTime = $"{end.Hours:00}:{end.Minutes:00}";
         return true;
     }
@@ -637,7 +659,23 @@ internal static class ScheduleEditorDialog
         string? currentEndTime,
         out string endTime)
     {
+        return TryShiftEndTimeForStartChange(
+            previousStartTime,
+            updatedStartTime,
+            currentEndTime,
+            out endTime,
+            out _);
+    }
+
+    internal static bool TryShiftEndTimeForStartChange(
+        string? previousStartTime,
+        string? updatedStartTime,
+        string? currentEndTime,
+        out string endTime,
+        out int dayOffset)
+    {
         endTime = currentEndTime ?? "";
+        dayOffset = 0;
         if (!TryParseTimeOfDay(previousStartTime, out var previousStart)
             || !TryParseTimeOfDay(updatedStartTime, out var updatedStart)
             || !TryParseTimeOfDay(currentEndTime, out var currentEnd))
@@ -646,11 +684,9 @@ internal static class ScheduleEditorDialog
         }
 
         var minutesInDay = (int)TimeSpan.FromDays(1).TotalMinutes;
-        var shiftedMinutes = ((int)currentEnd.TotalMinutes + (int)(updatedStart - previousStart).TotalMinutes) % minutesInDay;
-        if (shiftedMinutes < 0)
-        {
-            shiftedMinutes += minutesInDay;
-        }
+        var shiftedTotalMinutes = (int)currentEnd.TotalMinutes + (int)(updatedStart - previousStart).TotalMinutes;
+        dayOffset = (int)Math.Floor(shiftedTotalMinutes / (double)minutesInDay);
+        var shiftedMinutes = shiftedTotalMinutes - dayOffset * minutesInDay;
 
         endTime = $"{shiftedMinutes / 60:00}:{shiftedMinutes % 60:00}";
         return true;
