@@ -13,6 +13,7 @@ public partial class MainWindow
 {
     private bool _scheduleEditorReliabilityInitialized;
     private bool _restoringScheduleEditingIdentity;
+    private bool _scheduleEditorIsNew;
     private CalendarEvent? _activeScheduleEditingEvent;
     private CalendarEvent? _lastSelectedScheduleEvent;
     private readonly HashSet<Window> _observedScheduleEditorWindows = [];
@@ -87,6 +88,7 @@ public partial class MainWindow
             return;
         }
 
+        _scheduleEditorIsNew = false;
         _activeScheduleEditingEvent = editingEvent;
         _lastSelectedScheduleEvent = editingEvent;
         try
@@ -99,6 +101,7 @@ public partial class MainWindow
         finally
         {
             _activeScheduleEditingEvent = null;
+            _scheduleEditorIsNew = false;
         }
     }
 
@@ -123,7 +126,9 @@ public partial class MainWindow
             return;
         }
 
-        if (_activeScheduleEditingEvent is null
+        _scheduleEditorIsNew = string.Equals(window.Title, "スケジュールの追加", StringComparison.Ordinal);
+        if (!_scheduleEditorIsNew
+            && _activeScheduleEditingEvent is null
             && string.Equals(window.Title, "スケジュールの編集", StringComparison.Ordinal))
         {
             _activeScheduleEditingEvent = _viewModel.SelectedEvent is { IsTodoLike: false } selected
@@ -148,6 +153,7 @@ public partial class MainWindow
             _observedScheduleEditorWindows.Remove(window);
         }
         _activeScheduleEditingEvent = null;
+        _scheduleEditorIsNew = false;
     }
 
     private void PreserveScheduleEditingIdentity(object? sender, PropertyChangedEventArgs e)
@@ -172,7 +178,9 @@ public partial class MainWindow
             return;
         }
 
-        if (_activeScheduleEditingEvent is null
+        _scheduleEditorIsNew = string.Equals(window.Title, "スケジュールの追加", StringComparison.Ordinal);
+        if (!_scheduleEditorIsNew
+            && _activeScheduleEditingEvent is null
             && string.Equals(window.Title, "スケジュールの編集", StringComparison.Ordinal))
         {
             _activeScheduleEditingEvent = _lastSelectedScheduleEvent;
@@ -182,8 +190,31 @@ public partial class MainWindow
 
     private void RestoreScheduleEditingIdentity()
     {
-        if (_restoringScheduleEditingIdentity
-            || _activeScheduleEditingEvent is not { } editingEvent
+        if (_restoringScheduleEditingIdentity)
+        {
+            return;
+        }
+
+        if (_scheduleEditorIsNew)
+        {
+            if (_viewModel.SelectedEvent is null)
+            {
+                return;
+            }
+
+            _restoringScheduleEditingIdentity = true;
+            try
+            {
+                _viewModel.SelectedEvent = null;
+            }
+            finally
+            {
+                _restoringScheduleEditingIdentity = false;
+            }
+            return;
+        }
+
+        if (_activeScheduleEditingEvent is not { } editingEvent
             || (_viewModel.SelectedEvent is not null
                 && string.Equals(_viewModel.SelectedEvent.Id, editingEvent.Id, StringComparison.Ordinal)))
         {
