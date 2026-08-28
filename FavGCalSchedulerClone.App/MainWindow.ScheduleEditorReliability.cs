@@ -232,6 +232,30 @@ public partial class MainWindow
         }
     }
 
+    private void EnsureScheduleSaveIdentity(CalendarEvent? editingEvent)
+    {
+        if (editingEvent is null)
+        {
+            if (_viewModel.SelectedEvent is not null)
+            {
+                _viewModel.SelectedEvent = null;
+            }
+            return;
+        }
+
+        if (_viewModel.SelectedEvent is { } current && SameScheduleOccurrence(current, editingEvent))
+        {
+            return;
+        }
+
+        _viewModel.SelectEvent(editingEvent, selectEventDay: false);
+    }
+
+    private static bool SameScheduleOccurrence(CalendarEvent left, CalendarEvent right) =>
+        string.Equals(left.Id, right.Id, StringComparison.Ordinal)
+        && left.Start == right.Start
+        && left.OriginalStart == right.OriginalStart;
+
     private Window? FindScheduleEditorWindow() =>
         Application.Current.Windows.OfType<Window>().FirstOrDefault(window =>
             ReferenceEquals(window.Owner, this)
