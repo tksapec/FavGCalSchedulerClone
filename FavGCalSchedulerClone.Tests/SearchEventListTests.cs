@@ -128,6 +128,24 @@ public sealed class SearchEventListTests
     }
 
     [Fact]
+    public async Task RunCurrentYearSearchAsync_AfterManualViewChange_RestoresTheMostRecentSearchView()
+    {
+        var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
+        await repository.InitializeAsync();
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository))
+        {
+            CurrentViewMode = CalendarViewMode.Week
+        };
+
+        await viewModel.RunCurrentYearSearchAsync();
+        viewModel.CurrentViewMode = CalendarViewMode.Day;
+        await viewModel.RunCurrentYearSearchAsync();
+        viewModel.ClearCurrentYearSearchCommand.Execute(null);
+
+        Assert.Equal(CalendarViewMode.Day, viewModel.CurrentViewMode);
+    }
+
+    [Fact]
     public void EventListDialog_ResultColumnsMatchSearchListRequirements()
     {
         Assert.Equal(
