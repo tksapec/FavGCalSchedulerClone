@@ -48,6 +48,20 @@ public sealed class RecurrenceSetRegressionTests
     }
 
     [Fact]
+    public void ExpandForRange_ExRule_RemovesMatchingOccurrences()
+    {
+        var master = CreateMaster(
+            "combined-exrule",
+            "[\"RRULE:FREQ=DAILY;COUNT=4\",\"EXRULE:FREQ=DAILY;INTERVAL=2;COUNT=2\"]");
+
+        var results = Expand(master, new DateTimeOffset(2026, 5, 10, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 5, 15, 0, 0, 0, TimeSpan.Zero));
+
+        Assert.Equal(
+            new[] { new DateTime(2026, 5, 11), new DateTime(2026, 5, 13) },
+            results.Select(item => item.Start.Date).ToArray());
+    }
+
+    [Fact]
     public void ExpandForRange_RDateOnlyMaster_DoesNotDisappear()
     {
         var master = CreateMaster(
@@ -71,7 +85,7 @@ public sealed class RecurrenceSetRegressionTests
             Id = id,
             Title = id,
             Start = new DateTimeOffset(2026, 5, 10, 9, 0, 0, TimeSpan.Zero),
-            End = new DateTimeOffset(2026, 5, 10, 10, 0, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 5, 10, 10, 0, 0, TimeSpan.Zero),
             RecurrenceJson = recurrenceJson
         };
     }
