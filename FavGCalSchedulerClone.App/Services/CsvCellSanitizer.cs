@@ -5,7 +5,14 @@ internal static class CsvCellSanitizer
     public static string NeutralizeForSpreadsheet(string? value)
     {
         value ??= "";
-        return value.Length > 0 && IsFormulaPrefix(value[0])
+        if (value.Length > 0 && IsFormulaPrefix(value[0]))
+        {
+            return "'" + value;
+        }
+
+        // A literal apostrophe immediately before a formula prefix is otherwise
+        // indistinguishable from our spreadsheet-neutralization marker on import.
+        return value.Length > 1 && value[0] == '\'' && IsFormulaPrefix(value[1])
             ? "'" + value
             : value;
     }
@@ -13,6 +20,11 @@ internal static class CsvCellSanitizer
     public static string RestoreNeutralizedValue(string? value)
     {
         value ??= "";
+        if (value.Length > 2 && value[0] == '\'' && value[1] == '\'' && IsFormulaPrefix(value[2]))
+        {
+            return value[1..];
+        }
+
         return value.Length > 1 && value[0] == '\'' && IsFormulaPrefix(value[1])
             ? value[1..]
             : value;
