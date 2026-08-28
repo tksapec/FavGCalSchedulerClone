@@ -101,21 +101,27 @@ internal static class ScheduleEditorDialog
             {
                 endDate.SelectedDate = startDate.SelectedDate;
             }
-            dayCount.Text = days.ToString();
+            dayCount.Text = days.ToString(CultureInfo.InvariantCulture);
             updatingDateRange = false;
         }
 
         void UpdateEndDateFromCount()
         {
-            if (updatingDateRange || startDate.SelectedDate is null || !int.TryParse(dayCount.Text, out var days))
+            if (updatingDateRange || startDate.SelectedDate is null)
             {
                 return;
             }
 
+            var start = startDate.SelectedDate.Value.Date;
+            var fallbackDays = endDate.SelectedDate is null
+                ? 1
+                : Math.Max(1, (endDate.SelectedDate.Value.Date - start).Days + 1);
+            var maximumDays = (DateTime.MaxValue.Date - start).Days + 1;
+            var days = NormalizeDayCount(dayCount.Text, fallbackDays, maximumDays);
+
             updatingDateRange = true;
-            days = Math.Max(1, days);
-            dayCount.Text = days.ToString();
-            endDate.SelectedDate = startDate.SelectedDate.Value.Date.AddDays(days - 1);
+            dayCount.Text = days.ToString(CultureInfo.InvariantCulture);
+            endDate.SelectedDate = start.AddDays(days - 1);
             updatingDateRange = false;
         }
 
@@ -520,6 +526,15 @@ internal static class ScheduleEditorDialog
         };
         button.Click += (_, _) => action();
         return button;
+    }
+
+    internal static int NormalizeDayCount(string? value, int fallback, int maximum)
+    {
+        maximum = Math.Max(1, maximum);
+        fallback = Math.Clamp(fallback, 1, maximum);
+        return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var days)
+            ? Math.Clamp(days, 1, maximum)
+            : fallback;
     }
 
     internal static string NormalizeTimeText(string? value)
