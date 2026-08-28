@@ -107,6 +107,18 @@ public sealed class BranchIntegrationRegressionTests
     }
 
     [Fact]
+    public async Task SyncDataGate_CoordinatesRestoreMaintenance()
+    {
+        var sync = await ReadAppSourceAsync("ViewModels", "MainViewModel.Sync.cs");
+        var restore = await ReadAppSourceAsync("ViewModels", "MainViewModel.BackupRestore.cs");
+
+        Assert.Contains("EnsureSyncDataOperationAllowed", sync, StringComparison.Ordinal);
+        Assert.Contains("await _syncDataOperationGate.WaitAsync();", restore, StringComparison.Ordinal);
+        Assert.Contains("var syncDataGateEntered = false;", restore, StringComparison.Ordinal);
+        Assert.Contains("_syncDataOperationGate.Release();", restore, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ExplicitAddScheduleEntryPoints_AlwaysForceTheNewSchedulePath()
     {
         var mainWindow = await ReadAppSourceAsync("MainWindow.xaml.cs");
