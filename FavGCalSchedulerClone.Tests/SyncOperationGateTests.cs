@@ -87,6 +87,66 @@ public sealed class SyncOperationGateTests
     }
 
     [Fact]
+    public async Task ReloadAvailableCalendarsAsync_WaitsForExistingGoogleOperation()
+    {
+        var viewModel = await CreateViewModelAsync();
+        var gate = GetSyncDataOperationGate(viewModel);
+        await gate.WaitAsync();
+        Task reloadTask;
+        try
+        {
+            reloadTask = viewModel.ReloadAvailableCalendarsAsync();
+            Assert.False(reloadTask.IsCompleted);
+        }
+        finally
+        {
+            gate.Release();
+        }
+
+        await reloadTask;
+    }
+
+    [Fact]
+    public async Task ClearTokensAsync_WaitsForExistingGoogleOperation()
+    {
+        var viewModel = await CreateViewModelAsync();
+        var gate = GetSyncDataOperationGate(viewModel);
+        await gate.WaitAsync();
+        Task clearTokensTask;
+        try
+        {
+            clearTokensTask = viewModel.ClearTokensAsync();
+            Assert.False(clearTokensTask.IsCompleted);
+        }
+        finally
+        {
+            gate.Release();
+        }
+
+        await clearTokensTask;
+    }
+
+    [Fact]
+    public async Task AuthorizeGoogleAsync_WaitsForExistingGoogleOperation()
+    {
+        var viewModel = await CreateViewModelAsync();
+        var gate = GetSyncDataOperationGate(viewModel);
+        await gate.WaitAsync();
+        Task authorizeTask;
+        try
+        {
+            authorizeTask = viewModel.AuthorizeGoogleAsync();
+            Assert.False(authorizeTask.IsCompleted);
+        }
+        finally
+        {
+            gate.Release();
+        }
+
+        await authorizeTask;
+    }
+
+    [Fact]
     public async Task RestoreAllCalendarsAsync_WaitsForExistingSyncDataOperationBeforeReadingBackup()
     {
         var viewModel = await CreateViewModelAsync();
