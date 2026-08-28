@@ -15,7 +15,7 @@ public sealed class RecurrenceSetRegressionTests
         var results = Expand(master, new DateTimeOffset(2026, 5, 10, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 5, 13, 0, 0, 0, TimeSpan.Zero));
 
         Assert.Equal(
-            [new DateTime(2026, 5, 10), new DateTime(2026, 5, 12)],
+            new[] { new DateTime(2026, 5, 10), new DateTime(2026, 5, 12) },
             results.Select(item => item.Start.Date).Distinct().ToArray());
     }
 
@@ -29,7 +29,7 @@ public sealed class RecurrenceSetRegressionTests
         var results = Expand(master, new DateTimeOffset(2026, 5, 10, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 5, 20, 0, 0, 0, TimeSpan.Zero));
 
         Assert.Equal(
-            [new DateTime(2026, 5, 10), new DateTime(2026, 5, 17)],
+            new[] { new DateTime(2026, 5, 10), new DateTime(2026, 5, 17) },
             results.Select(item => item.Start.Date).ToArray());
     }
 
@@ -43,7 +43,7 @@ public sealed class RecurrenceSetRegressionTests
         var results = Expand(master, new DateTimeOffset(2026, 5, 10, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 5, 13, 0, 0, 0, TimeSpan.Zero));
 
         Assert.Equal(
-            [new DateTime(2026, 5, 10), new DateTime(2026, 5, 12)],
+            new[] { new DateTime(2026, 5, 10), new DateTime(2026, 5, 12) },
             results.Select(item => item.Start.Date).ToArray());
     }
 
@@ -71,7 +71,7 @@ public sealed class RecurrenceSetRegressionTests
             Id = id,
             Title = id,
             Start = new DateTimeOffset(2026, 5, 10, 9, 0, 0, TimeSpan.Zero),
-            End = new DateTimeOffset(2026, 5, 10, 10, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 5, 10, 10, 0, 0, 0, TimeSpan.Zero),
             RecurrenceJson = recurrenceJson
         };
     }
