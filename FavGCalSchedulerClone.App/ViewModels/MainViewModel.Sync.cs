@@ -63,7 +63,10 @@ public sealed partial class MainViewModel
         }
     }
 
-    public async Task<SyncResult> SynchronizeDirtyOnlyAsync()
+    public Task<SyncResult> SynchronizeDirtyOnlyAsync() =>
+        RunExclusiveSyncDataOperationAsync(SynchronizeDirtyOnlyCoreAsync);
+
+    private async Task<SyncResult> SynchronizeDirtyOnlyCoreAsync()
     {
         var dirtyIds = (await _repository.LoadDirtyEventsAsync())
             .Select(item => item.Id)
@@ -76,12 +79,15 @@ public sealed partial class MainViewModel
             return empty;
         }
 
-        var result = await ResyncDirtyItemsAsync(dirtyIds);
+        var result = await ResyncDirtyItemsCoreAsync(dirtyIds);
         await RefreshOperationalStatusAsync(null);
         return result;
     }
 
-    public async Task<SyncDiagnosticsSnapshot> LoadSyncDiagnosticsAsync()
+    public Task<SyncDiagnosticsSnapshot> LoadSyncDiagnosticsAsync() =>
+        RunExclusiveSyncDataOperationAsync(LoadSyncDiagnosticsCoreAsync);
+
+    private async Task<SyncDiagnosticsSnapshot> LoadSyncDiagnosticsCoreAsync()
     {
         await SaveOAuthPathAsync();
         return await _syncService.LoadDiagnosticsAsync(CreateSettingsSnapshot());
@@ -118,7 +124,10 @@ public sealed partial class MainViewModel
         return result;
     }
 
-    public async Task<SyncResult> ResyncFailedItemsAsync(IReadOnlyCollection<string> localIds)
+    public Task<SyncResult> ResyncFailedItemsAsync(IReadOnlyCollection<string> localIds) =>
+        RunExclusiveSyncDataOperationAsync(() => ResyncFailedItemsCoreAsync(localIds));
+
+    private async Task<SyncResult> ResyncFailedItemsCoreAsync(IReadOnlyCollection<string> localIds)
     {
         var dirtyIds = (await _repository.LoadDirtyEventsAsync())
             .Select(item => item.Id)
@@ -133,7 +142,7 @@ public sealed partial class MainViewModel
             return empty;
         }
 
-        return await ResyncDirtyItemsAsync(targets);
+        return await ResyncDirtyItemsCoreAsync(targets);
     }
 
     public Task<int> MarkDirtyItemsSyncedAsync(IReadOnlyCollection<string> localIds) =>
