@@ -74,6 +74,26 @@ public sealed record GoogleEventListRequest
     public bool SingleEvents { get; init; }
     public int MaxResults { get; init; }
     public DateTimeOffset? TimeMax { get; init; }
+
+    public void Deconstruct(
+        out string CalendarId,
+        out string? SyncToken,
+        out string? PageToken,
+        out DateTimeOffset? TimeMin,
+        out bool ShowDeleted,
+        out bool SingleEvents,
+        out int MaxResults,
+        out DateTimeOffset? TimeMax)
+    {
+        CalendarId = this.CalendarId;
+        SyncToken = this.SyncToken;
+        PageToken = this.PageToken;
+        TimeMin = this.TimeMin;
+        ShowDeleted = this.ShowDeleted;
+        SingleEvents = this.SingleEvents;
+        MaxResults = this.MaxResults;
+        TimeMax = this.TimeMax;
+    }
 }
 
 public sealed record GoogleEventPage(
