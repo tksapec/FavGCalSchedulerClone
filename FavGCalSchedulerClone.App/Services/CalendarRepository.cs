@@ -663,19 +663,96 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
     public async Task SaveSyncTokenAsync(string calendarId, string? syncToken)
     {
         await using var connection = OpenConnection();
-        await using var command = connection.CreateCommand();
-        if (string.IsNullOrWhiteSpace(syncToken))
-        {
-            command.CommandText = "DELETE FROM settings WHERE key = $key";
-        }
-        else
-        {
-            command.CommandText = "INSERT OR REPLACE INTO settings(key, value) VALUES($key, $value)";
-            command.Parameters.AddWithValue("$value", syncToken);
-        }
+        await using var transaction = connection.BeginTransaction();
+        var syncKey = $"sync:{calendarId}";
+        var recoveryKey = $"sync-recovery-start:{calendarId}";
 
-        command.Parameters.AddWithValue("$key", $"sync:{calendarId}");
-        await command.ExecuteNonQueryAsync();
+        try
+        {
+            string? existingToken;
+            await using (var readToken = connection.CreateCommand())
+            {
+                readToken.Transaction = transaction;
+                readToken.CommandText = "SELECT value FROM settings WHERE key = $key";
+                readToken.Parameters.AddWithValue("$key", syncKey);
+                existingToken = await readToken.ExecuteScalarAsync() as string;
+            }
+
+            if (string.IsNullOrWhiteSpace(syncToken))
+            {
+                if (!string.IsNullOrWhiteSpace(existingToken))
+                {
+                    await using var markRecovery = connection.CreateCommand();
+                    markRecovery.Transaction = transaction;
+                    markRecovery.CommandText = "INSERT OR REPLACE INTO settings(key, value) VALUES($key, $value)";
+                    markRecovery.Parameters.AddWithValue("$key", recoveryKey);
+                    markRecovery.Parameters.AddWithValue(
+                        "$value",
+                        DateTimeOffset.UtcNow.UtcTicks.ToString(CultureInfo.InvariantCulture));
+                    await markRecovery.ExecuteNonQueryAsync();
+                }
+
+                await using var deleteToken = connection.CreateCommand();
+                deleteToken.Transaction = transaction;
+                deleteToken.CommandText = "DELETE FROM settings WHERE key = $key";
+                deleteToken.Parameters.AddWithValue("$key", syncKey);
+                await deleteToken.ExecuteNonQueryAsync();
+            }
+            else
+            {
+                string? recoveryStartValue;
+                await using (var readRecovery = connection.CreateCommand())
+                {
+                    readRecovery.Transaction = transaction;
+                    readRecovery.CommandText = "SELECT value FROM settings WHERE key = $key";
+                    readRecovery.Parameters.AddWithValue("$key", recoveryKey);
+                    recoveryStartValue = await readRecovery.ExecuteScalarAsync() as string;
+                }
+
+                if (long.TryParse(
+                    recoveryStartValue,
+                    NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,
+                    out var recoveryStartUtcTicks))
+                {
+                    await using var cleanup = connection.CreateCommand();
+                    cleanup.Transaction = transaction;
+                    cleanup.CommandText = """
+                        DELETE FROM events
+                        WHERE calendar_id = $calendar_id
+                          AND is_dirty = 0
+                          AND google_event_id IS NOT NULL
+                          AND TRIM(google_event_id) <> ''
+                          AND (last_synced_at_utc_ticks IS NULL OR last_synced_at_utc_ticks < $recovery_start_utc_ticks)
+                        """;
+                    cleanup.Parameters.AddWithValue("$calendar_id", calendarId);
+                    cleanup.Parameters.AddWithValue("$recovery_start_utc_ticks", recoveryStartUtcTicks);
+                    await cleanup.ExecuteNonQueryAsync();
+                }
+
+                await using (var saveToken = connection.CreateCommand())
+                {
+                    saveToken.Transaction = transaction;
+                    saveToken.CommandText = "INSERT OR REPLACE INTO settings(key, value) VALUES($key, $value)";
+                    saveToken.Parameters.AddWithValue("$key", syncKey);
+                    saveToken.Parameters.AddWithValue("$value", syncToken);
+                    await saveToken.ExecuteNonQueryAsync();
+                }
+
+                await using var clearRecovery = connection.CreateCommand();
+                clearRecovery.Transaction = transaction;
+                clearRecovery.CommandText = "DELETE FROM settings WHERE key = $key";
+                clearRecovery.Parameters.AddWithValue("$key", recoveryKey);
+                await clearRecovery.ExecuteNonQueryAsync();
+            }
+
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
     }
 
     private async Task UpsertEventAsync(CalendarEvent calendarEvent)
