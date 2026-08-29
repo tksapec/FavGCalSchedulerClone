@@ -585,7 +585,11 @@ public sealed class GoogleCalendarSyncService
 
                 var wasNotFound = resolved.NotFoundLocalIds.Contains(localEvent.Id);
                 var detail = wasNotFound
-                    ? localEvent.IsDeleted ? "Google側では既に削除済み" : "Google側に存在しないため再作成予定"
+                    ? localEvent.IsDeleted
+                        ? "Google側では既に削除済み"
+                        : localEvent.IsRecurrenceException
+                            ? "Google側の繰り返し予定を確認できないため、再作成せず未同期のまま保持予定"
+                            : "Google側に存在しないため再作成予定"
                     : planItem.RequiresTodoReminderCleanup
                         ? "Googleへ送信予定。同じ更新でGoogle側の通知も削除します。アプリ内通知は期限日の08:15です。"
                         : localEvent.IsDeleted ? "Googleから削除予定" : "Googleへ送信予定";
@@ -1283,7 +1287,7 @@ public sealed class GoogleCalendarSyncService
         var events = new List<Event>();
         string? pageToken = null;
         string? nextSyncToken = null;
-        var fullSyncStart = string.IsNullOrWhiteSpace(syncToken) ? DateTimeOffset.Now.AddYears(-5) : (DateTimeOffset?)null;
+        DateTimeOffset? fullSyncStart = null;
         try
         {
             do
@@ -1483,7 +1487,7 @@ public sealed class GoogleCalendarSyncService
                         calendarId,
                         syncToken,
                         pageToken,
-                        string.IsNullOrWhiteSpace(syncToken) ? DateTimeOffset.Now.AddYears(-5) : null,
+                        null,
                         ShowDeleted: true,
                         SingleEvents: false,
                         MaxResults: 2500),
