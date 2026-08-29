@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using FavGCalSchedulerClone.App.Models;
+using FavGCalSchedulerClone.App.Services;
 using Microsoft.Win32;
 
 namespace FavGCalSchedulerClone.App.Views.Dialogs;
@@ -100,10 +101,6 @@ internal static class SyncDialogs
         var panel = new DockPanel { Margin = new Thickness(12), LastChildFill = true };
         window.Content = panel;
 
-        var last = diagnostics.LastResult;
-        var summaryText = last is null
-            ? $"未同期変更: {diagnostics.DirtyCount} 件\n最終同期結果はありません。"
-            : $"未同期変更: {diagnostics.DirtyCount} 件\n最終同期: {last.FinishedAt:yyyy/MM/dd HH:mm:ss} / {last.SummaryText}";
         var summary = new TextBlock { Text = BuildDiagnosticsSummary(diagnostics), Margin = new Thickness(0, 0, 0, 8), FontWeight = FontWeights.SemiBold };
         DockPanel.SetDock(summary, Dock.Top);
         panel.Children.Add(summary);
@@ -116,6 +113,8 @@ internal static class SyncDialogs
         var dirtyItems = new ObservableCollection<SyncDirtyItem>(diagnostics.DirtyItems);
         var failureItems = new ObservableCollection<SyncFailureDiagnostic>(diagnostics.Failures);
         var historyItems = new ObservableCollection<SyncResult>(diagnostics.History);
+        Action updateRetryFailuresState = static () => { };
+        Action updateDirtyActionState = static () => { };
 
         async Task RunAndRefreshAsync(Func<Task> operation, string successMessage)
         {
@@ -128,6 +127,8 @@ internal static class SyncDialogs
                 ReplaceAll(failureItems, currentDiagnostics.Failures);
                 ReplaceAll(historyItems, currentDiagnostics.History);
                 summary.Text = BuildDiagnosticsSummary(currentDiagnostics);
+                updateRetryFailuresState();
+                updateDirtyActionState();
                 status.Text = successMessage;
             }
             catch (Exception ex)
@@ -146,10 +147,16 @@ internal static class SyncDialogs
             ToolTip = "同期ログと失敗詳細だけを削除します。未同期データは削除されません。"
         };
         var close = new Button { Content = "閉じる", MinWidth = 96, Height = 28 };
-        var retryFailures = new Button { Content = "失敗分を再同期", MinWidth = 116, Height = 28, Margin = new Thickness(0, 0, 8, 0), IsEnabled = retryFailuresAsync is not null && diagnostics.Failures.Any(item => !string.IsNullOrWhiteSpace(item.LocalId)) };
+        var retryFailures = new Button { Content = "失敗分を再同期", MinWidth = 116, Height = 28, Margin = new Thickness(0, 0, 8, 0), IsEnabled = false };
         var exportDirty = new Button { Content = "未同期CSV出力", MinWidth = 116, Height = 28, Margin = new Thickness(0, 0, 8, 0) };
         var exportLog = new Button { Content = "診断ログ出力", MinWidth = 116, Height = 28, Margin = new Thickness(0, 0, 8, 0) };
         var refreshReminders = new Button { Content = "Google通知設定を再取得", MinWidth = 150, Height = 28, Margin = new Thickness(0, 0, 8, 0), IsEnabled = refreshGoogleRemindersAsync is not null };
+        updateRetryFailuresState = () =>
+        {
+            retryFailures.IsEnabled = retryFailuresAsync is not null
+                && currentDiagnostics.Failures.Any(item => !string.IsNullOrWhiteSpace(item.LocalId));
+        };
+        updateRetryFailuresState();
         retryFailures.Click += async (_, _) =>
         {
             if (retryFailuresAsync is not null)
@@ -243,16 +250,18 @@ internal static class SyncDialogs
             discardLocal.IsEnabled = hasSelection && discardDirtyItemsAsync is not null;
         }
 
-        dirtyGrid.SelectionChanged += (_, _) => UpdateDirtyActionState();
+        updateDirtyActionState = UpdateDirtyActionState;
+        dirtyGrid.SelectionChanged += (_, _) => updateDirtyActionState();
+        updateDirtyActionState();
 
-        openDirty.Click += async (_, _) =>
+        openDirty.Click += (_, _) => DialogAsyncGuard.Run(window, async () =>
         {
             if (openDirtyItemAsync is not null && GetSelectedDirtyIds(dirtyGrid).FirstOrDefault() is { } id)
             {
                 await openDirtyItemAsync(id);
                 window.Close();
             }
-        };
+        }, "未同期データを開く");
         retryDirty.Click += async (_, _) =>
         {
             var ids = GetSelectedDirtyIds(dirtyGrid);
@@ -412,10 +421,17 @@ internal static class SyncDialogs
 
     private static void ExportText(Window owner, string fileName, string content)
     {
-        var dialog = new SaveFileDialog { FileName = fileName, Filter = "Text files (*.txt;*.csv)|*.txt;*.csv|All files (*.*)|*.*" };
-        if (dialog.ShowDialog(owner) == true)
+        try
         {
-            File.WriteAllText(dialog.FileName, content, Encoding.UTF8);
+            var dialog = new SaveFileDialog { FileName = fileName, Filter = "Text files (*.txt;*.csv)|*.txt;*.csv|All files (*.*)|*.*" };
+            if (dialog.ShowDialog(owner) == true)
+            {
+                File.WriteAllText(dialog.FileName, content, Encoding.UTF8);
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(owner, ex.Message, "診断データ出力エラー", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -450,7 +466,7 @@ internal static class SyncDialogs
 
     private static string Csv(string? value)
     {
-        value ??= "";
+        value = CsvCellSanitizer.NeutralizeForSpreadsheet(value);
         return "\"" + value.Replace("\"", "\"\"") + "\"";
     }
 }

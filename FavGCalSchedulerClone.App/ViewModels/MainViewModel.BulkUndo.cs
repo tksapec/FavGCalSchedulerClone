@@ -18,7 +18,8 @@ public sealed partial class MainViewModel
             return 0;
         }
 
-        CaptureUndo("一括編集", events);
+        var undoSnapshots = events.Select(UndoService.Clone).ToArray();
+        var writes = new List<CalendarEvent>();
         var updated = 0;
         foreach (var calendarEvent in events)
         {
@@ -61,10 +62,13 @@ public sealed partial class MainViewModel
             }
 
             calendarEvent.IsDirty = true;
-            await SaveEventWithCalendarMoveAsync(calendarEvent, original);
+            NormalizeTimedEventTimeZoneOffsets(calendarEvent);
+            writes.AddRange(PrepareCalendarMoveWrites(calendarEvent, original));
             updated++;
         }
 
+        await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes);
+        CaptureUndo("一括編集", undoSnapshots);
         await RefreshCalendarAsync();
         Status = $"一括編集しました: {updated} 件";
         await SyncAfterLocalChangeAsync();
@@ -79,14 +83,16 @@ public sealed partial class MainViewModel
             return 0;
         }
 
-        CaptureUndo("一括削除", events);
-        var deleted = 0;
+        var undoSnapshots = events.Select(UndoService.Clone).ToArray();
         foreach (var calendarEvent in events)
         {
-            await _repository.DeleteEventAsync(calendarEvent);
-            deleted++;
+            calendarEvent.IsDeleted = true;
+            calendarEvent.IsDirty = true;
         }
 
+        await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, events);
+        CaptureUndo("一括削除", undoSnapshots);
+        var deleted = events.Count;
         SelectedEvent = null;
         await RefreshCalendarAsync();
         Status = $"一括削除しました: {deleted} 件";
@@ -96,20 +102,73 @@ public sealed partial class MainViewModel
 
     public async Task<bool> UndoLastChangeAsync()
     {
-        var operation = _undoService.Pop();
-        NotifyUndoStateChanged();
+        var operation = _undoService.Peek();
         if (operation is null)
         {
             return false;
         }
 
+        var writes = new List<CalendarEvent>();
+        var hardDeleteIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var snapshot in operation.BeforeEvents)
         {
+            var current = await _repository.FindMasterByIdAsync(snapshot.Id);
+            if (CreateDestinationDeleteForSyncedMove(current, snapshot) is { } destinationTombstone)
+            {
+                writes.Add(destinationTombstone);
+            }
+
             var restored = UndoService.Clone(snapshot);
             restored.IsDirty = true;
             restored.LastSyncedAt = null;
-            await _repository.SaveEventAsync(restored);
-            await RemoveUndoMoveTombstonesAsync(restored);
+            writes.Add(restored);
+            foreach (var id in await FindUndoMoveTombstoneIdsAsync(restored))
+            {
+                hardDeleteIds.Add(id);
+            }
+        }
+
+        var createdIdSet = operation.CreatedEventIds.ToHashSet(StringComparer.Ordinal);
+        // Recurrence splits record the new parent before its children. Process in reverse
+        // order so a synced occurrence is handled before its newly-created remote master.
+        foreach (var createdId in operation.CreatedEventIds.Reverse())
+        {
+            var current = await _repository.FindMasterByIdAsync(createdId);
+            if (current is null)
+            {
+                continue;
+            }
+
+            if (IsSyncedEditedOccurrence(current, createdIdSet))
+            {
+                var parent = await _repository.FindMasterByIdAsync(current.RecurringParentId);
+                if (parent is null || current.OriginalStart is null)
+                {
+                    throw new InvalidOperationException(
+                        "同期済みの繰り返し予定を安全に元へ戻せません。親系列を確認してから再実行してください。");
+                }
+
+                writes.Add(CreateRestoredOccurrenceFromMaster(current, parent));
+                continue;
+            }
+
+            if (!current.IsDeleted && !string.IsNullOrWhiteSpace(current.GoogleEventId))
+            {
+                var tombstone = UndoService.Clone(current);
+                tombstone.Id = Guid.NewGuid().ToString("N");
+                tombstone.IsDeleted = true;
+                tombstone.IsDirty = true;
+                tombstone.LastSyncedAt = null;
+                writes.Add(tombstone);
+            }
+
+            hardDeleteIds.Add(createdId);
+        }
+
+        await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes, hardDeleteIds);
+        if (_undoService.Consume(operation))
+        {
+            NotifyUndoStateChanged();
         }
 
         SelectedEvent = operation.BeforeEvents.Count == 1
@@ -139,27 +198,114 @@ public sealed partial class MainViewModel
         return events;
     }
 
-    private async Task RemoveUndoMoveTombstonesAsync(CalendarEvent restored)
+    private static IReadOnlyList<CalendarEvent> PrepareCalendarMoveWrites(CalendarEvent candidate, CalendarEvent? original)
+    {
+        if (original is null
+            || string.IsNullOrWhiteSpace(original.GoogleEventId)
+            || string.Equals(original.CalendarId, candidate.CalendarId, StringComparison.Ordinal))
+        {
+            return [candidate];
+        }
+
+        var tombstone = CloneEventForEditing(original);
+        tombstone.Id = Guid.NewGuid().ToString("N");
+        tombstone.IsDeleted = true;
+        tombstone.IsDirty = true;
+        tombstone.LastSyncedAt = null;
+
+        candidate.GoogleEventId = null;
+        candidate.LastSyncedGoogleEtag = null;
+        candidate.LastSyncedAt = null;
+        if (candidate.IsRecurrenceException)
+        {
+            // An occurrence cannot remain a recurrence exception after it is moved to
+            // a different calendar from its parent series. Recreate it as a standalone
+            // event in the destination calendar and delete the old remote occurrence.
+            candidate.IsRecurrenceException = false;
+            candidate.RecurringEventId = null;
+            candidate.RecurringParentId = null;
+            candidate.OriginalStart = null;
+            candidate.RecurrenceJson = null;
+        }
+
+        return [tombstone, candidate];
+    }
+
+    private static CalendarEvent? CreateDestinationDeleteForSyncedMove(CalendarEvent? current, CalendarEvent before)
+    {
+        if (current is null
+            || string.IsNullOrWhiteSpace(current.GoogleEventId)
+            || string.Equals(current.CalendarId, before.CalendarId, StringComparison.Ordinal)
+            || string.Equals(current.GoogleEventId, before.GoogleEventId, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var destinationTombstone = UndoService.Clone(current);
+        destinationTombstone.Id = Guid.NewGuid().ToString("N");
+        destinationTombstone.IsDeleted = true;
+        destinationTombstone.IsDirty = true;
+        destinationTombstone.LastSyncedAt = null;
+        return destinationTombstone;
+    }
+
+    private static bool IsSyncedEditedOccurrence(CalendarEvent current, IReadOnlySet<string> createdIds)
+    {
+        return current.IsRecurrenceException
+            && !current.IsDeleted
+            && !string.IsNullOrWhiteSpace(current.GoogleEventId)
+            && !string.IsNullOrWhiteSpace(current.RecurringParentId)
+            && !createdIds.Contains(current.RecurringParentId);
+    }
+
+    private static CalendarEvent CreateRestoredOccurrenceFromMaster(CalendarEvent current, CalendarEvent parent)
+    {
+        var originalStart = current.OriginalStart!.Value;
+        var restored = UndoService.Clone(parent);
+        restored.Id = current.Id;
+        restored.GoogleEventId = current.GoogleEventId;
+        restored.LastSyncedGoogleEtag = current.LastSyncedGoogleEtag;
+        restored.RecurringEventId = parent.GoogleEventId;
+        restored.RecurringParentId = parent.Id;
+        restored.OriginalStart = originalStart;
+        restored.IsRecurrenceException = true;
+        restored.IsGeneratedOccurrence = false;
+        restored.RecurrenceJson = null;
+        restored.Start = originalStart;
+        restored.End = originalStart + (parent.End - parent.Start);
+        restored.IsDeleted = false;
+        restored.IsDirty = true;
+        restored.LastSyncedAt = null;
+        return restored;
+    }
+
+    private async Task<IReadOnlyList<string>> FindUndoMoveTombstoneIdsAsync(CalendarEvent restored)
     {
         if (string.IsNullOrWhiteSpace(restored.GoogleEventId))
         {
-            return;
+            return [];
         }
 
-        var dirtyEvents = await _repository.LoadDirtyEventsAsync();
-        foreach (var tombstone in dirtyEvents.Where(item =>
-                     item.Id != restored.Id
-                     && item.IsDeleted
-                     && string.Equals(item.CalendarId, restored.CalendarId, StringComparison.Ordinal)
-                     && string.Equals(item.GoogleEventId, restored.GoogleEventId, StringComparison.Ordinal)))
-        {
-            await _repository.HardDeleteEventAsync(tombstone.Id);
-        }
+        var candidates = await _repository.LoadEventsAsync(
+            restored.Start.AddDays(-1),
+            restored.End.AddDays(1),
+            includeDeleted: true);
+        return candidates
+            .Where(item =>
+                item.Id != restored.Id
+                && item.IsDeleted
+                && string.Equals(item.CalendarId, restored.CalendarId, StringComparison.Ordinal)
+                && string.Equals(item.GoogleEventId, restored.GoogleEventId, StringComparison.Ordinal))
+            .Select(item => item.Id)
+            .ToArray();
     }
 
-    private void CaptureUndo(string description, IEnumerable<CalendarEvent?> beforeEvents)
+    private void CaptureUndo(
+        string description,
+        IEnumerable<CalendarEvent?> beforeEvents,
+        IEnumerable<string>? createdEventIds = null)
     {
-        _undoService.Capture(description, beforeEvents);
+        _undoService.Capture(description, beforeEvents, createdEventIds);
         NotifyUndoStateChanged();
     }
 

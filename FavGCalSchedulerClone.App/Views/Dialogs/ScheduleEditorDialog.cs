@@ -101,21 +101,27 @@ internal static class ScheduleEditorDialog
             {
                 endDate.SelectedDate = startDate.SelectedDate;
             }
-            dayCount.Text = days.ToString();
+            dayCount.Text = days.ToString(CultureInfo.InvariantCulture);
             updatingDateRange = false;
         }
 
         void UpdateEndDateFromCount()
         {
-            if (updatingDateRange || startDate.SelectedDate is null || !int.TryParse(dayCount.Text, out var days))
+            if (updatingDateRange || startDate.SelectedDate is null)
             {
                 return;
             }
 
+            var start = startDate.SelectedDate.Value.Date;
+            var fallbackDays = endDate.SelectedDate is null
+                ? 1
+                : Math.Max(1, (endDate.SelectedDate.Value.Date - start).Days + 1);
+            var maximumDays = (DateTime.MaxValue.Date - start).Days + 1;
+            var days = NormalizeDayCount(dayCount.Text, fallbackDays, maximumDays);
+
             updatingDateRange = true;
-            days = Math.Max(1, days);
-            dayCount.Text = days.ToString();
-            endDate.SelectedDate = startDate.SelectedDate.Value.Date.AddDays(days - 1);
+            dayCount.Text = days.ToString(CultureInfo.InvariantCulture);
+            endDate.SelectedDate = start.AddDays(days - 1);
             updatingDateRange = false;
         }
 
@@ -134,11 +140,20 @@ internal static class ScheduleEditorDialog
             }
 
             var updatedStartTime = NormalizeTimeText(startTime.Text);
-            if (TryShiftEndTimeForStartChange(previousStartTime, updatedStartTime, endTime.Text, out var shiftedEndTime))
+            if (TryShiftEndTimeForStartChange(
+                    previousStartTime,
+                    updatedStartTime,
+                    endTime.Text,
+                    out var shiftedEndTime,
+                    out var endDateOffset))
             {
                 shiftingEndTime = true;
                 startTime.Text = updatedStartTime;
                 endTime.Text = shiftedEndTime;
+                if (endDateOffset != 0 && endDate.SelectedDate is { } selectedEndDate)
+                {
+                    endDate.SelectedDate = selectedEndDate.Date.AddDays(endDateOffset);
+                }
                 shiftingEndTime = false;
             }
 
@@ -150,10 +165,12 @@ internal static class ScheduleEditorDialog
 
         void ApplyDurationShortcut(TimeSpan duration)
         {
-            if (TryCreateEndTimeFromDuration(startTime.Text, duration, out var endTimeText))
+            if (startDate.SelectedDate is { } selectedStartDate
+                && TryCreateEndTimeFromDuration(startTime.Text, duration, out var endTimeText, out var endDateOffset))
             {
                 startTime.Text = NormalizeTimeText(startTime.Text);
                 endTime.Text = endTimeText;
+                endDate.SelectedDate = selectedStartDate.Date.AddDays(endDateOffset);
                 isAllDay.IsChecked = false;
             }
         }
@@ -511,6 +528,15 @@ internal static class ScheduleEditorDialog
         return button;
     }
 
+    internal static int NormalizeDayCount(string? value, int fallback, int maximum)
+    {
+        maximum = Math.Max(1, maximum);
+        fallback = Math.Clamp(fallback, 1, maximum);
+        return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var days)
+            ? Math.Clamp(days, 1, maximum)
+            : fallback;
+    }
+
     internal static string NormalizeTimeText(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -611,7 +637,17 @@ internal static class ScheduleEditorDialog
 
     internal static bool TryCreateEndTimeFromDuration(string? startTime, TimeSpan duration, out string endTime)
     {
+        return TryCreateEndTimeFromDuration(startTime, duration, out endTime, out _);
+    }
+
+    internal static bool TryCreateEndTimeFromDuration(
+        string? startTime,
+        TimeSpan duration,
+        out string endTime,
+        out int dayOffset)
+    {
         endTime = startTime ?? "";
+        dayOffset = 0;
         var normalized = NormalizeTimeText(startTime);
         if (!TimeSpan.TryParseExact(
                 normalized,
@@ -627,6 +663,7 @@ internal static class ScheduleEditorDialog
         }
 
         var end = start.Add(duration);
+        dayOffset = end.Days;
         endTime = $"{end.Hours:00}:{end.Minutes:00}";
         return true;
     }
@@ -637,7 +674,23 @@ internal static class ScheduleEditorDialog
         string? currentEndTime,
         out string endTime)
     {
+        return TryShiftEndTimeForStartChange(
+            previousStartTime,
+            updatedStartTime,
+            currentEndTime,
+            out endTime,
+            out _);
+    }
+
+    internal static bool TryShiftEndTimeForStartChange(
+        string? previousStartTime,
+        string? updatedStartTime,
+        string? currentEndTime,
+        out string endTime,
+        out int dayOffset)
+    {
         endTime = currentEndTime ?? "";
+        dayOffset = 0;
         if (!TryParseTimeOfDay(previousStartTime, out var previousStart)
             || !TryParseTimeOfDay(updatedStartTime, out var updatedStart)
             || !TryParseTimeOfDay(currentEndTime, out var currentEnd))
@@ -646,11 +699,9 @@ internal static class ScheduleEditorDialog
         }
 
         var minutesInDay = (int)TimeSpan.FromDays(1).TotalMinutes;
-        var shiftedMinutes = ((int)currentEnd.TotalMinutes + (int)(updatedStart - previousStart).TotalMinutes) % minutesInDay;
-        if (shiftedMinutes < 0)
-        {
-            shiftedMinutes += minutesInDay;
-        }
+        var shiftedTotalMinutes = (int)currentEnd.TotalMinutes + (int)(updatedStart - previousStart).TotalMinutes;
+        dayOffset = (int)Math.Floor(shiftedTotalMinutes / (double)minutesInDay);
+        var shiftedMinutes = shiftedTotalMinutes - dayOffset * minutesInDay;
 
         endTime = $"{shiftedMinutes / 60:00}:{shiftedMinutes % 60:00}";
         return true;

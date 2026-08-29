@@ -12,7 +12,10 @@ namespace FavGCalSchedulerClone.App.ViewModels;
 public sealed partial class MainViewModel
 {
 
-    public async Task<CalendarCsvExportResult> ExportCurrentYearCsvAsync(string csvPath)
+    public Task<CalendarCsvExportResult> ExportCurrentYearCsvAsync(string csvPath) =>
+        RunExclusiveSyncDataOperationAsync(() => ExportCurrentYearCsvCoreAsync(csvPath));
+
+    private async Task<CalendarCsvExportResult> ExportCurrentYearCsvCoreAsync(string csvPath)
     {
         var events = await LoadYearEventsAsync(CurrentMonth);
         var result = await _csvService.ExportAsync(events, csvPath);
@@ -20,13 +23,13 @@ public sealed partial class MainViewModel
         return result;
     }
 
-    public async Task<CalendarCsvImportResult> ImportCsvAsync(string csvPath)
+    public Task<CalendarCsvImportResult> ImportCsvAsync(string csvPath) =>
+        RunExclusiveSyncDataOperationAsync(() => ImportCsvCoreAsync(csvPath));
+
+    private async Task<CalendarCsvImportResult> ImportCsvCoreAsync(string csvPath)
     {
         var result = await _csvService.ImportAsync(csvPath);
-        foreach (var calendarEvent in result.Events)
-        {
-            await _repository.SaveEventAsync(calendarEvent);
-        }
+        await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, result.Events);
 
         await RefreshCalendarAsync();
         Status = result.Errors.Count == 0
@@ -40,7 +43,10 @@ public sealed partial class MainViewModel
         return _favGCalImportService.AnalyzeAsync(sourceFolder);
     }
 
-    public async Task<FavGCalImportResult> ImportFavGCalSchedulerAsync(FavGCalImportOptions options)
+    public Task<FavGCalImportResult> ImportFavGCalSchedulerAsync(FavGCalImportOptions options) =>
+        RunExclusiveSyncDataOperationAsync(() => ImportFavGCalSchedulerCoreAsync(options));
+
+    private async Task<FavGCalImportResult> ImportFavGCalSchedulerCoreAsync(FavGCalImportOptions options)
     {
         var mappedCalendarIds = options.CalendarMappings.Values
             .Where(id => !string.IsNullOrWhiteSpace(id))
@@ -90,7 +96,7 @@ public sealed partial class MainViewModel
             await SaveApplicationSettingsAsync(CreateSettingsSnapshot());
         }
 
-        await ReloadAvailableCalendarsAsync();
+        await ReloadAvailableCalendarsCoreAsync();
         await RefreshCalendarAsync();
         Status = $"FavGCalSchedulerデータを取り込みました: 追加 {result.ImportedCount} 件、既存紐付け {result.LinkedExistingGoogleCount} 件、重複スキップ {result.SkippedDuplicateCount} 件、ToDo内容修復 {result.CorrectedTodoDescriptionCount} 件";
         return result;
@@ -124,7 +130,7 @@ public sealed partial class MainViewModel
             var key = trimmed[..separator].Trim();
             var value = trimmed[(separator + 1)..].Trim();
             if (section.Equals("DISP_INFO", StringComparison.OrdinalIgnoreCase)
-                && new[] { "DeletePopup", "AppClose", "EditScheduleWindowHide", "StartWeekdayIndex", "WeekdayType", "FontSize", "BottomInfoFontSize", "ToDoRunLimitMonthCount", "ToDoCompLimitMonthCount" }
+                && new[] { "DeletePopup", "EditScheduleWindowHide", "StartWeekdayIndex", "WeekdayType", "FontSize", "BottomInfoFontSize", "ToDoRunLimitMonthCount", "ToDoCompLimitMonthCount" }
                     .Contains(key, StringComparer.OrdinalIgnoreCase))
             {
                 values[key] = value;
@@ -147,11 +153,6 @@ public sealed partial class MainViewModel
         if (values.TryGetValue("DeletePopup", out var deletePopup))
         {
             _settings.ConfirmBeforeDelete = deletePopup != "0";
-        }
-
-        if (values.TryGetValue("AppClose", out var appClose))
-        {
-            _settings.CloseButtonExitsApplication = appClose != "0";
         }
 
         if (values.TryGetValue("ScheduleDeaultAllDay", out var defaultAllDay))

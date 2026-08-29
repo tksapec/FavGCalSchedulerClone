@@ -4,40 +4,103 @@ namespace FavGCalSchedulerClone.App.ViewModels;
 
 public sealed partial class MainViewModel
 {
+    private CalendarViewMode? _searchReturnViewMode;
+    private int _searchGeneration;
+
     public async Task RunCurrentYearSearchAsync()
     {
-        _searchResultsYear = CurrentMonth.Year;
-        await RunSearchForYearAsync(_searchResultsYear.Value);
+        var searchWasVisible = IsSearchResultsVisible;
+        var previousView = CurrentViewMode;
+        var year = CurrentMonth.Year;
+        var query = SearchQuery;
+        var generation = Interlocked.Increment(ref _searchGeneration);
+
+        if (!await RunSearchForYearAsync(year, query, generation, previousView, requireCurrentYearMatch: true))
+        {
+            return;
+        }
+
+        if (!searchWasVisible || previousView != CalendarViewMode.Month)
+        {
+            _searchReturnViewMode = previousView;
+        }
+
+        if (CurrentViewMode != CalendarViewMode.Month)
+        {
+            CurrentViewMode = CalendarViewMode.Month;
+        }
     }
 
-    private async Task RunSearchForYearAsync(int year)
+    private async Task<bool> RunSearchForYearAsync(
+        int year,
+        string query,
+        int generation,
+        CalendarViewMode expectedView,
+        bool requireCurrentYearMatch = false)
     {
-        var results = await SearchYearEventsAsync(new DateTime(year, 1, 1), SearchQuery);
+        var results = await SearchYearEventsAsync(new DateTime(year, 1, 1), query);
+        if (generation != Volatile.Read(ref _searchGeneration)
+            || !string.Equals(SearchQuery, query, StringComparison.Ordinal)
+            || CurrentViewMode != expectedView
+            || (requireCurrentYearMatch && CurrentMonth.Year != year))
+        {
+            return false;
+        }
+
+        _searchResultsYear = year;
+        var selectedSearchResult = SelectedSearchResult;
         _searchResults.ReplaceAll(results);
         SelectedSearchResult = null;
+        if (selectedSearchResult is not null && ReferenceEquals(SelectedEvent, selectedSearchResult))
+        {
+            SelectedEvent = null;
+        }
+
         IsSearchResultsVisible = true;
         OnPropertyChanged(nameof(SearchResultsScopeText));
-        Status = string.IsNullOrWhiteSpace(SearchQuery)
+        Status = string.IsNullOrWhiteSpace(query)
             ? $"{year}年の予定を表示しています: {results.Count}件"
-            : $"「{SearchQuery.Trim()}」の検索結果: {results.Count}件";
+            : $"「{query.Trim()}」の検索結果: {results.Count}件";
+        return true;
     }
 
     public async Task RefreshCurrentYearSearchAsync()
     {
-        if (IsSearchResultsVisible)
+        if (!IsSearchResultsVisible)
         {
-            await RunSearchForYearAsync(_searchResultsYear ?? CurrentMonth.Year);
+            return;
         }
+
+        var year = _searchResultsYear ?? CurrentMonth.Year;
+        var query = SearchQuery;
+        var expectedView = CurrentViewMode;
+        var generation = Interlocked.Increment(ref _searchGeneration);
+        await RunSearchForYearAsync(year, query, generation, expectedView);
     }
 
     private void ClearCurrentYearSearch()
     {
+        Interlocked.Increment(ref _searchGeneration);
+        var returnViewMode = _searchReturnViewMode;
+        var selectedSearchResult = SelectedSearchResult;
+        _searchReturnViewMode = null;
         SearchQuery = "";
         _searchResults.Clear();
         _searchResultsYear = null;
         SelectedSearchResult = null;
+        if (selectedSearchResult is not null && ReferenceEquals(SelectedEvent, selectedSearchResult))
+        {
+            SelectedEvent = null;
+        }
+
         IsSearchResultsVisible = false;
         OnPropertyChanged(nameof(SearchResultsScopeText));
+
+        if (returnViewMode is { } viewMode && CurrentViewMode == CalendarViewMode.Month)
+        {
+            CurrentViewMode = viewMode;
+        }
+
         Status = "検索結果を閉じました。";
     }
 }

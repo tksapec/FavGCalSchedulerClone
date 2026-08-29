@@ -61,6 +61,7 @@ public sealed partial class MainViewModel
             IsDirty = true
         };
         await _repository.SaveEventAsync(testEvent);
+        CaptureUndo("予定追加", [], [testEvent.Id]);
         await RefreshCalendarAsync();
         SelectedEvent = _visibleEvents.FirstOrDefault(item => item.Id == testEvent.Id) ?? testEvent;
         Status = "2分後の通知確認テスト予定を作成しました。";

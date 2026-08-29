@@ -61,7 +61,7 @@ public partial class App : System.Windows.Application
     {
         _isExiting = true;
         _deactivationCancellation?.Cancel();
-        if (_serviceProvider is not null)
+        if (_serviceProvider is not null && _startupInitializationCompleted)
         {
             try
             {
@@ -104,7 +104,8 @@ public partial class App : System.Windows.Application
                 await Task.Delay(50, cancellation.Token);
             }
             if (ShouldSkipReturnToToday()
-                || MainWindow?.DataContext is not MainViewModel viewModel)
+                || MainWindow?.DataContext is not MainViewModel viewModel
+                || !viewModel.ReturnToTodayWhenDeactivated)
             {
                 return;
             }
@@ -122,13 +123,15 @@ public partial class App : System.Windows.Application
         _isExiting
         || !_startupInitializationCompleted
         || _interactionGuard?.IsReturnToTodaySuppressed != false
+        || MainWindow?.IsEnabled == false
         || MainWindow?.DataContext is not MainViewModel
-        || Windows.OfType<Window>().Any(window => window.IsActive);
+        || Windows.OfType<Window>().Any(window =>
+            window.IsActive
+            || (window.IsVisible && ReferenceEquals(window.Owner, MainWindow)));
 
     private async Task CompleteStartupInitializationAsync(Func<Task> initialize, IAppLogger logger)
     {
-        try { await RunStartupInitializationAsync(initialize, logger); }
-        finally { _startupInitializationCompleted = true; }
+        _startupInitializationCompleted = await RunStartupInitializationAsync(initialize, logger);
     }
 
     private static ServiceProvider CreateServiceProvider()
@@ -159,15 +162,17 @@ public partial class App : System.Windows.Application
         return services.BuildServiceProvider();
     }
 
-    internal static async Task RunStartupInitializationAsync(Func<Task> initialize, IAppLogger logger)
+    internal static async Task<bool> RunStartupInitializationAsync(Func<Task> initialize, IAppLogger logger)
     {
         try
         {
             await initialize();
+            return true;
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Application startup initialization failed.");
+            return false;
         }
     }
 
@@ -218,6 +223,16 @@ public partial class App : System.Windows.Application
     {
         if (_isExiting)
         {
+            return;
+        }
+
+        if (MainWindow?.DataContext is MainViewModel { IsDatabaseMaintenanceInProgress: true })
+        {
+            MessageBox.Show(
+                "データベースのメンテナンス処理中のため終了できません。処理完了後にもう一度終了してください。",
+                "FavGCalSchedulerClone",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
             return;
         }
 

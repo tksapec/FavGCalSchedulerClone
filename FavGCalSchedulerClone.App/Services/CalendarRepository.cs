@@ -1,3 +1,4 @@
+using System.Data;
 using System.Globalization;
 using System.Text.Json;
 using FavGCalSchedulerClone.App.Models;
@@ -9,6 +10,11 @@ namespace FavGCalSchedulerClone.App.Services;
 public sealed class CalendarRepository : IEventRepository, ISettingsRepository, ITagRepository, ISyncStateRepository
 {
     private readonly string _databasePath;
+    private readonly object _maintenanceLock = new();
+    private readonly AsyncLocal<MaintenanceAccessToken?> _maintenanceAccess = new();
+    private bool _databaseMaintenanceRequested;
+    private int _activeConnectionCount;
+    private TaskCompletionSource<bool>? _connectionsDrained;
 
     public CalendarRepository(string? databasePath = null)
     {
@@ -16,6 +22,81 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
     }
 
     public string DatabasePath => _databasePath;
+
+    internal async Task BeginMaintenanceAsync(CancellationToken cancellationToken = default)
+    {
+        Task? waitTask = null;
+        lock (_maintenanceLock)
+        {
+            if (_databaseMaintenanceRequested)
+            {
+                throw new InvalidOperationException("Database maintenance is in progress.");
+            }
+
+            _databaseMaintenanceRequested = true;
+            if (_activeConnectionCount > 0)
+            {
+                _connectionsDrained = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                waitTask = _connectionsDrained.Task;
+            }
+        }
+
+        if (waitTask is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await waitTask.WaitAsync(cancellationToken);
+        }
+        catch
+        {
+            EndMaintenance();
+            throw;
+        }
+    }
+
+    internal void EndMaintenance()
+    {
+        lock (_maintenanceLock)
+        {
+            _databaseMaintenanceRequested = false;
+            _connectionsDrained = null;
+        }
+    }
+
+    internal async Task RunWithMaintenanceAccessAsync(Func<Task> action)
+    {
+        var previousAccess = _maintenanceAccess.Value;
+        var access = new MaintenanceAccessToken();
+        _maintenanceAccess.Value = access;
+        try
+        {
+            await action();
+        }
+        finally
+        {
+            access.Deactivate();
+            _maintenanceAccess.Value = previousAccess;
+        }
+    }
+
+    internal async Task<T> RunWithMaintenanceAccessAsync<T>(Func<Task<T>> action)
+    {
+        var previousAccess = _maintenanceAccess.Value;
+        var access = new MaintenanceAccessToken();
+        _maintenanceAccess.Value = access;
+        try
+        {
+            return await action();
+        }
+        finally
+        {
+            access.Deactivate();
+            _maintenanceAccess.Value = previousAccess;
+        }
+    }
 
     public async Task InitializeAsync()
     {
@@ -310,7 +391,14 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
                   google_email_reminder_enabled = 0,
                   app_reminder_minutes_json = '[]',
                   google_email_reminder_minutes_json = '[]',
-                  google_reminder_metadata_json = NULL
+                  google_reminder_metadata_json = CASE
+                      WHEN google_reminder_metadata_json IS NULL OR json_valid(google_reminder_metadata_json) = 0 THEN NULL
+                      WHEN json_extract(google_reminder_metadata_json, '$.StartTimeZoneId') IS NULL
+                       AND json_extract(google_reminder_metadata_json, '$.EndTimeZoneId') IS NULL THEN NULL
+                      ELSE json_object(
+                          'StartTimeZoneId', json_extract(google_reminder_metadata_json, '$.StartTimeZoneId'),
+                          'EndTimeZoneId', json_extract(google_reminder_metadata_json, '$.EndTimeZoneId'))
+                  END
               WHERE id = $id
               """
             : """
@@ -320,7 +408,14 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
                   google_email_reminder_enabled = 0,
                   app_reminder_minutes_json = '[]',
                   google_email_reminder_minutes_json = '[]',
-                  google_reminder_metadata_json = NULL,
+                  google_reminder_metadata_json = CASE
+                      WHEN google_reminder_metadata_json IS NULL OR json_valid(google_reminder_metadata_json) = 0 THEN NULL
+                      WHEN json_extract(google_reminder_metadata_json, '$.StartTimeZoneId') IS NULL
+                       AND json_extract(google_reminder_metadata_json, '$.EndTimeZoneId') IS NULL THEN NULL
+                      ELSE json_object(
+                          'StartTimeZoneId', json_extract(google_reminder_metadata_json, '$.StartTimeZoneId'),
+                          'EndTimeZoneId', json_extract(google_reminder_metadata_json, '$.EndTimeZoneId'))
+                  END,
                   last_synced_google_etag = COALESCE($etag, last_synced_google_etag)
               WHERE id = $id
               """;
@@ -343,16 +438,16 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
             FROM events
             WHERE calendar_id = $calendar_id
               AND title = $title
-              AND start = $start
-              AND end = $end
+              AND start_utc_ticks = $start_utc_ticks
+              AND end_utc_ticks = $end_utc_ticks
               AND COALESCE(location, '') = COALESCE($location, '')
               AND is_deleted = 0
             LIMIT 1
             """;
         command.Parameters.AddWithValue("$calendar_id", calendarEvent.CalendarId);
         command.Parameters.AddWithValue("$title", calendarEvent.Title);
-        command.Parameters.AddWithValue("$start", calendarEvent.Start.ToString("O"));
-        command.Parameters.AddWithValue("$end", calendarEvent.End.ToString("O"));
+        command.Parameters.AddWithValue("$start_utc_ticks", calendarEvent.Start.UtcTicks);
+        command.Parameters.AddWithValue("$end_utc_ticks", calendarEvent.End.UtcTicks);
         command.Parameters.AddWithValue("$location", (object?)calendarEvent.Location ?? DBNull.Value);
         return (await ReadEventsAsync(command)).FirstOrDefault();
     }
@@ -568,19 +663,96 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
     public async Task SaveSyncTokenAsync(string calendarId, string? syncToken)
     {
         await using var connection = OpenConnection();
-        await using var command = connection.CreateCommand();
-        if (string.IsNullOrWhiteSpace(syncToken))
-        {
-            command.CommandText = "DELETE FROM settings WHERE key = $key";
-        }
-        else
-        {
-            command.CommandText = "INSERT OR REPLACE INTO settings(key, value) VALUES($key, $value)";
-            command.Parameters.AddWithValue("$value", syncToken);
-        }
+        await using var transaction = connection.BeginTransaction();
+        var syncKey = $"sync:{calendarId}";
+        var recoveryKey = $"sync-recovery-start:{calendarId}";
 
-        command.Parameters.AddWithValue("$key", $"sync:{calendarId}");
-        await command.ExecuteNonQueryAsync();
+        try
+        {
+            string? existingToken;
+            await using (var readToken = connection.CreateCommand())
+            {
+                readToken.Transaction = transaction;
+                readToken.CommandText = "SELECT value FROM settings WHERE key = $key";
+                readToken.Parameters.AddWithValue("$key", syncKey);
+                existingToken = await readToken.ExecuteScalarAsync() as string;
+            }
+
+            if (string.IsNullOrWhiteSpace(syncToken))
+            {
+                if (!string.IsNullOrWhiteSpace(existingToken))
+                {
+                    await using var markRecovery = connection.CreateCommand();
+                    markRecovery.Transaction = transaction;
+                    markRecovery.CommandText = "INSERT OR REPLACE INTO settings(key, value) VALUES($key, $value)";
+                    markRecovery.Parameters.AddWithValue("$key", recoveryKey);
+                    markRecovery.Parameters.AddWithValue(
+                        "$value",
+                        DateTimeOffset.UtcNow.UtcTicks.ToString(CultureInfo.InvariantCulture));
+                    await markRecovery.ExecuteNonQueryAsync();
+                }
+
+                await using var deleteToken = connection.CreateCommand();
+                deleteToken.Transaction = transaction;
+                deleteToken.CommandText = "DELETE FROM settings WHERE key = $key";
+                deleteToken.Parameters.AddWithValue("$key", syncKey);
+                await deleteToken.ExecuteNonQueryAsync();
+            }
+            else
+            {
+                string? recoveryStartValue;
+                await using (var readRecovery = connection.CreateCommand())
+                {
+                    readRecovery.Transaction = transaction;
+                    readRecovery.CommandText = "SELECT value FROM settings WHERE key = $key";
+                    readRecovery.Parameters.AddWithValue("$key", recoveryKey);
+                    recoveryStartValue = await readRecovery.ExecuteScalarAsync() as string;
+                }
+
+                if (long.TryParse(
+                    recoveryStartValue,
+                    NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,
+                    out var recoveryStartUtcTicks))
+                {
+                    await using var cleanup = connection.CreateCommand();
+                    cleanup.Transaction = transaction;
+                    cleanup.CommandText = """
+                        DELETE FROM events
+                        WHERE calendar_id = $calendar_id
+                          AND is_dirty = 0
+                          AND google_event_id IS NOT NULL
+                          AND TRIM(google_event_id) <> ''
+                          AND (last_synced_at_utc_ticks IS NULL OR last_synced_at_utc_ticks < $recovery_start_utc_ticks)
+                        """;
+                    cleanup.Parameters.AddWithValue("$calendar_id", calendarId);
+                    cleanup.Parameters.AddWithValue("$recovery_start_utc_ticks", recoveryStartUtcTicks);
+                    await cleanup.ExecuteNonQueryAsync();
+                }
+
+                await using (var saveToken = connection.CreateCommand())
+                {
+                    saveToken.Transaction = transaction;
+                    saveToken.CommandText = "INSERT OR REPLACE INTO settings(key, value) VALUES($key, $value)";
+                    saveToken.Parameters.AddWithValue("$key", syncKey);
+                    saveToken.Parameters.AddWithValue("$value", syncToken);
+                    await saveToken.ExecuteNonQueryAsync();
+                }
+
+                await using var clearRecovery = connection.CreateCommand();
+                clearRecovery.Transaction = transaction;
+                clearRecovery.CommandText = "DELETE FROM settings WHERE key = $key";
+                clearRecovery.Parameters.AddWithValue("$key", recoveryKey);
+                await clearRecovery.ExecuteNonQueryAsync();
+            }
+
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
     }
 
     private async Task UpsertEventAsync(CalendarEvent calendarEvent)
@@ -632,21 +804,67 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         }
     }
 
-    private SqliteConnection OpenConnection()
+    internal SqliteConnection OpenConnection()
     {
-        var directory = Path.GetDirectoryName(_databasePath);
-        if (!string.IsNullOrWhiteSpace(directory))
+        lock (_maintenanceLock)
         {
-            Directory.CreateDirectory(directory);
+            if (_databaseMaintenanceRequested && _maintenanceAccess.Value?.IsActive != true)
+            {
+                throw new InvalidOperationException("Database maintenance is in progress.");
+            }
+
+            _activeConnectionCount++;
         }
 
-        var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        var released = 0;
+        void ReleaseConnection()
         {
-            DataSource = _databasePath,
-            DefaultTimeout = 10
-        }.ToString());
-        connection.Open();
-        return connection;
+            if (Interlocked.Exchange(ref released, 1) != 0)
+            {
+                return;
+            }
+
+            lock (_maintenanceLock)
+            {
+                _activeConnectionCount--;
+                if (_activeConnectionCount == 0)
+                {
+                    _connectionsDrained?.TrySetResult(true);
+                }
+            }
+        }
+
+        SqliteConnection? connection = null;
+        try
+        {
+            var directory = Path.GetDirectoryName(_databasePath);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            connection = new SqliteConnection(new SqliteConnectionStringBuilder
+            {
+                DataSource = _databasePath,
+                DefaultTimeout = 10
+            }.ToString());
+            connection.StateChange += (_, args) =>
+            {
+                if (args.CurrentState is ConnectionState.Closed or ConnectionState.Broken)
+                {
+                    ReleaseConnection();
+                }
+            };
+
+            connection.Open();
+            return connection;
+        }
+        catch
+        {
+            ReleaseConnection();
+            connection?.Dispose();
+            throw;
+        }
     }
 
     private static async Task ExecuteAsync(SqliteConnection connection, string sql)
@@ -699,7 +917,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
                 DirtyFields = reader.IsDBNull(23) ? null : reader.GetString(23),
                 GoogleReminderMetadata = reader.IsDBNull(24)
                     ? null
-                    : JsonSerializer.Deserialize<GoogleReminderMetadata>(reader.GetString(24)),
+                    : DeserializeGoogleReminderMetadata(reader.GetString(24)),
                 AppReminderMinutesBeforeStart = reader.FieldCount <= 25 || reader.IsDBNull(25)
                     ? []
                     : DeserializeReminderMinutes(reader.GetString(25)),
@@ -881,6 +1099,23 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
             : [];
     }
 
+    private static GoogleReminderMetadata? DeserializeGoogleReminderMetadata(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<GoogleReminderMetadata>(json);
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
     private static List<int> DeserializeReminderMinutes(string? json)
     {
         if (string.IsNullOrWhiteSpace(json))
@@ -913,5 +1148,14 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         }
 
         await ExecuteAsync(connection, transaction, $"ALTER TABLE {tableName} ADD COLUMN {columnName} {sqlDefinition};");
+    }
+
+    private sealed class MaintenanceAccessToken
+    {
+        private int _isActive = 1;
+
+        public bool IsActive => Volatile.Read(ref _isActive) != 0;
+
+        public void Deactivate() => Interlocked.Exchange(ref _isActive, 0);
     }
 }

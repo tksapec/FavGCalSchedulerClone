@@ -1,0 +1,235 @@
+using FavGCalSchedulerClone.App.Models;
+using FavGCalSchedulerClone.App.Services;
+using FavGCalSchedulerClone.App.ViewModels;
+using FavGCalSchedulerClone.App.Views.Dialogs;
+
+namespace FavGCalSchedulerClone.Tests;
+
+public sealed class SearchEventListTests
+{
+    [Fact]
+    public async Task SearchEventsAsync_FiltersSchedulesAndTodos()
+    {
+        var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
+        await repository.InitializeAsync();
+        await repository.SaveEventAsync(Event("schedule", isTodo: false));
+        await repository.SaveEventAsync(Event("todo", isTodo: true));
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+
+        var all = await viewModel.SearchEventsAsync(new EventListFilter("", EventKindFilter.All, EventSearchRange.Year, new DateTime(2026, 1, 1)));
+        var schedules = await viewModel.SearchEventsAsync(new EventListFilter("", EventKindFilter.Schedule, EventSearchRange.Year, new DateTime(2026, 1, 1)));
+        var todos = await viewModel.SearchEventsAsync(new EventListFilter("", EventKindFilter.Todo, EventSearchRange.Year, new DateTime(2026, 1, 1)));
+
+        Assert.Equal(2, all.Count);
+        Assert.Single(schedules);
+        Assert.Equal("schedule", schedules[0].Title);
+        Assert.Single(todos);
+        Assert.Equal("todo", todos[0].Title);
+    }
+
+    [Fact]
+    public async Task SearchEventsAsync_YearRangeKeepsExistingListScope()
+    {
+        var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
+        await repository.InitializeAsync();
+        await repository.SaveEventAsync(Event("this year", isTodo: false, start: new DateTimeOffset(2026, 5, 1, 9, 0, 0, TimeSpan.Zero)));
+        await repository.SaveEventAsync(Event("next year", isTodo: false, start: new DateTimeOffset(2027, 5, 1, 9, 0, 0, TimeSpan.Zero)));
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+
+        var result = await viewModel.SearchEventsAsync(new EventListFilter("", EventKindFilter.All, EventSearchRange.Year, new DateTime(2026, 5, 31)));
+
+        Assert.Single(result);
+        Assert.Equal("this year", result[0].Title);
+    }
+
+    [Fact]
+    public async Task SearchEventsAsync_CustomRangeUsesSelectedStartAndEndDates()
+    {
+        var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
+        await repository.InitializeAsync();
+        await repository.SaveEventAsync(Event("inside", isTodo: false, start: new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.Zero)));
+        await repository.SaveEventAsync(Event("outside", isTodo: false, start: new DateTimeOffset(2026, 6, 1, 9, 0, 0, TimeSpan.Zero)));
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+
+        var result = await viewModel.SearchEventsAsync(new EventListFilter(
+            "",
+            EventKindFilter.All,
+            EventSearchRange.Custom,
+            new DateTime(2026, 5, 1),
+            StartDate: new DateTime(2026, 5, 10),
+            EndDate: new DateTime(2026, 5, 20)));
+
+        Assert.Single(result);
+        Assert.Equal("inside", result[0].Title);
+    }
+
+    [Fact]
+    public async Task ClearCurrentYearSearch_PreservesSelectionWhenNoSearchResultWasSelected()
+    {
+        var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
+        await repository.InitializeAsync();
+        var preselected = Event("preselected", isTodo: false, start: new DateTimeOffset(2026, 5, 10, 9, 0, 0, TimeSpan.Zero));
+        await repository.SaveEventAsync(preselected);
+        await repository.SaveEventAsync(Event("other", isTodo: false, start: new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.Zero)));
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        viewModel.CurrentMonth = new DateTime(2026, 5, 1);
+        await viewModel.InitializeAsync();
+        viewModel.SelectEvent(preselected, selectEventDay: false);
+
+        await viewModel.RunCurrentYearSearchAsync();
+        Assert.Null(viewModel.SelectedSearchResult);
+
+        viewModel.ClearCurrentYearSearchCommand.Execute(null);
+
+        Assert.Same(preselected, viewModel.SelectedEvent);
+    }
+
+    [Fact]
+    public async Task ClearCurrentYearSearch_ClearsSelectedEventFromHiddenResult()
+    {
+        var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
+        await repository.InitializeAsync();
+        await repository.SaveEventAsync(Event("target", isTodo: false, start: new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.Zero)));
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        viewModel.CurrentMonth = new DateTime(2026, 5, 1);
+
+        await viewModel.RunCurrentYearSearchAsync();
+        var result = Assert.Single(viewModel.SearchResults);
+        viewModel.SelectedSearchResult = result;
+        Assert.Same(result, viewModel.SelectedEvent);
+
+        viewModel.ClearCurrentYearSearchCommand.Execute(null);
+
+        Assert.False(viewModel.IsSearchResultsVisible);
+        Assert.Null(viewModel.SelectedSearchResult);
+        Assert.Null(viewModel.SelectedEvent);
+    }
+
+    [Fact]
+    public async Task RunCurrentYearSearchAsync_ReplacingResultsClearsSelectedEventFromOldResult()
+    {
+        var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
+        await repository.InitializeAsync();
+        await repository.SaveEventAsync(Event("target", isTodo: false, start: new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.Zero)));
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        viewModel.CurrentMonth = new DateTime(2026, 5, 1);
+
+        await viewModel.RunCurrentYearSearchAsync();
+        var selected = Assert.Single(viewModel.SearchResults);
+        viewModel.SelectedSearchResult = selected;
+        Assert.Same(selected, viewModel.SelectedEvent);
+
+        await viewModel.RunCurrentYearSearchAsync();
+
+        Assert.True(viewModel.IsSearchResultsVisible);
+        Assert.Null(viewModel.SelectedSearchResult);
+        Assert.Null(viewModel.SelectedEvent);
+        Assert.Single(viewModel.SearchResults);
+    }
+
+    [Fact]
+    public async Task RunCurrentYearSearchAsync_AfterManualViewChange_RestoresTheMostRecentSearchView()
+    {
+        var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
+        await repository.InitializeAsync();
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository))
+        {
+            CurrentViewMode = CalendarViewMode.Week
+        };
+
+        await viewModel.RunCurrentYearSearchAsync();
+        viewModel.CurrentViewMode = CalendarViewMode.Day;
+        await viewModel.RunCurrentYearSearchAsync();
+        viewModel.ClearCurrentYearSearchCommand.Execute(null);
+
+        Assert.Equal(CalendarViewMode.Day, viewModel.CurrentViewMode);
+    }
+
+    [Fact]
+    public async Task RunCurrentYearSearchAsync_WhenSearchFails_PreservesTheCurrentView()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var repository = new CalendarRepository(directory);
+            var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository))
+            {
+                CurrentViewMode = CalendarViewMode.Week
+            };
+
+            await Assert.ThrowsAnyAsync<Exception>(() => viewModel.RunCurrentYearSearchAsync());
+
+            Assert.Equal(CalendarViewMode.Week, viewModel.CurrentViewMode);
+            Assert.False(viewModel.IsSearchResultsVisible);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RunCurrentYearSearchAsync_WhenVisibleSearchFails_PreservesDisplayedScopeYear()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var databasePath = Path.Combine(directory, "calendar.db");
+        try
+        {
+            var repository = new CalendarRepository(databasePath);
+            await repository.InitializeAsync();
+            await repository.SaveEventAsync(Event("2026 target", isTodo: false, start: new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.Zero)));
+            var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository))
+            {
+                CurrentMonth = new DateTime(2026, 5, 1)
+            };
+
+            await viewModel.RunCurrentYearSearchAsync();
+            Assert.Equal("2026年の検索結果", viewModel.SearchResultsScopeText);
+            Assert.Single(viewModel.SearchResults);
+
+            viewModel.CurrentMonth = new DateTime(2027, 5, 1);
+            await repository.BeginMaintenanceAsync();
+            try
+            {
+                await Assert.ThrowsAsync<InvalidOperationException>(() => viewModel.RunCurrentYearSearchAsync());
+
+                Assert.True(viewModel.IsSearchResultsVisible);
+                Assert.Equal("2026年の検索結果", viewModel.SearchResultsScopeText);
+                Assert.Single(viewModel.SearchResults);
+            }
+            finally
+            {
+                repository.EndMaintenance();
+            }
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void EventListDialog_ResultColumnsMatchSearchListRequirements()
+    {
+        Assert.Equal(
+            ["開始日時", "終了日時", "アラーム", "カレンダー", "場所", "件名", "内容", "概要"],
+            EventListDialog.ResultColumnHeaders);
+    }
+
+    private static CalendarEvent Event(string title, bool isTodo, DateTimeOffset? start = null)
+    {
+        var eventStart = start ?? new DateTimeOffset(2026, 1, 2, 9, 0, 0, TimeSpan.Zero);
+        return new CalendarEvent
+        {
+            CalendarId = "primary",
+            Title = title,
+            Description = isTodo ? "#todoA50% body" : "body",
+            Start = eventStart,
+            End = eventStart.AddHours(1),
+            IsAllDay = false
+        };
+    }
+}

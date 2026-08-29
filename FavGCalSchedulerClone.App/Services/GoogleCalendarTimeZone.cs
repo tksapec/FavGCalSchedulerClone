@@ -8,12 +8,105 @@ internal static class GoogleCalendarTimeZone
 
     public static string ToIanaId(TimeZoneInfo timeZone)
     {
-        if (string.Equals(timeZone.Id, "Tokyo Standard Time", StringComparison.OrdinalIgnoreCase))
+        if (LooksLikeIanaId(timeZone.Id))
         {
-            return TokyoIanaId;
+            return timeZone.Id;
         }
 
-        return LooksLikeIanaId(timeZone.Id) ? timeZone.Id : TokyoIanaId;
+        if (TimeZoneInfo.TryConvertWindowsIdToIanaId(timeZone.Id, out var ianaId)
+            && !string.IsNullOrWhiteSpace(ianaId))
+        {
+            return ianaId;
+        }
+
+        if (string.Equals(timeZone.Id, "UTC", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Etc/UTC";
+        }
+
+        // The application is primarily used in Japan. Keep the historical fallback only
+        // for an OS time-zone identifier that .NET itself cannot map.
+        return TokyoIanaId;
+    }
+
+    public static bool TryCreateDateTimeOffset(
+        DateTime wallClock,
+        string? timeZoneId,
+        TimeSpan? preferredOffset,
+        out DateTimeOffset result)
+    {
+        var unspecified = DateTime.SpecifyKind(wallClock, DateTimeKind.Unspecified);
+        if (string.IsNullOrWhiteSpace(timeZoneId) && preferredOffset is { } explicitOffset)
+        {
+            result = new DateTimeOffset(unspecified, explicitOffset);
+            return true;
+        }
+
+        if (!TryResolveTimeZone(timeZoneId, out var timeZone) || timeZone.IsInvalidTime(unspecified))
+        {
+            result = default;
+            return false;
+        }
+
+        var offset = timeZone.GetUtcOffset(unspecified);
+        if (timeZone.IsAmbiguousTime(unspecified) && preferredOffset is { } preferred)
+        {
+            var offsets = timeZone.GetAmbiguousTimeOffsets(unspecified);
+            if (offsets.Contains(preferred))
+            {
+                offset = preferred;
+            }
+        }
+
+        result = new DateTimeOffset(unspecified, offset);
+        return true;
+    }
+
+    private static bool TryResolveTimeZone(string? timeZoneId, out TimeZoneInfo timeZone)
+    {
+        if (string.IsNullOrWhiteSpace(timeZoneId))
+        {
+            timeZone = TimeZoneInfo.Local;
+            return true;
+        }
+
+        if (TryFindTimeZone(timeZoneId, out timeZone))
+        {
+            return true;
+        }
+
+        if (TimeZoneInfo.TryConvertIanaIdToWindowsId(timeZoneId, out var windowsId)
+            && TryFindTimeZone(windowsId, out timeZone))
+        {
+            return true;
+        }
+
+        if (TimeZoneInfo.TryConvertWindowsIdToIanaId(timeZoneId, out var ianaId)
+            && TryFindTimeZone(ianaId, out timeZone))
+        {
+            return true;
+        }
+
+        timeZone = TimeZoneInfo.Local;
+        return false;
+    }
+
+    private static bool TryFindTimeZone(string id, out TimeZoneInfo timeZone)
+    {
+        try
+        {
+            timeZone = TimeZoneInfo.FindSystemTimeZoneById(id);
+            return true;
+        }
+        catch (TimeZoneNotFoundException)
+        {
+        }
+        catch (InvalidTimeZoneException)
+        {
+        }
+
+        timeZone = TimeZoneInfo.Local;
+        return false;
     }
 
     private static bool LooksLikeIanaId(string id)

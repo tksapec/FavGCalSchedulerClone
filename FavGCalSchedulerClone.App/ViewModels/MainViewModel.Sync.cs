@@ -11,10 +11,16 @@ namespace FavGCalSchedulerClone.App.ViewModels;
 
 public sealed partial class MainViewModel
 {
+    private readonly SemaphoreSlim _syncDataOperationGate = new(1, 1);
+    private int _manualSyncFlowInProgress;
 
-    public async Task<SyncPreview> CreateSyncPreviewAsync()
+    public Task<SyncPreview> CreateSyncPreviewAsync() =>
+        RunExclusiveSyncDataOperationAsync(CreateSyncPreviewCoreAsync);
+
+    private async Task<SyncPreview> CreateSyncPreviewCoreAsync()
     {
         await SaveOAuthPathAsync();
+        await EnsureGoogleIdentityIntegrityAsync();
         return await _syncService.PreviewAsync(CreateSettingsSnapshot());
     }
 
@@ -30,21 +36,37 @@ public sealed partial class MainViewModel
 
     public async Task<SyncResult?> SynchronizeManuallyWithPreviewAsync()
     {
-        var settings = CreateSettingsSnapshot();
-        if (settings.ShowSyncPreviewBeforeManualSync && _confirmManualSyncPreviewAsync is not null)
+        if (Interlocked.Exchange(ref _manualSyncFlowInProgress, 1) != 0)
         {
-            var preview = await CreateSyncPreviewAsync();
-            if (!await _confirmManualSyncPreviewAsync(preview))
-            {
-                Status = "同期をキャンセルしました。";
-                return null;
-            }
+            Status = "手動同期の確認または実行中です。";
+            return null;
         }
 
-        return await SynchronizeManuallyAsync();
+        try
+        {
+            var settings = CreateSettingsSnapshot();
+            if (settings.ShowSyncPreviewBeforeManualSync && _confirmManualSyncPreviewAsync is not null)
+            {
+                var preview = await CreateSyncPreviewAsync();
+                if (!await _confirmManualSyncPreviewAsync(preview))
+                {
+                    Status = "同期をキャンセルしました。";
+                    return null;
+                }
+            }
+
+            return await SynchronizeManuallyAsync();
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _manualSyncFlowInProgress, 0);
+        }
     }
 
-    public async Task<SyncResult> SynchronizeDirtyOnlyAsync()
+    public Task<SyncResult> SynchronizeDirtyOnlyAsync() =>
+        RunExclusiveSyncDataOperationAsync(SynchronizeDirtyOnlyCoreAsync);
+
+    private async Task<SyncResult> SynchronizeDirtyOnlyCoreAsync()
     {
         var dirtyIds = (await _repository.LoadDirtyEventsAsync())
             .Select(item => item.Id)
@@ -57,18 +79,24 @@ public sealed partial class MainViewModel
             return empty;
         }
 
-        var result = await ResyncDirtyItemsAsync(dirtyIds);
+        var result = await ResyncDirtyItemsCoreAsync(dirtyIds);
         await RefreshOperationalStatusAsync(null);
         return result;
     }
 
-    public async Task<SyncDiagnosticsSnapshot> LoadSyncDiagnosticsAsync()
+    public Task<SyncDiagnosticsSnapshot> LoadSyncDiagnosticsAsync() =>
+        RunExclusiveSyncDataOperationAsync(LoadSyncDiagnosticsCoreAsync);
+
+    private async Task<SyncDiagnosticsSnapshot> LoadSyncDiagnosticsCoreAsync()
     {
         await SaveOAuthPathAsync();
         return await _syncService.LoadDiagnosticsAsync(CreateSettingsSnapshot());
     }
 
-    public async Task<int> RefreshGoogleReminderMetadataAsync()
+    public Task<int> RefreshGoogleReminderMetadataAsync() =>
+        RunExclusiveSyncDataOperationAsync(RefreshGoogleReminderMetadataCoreAsync);
+
+    private async Task<int> RefreshGoogleReminderMetadataCoreAsync()
     {
         await SaveOAuthPathAsync();
         var now = DateTimeOffset.Now;
@@ -82,16 +110,24 @@ public sealed partial class MainViewModel
         return updated;
     }
 
-    public async Task<SyncResult> ResyncDirtyItemsAsync(IReadOnlyCollection<string> localIds)
+    public Task<SyncResult> ResyncDirtyItemsAsync(IReadOnlyCollection<string> localIds) =>
+        RunExclusiveSyncDataOperationAsync(() => ResyncDirtyItemsCoreAsync(localIds));
+
+    private async Task<SyncResult> ResyncDirtyItemsCoreAsync(IReadOnlyCollection<string> localIds)
     {
         await SaveOAuthPathAsync();
-        var result = await _syncService.SyncDirtyEventsAsync(CreateSettingsSnapshot(), localIds.ToHashSet(StringComparer.Ordinal));
+        var targetIds = localIds.ToHashSet(StringComparer.Ordinal);
+        await EnsureGoogleIdentityIntegrityAsync(targetIds);
+        var result = await _syncService.SyncDirtyEventsAsync(CreateSettingsSnapshot(), targetIds);
         await RefreshCalendarAsync();
         Status = $"{result.Message} / 未同期残数 {(await _repository.LoadDirtyEventsAsync()).Count}";
         return result;
     }
 
-    public async Task<SyncResult> ResyncFailedItemsAsync(IReadOnlyCollection<string> localIds)
+    public Task<SyncResult> ResyncFailedItemsAsync(IReadOnlyCollection<string> localIds) =>
+        RunExclusiveSyncDataOperationAsync(() => ResyncFailedItemsCoreAsync(localIds));
+
+    private async Task<SyncResult> ResyncFailedItemsCoreAsync(IReadOnlyCollection<string> localIds)
     {
         var dirtyIds = (await _repository.LoadDirtyEventsAsync())
             .Select(item => item.Id)
@@ -106,10 +142,13 @@ public sealed partial class MainViewModel
             return empty;
         }
 
-        return await ResyncDirtyItemsAsync(targets);
+        return await ResyncDirtyItemsCoreAsync(targets);
     }
 
-    public async Task<int> MarkDirtyItemsSyncedAsync(IReadOnlyCollection<string> localIds)
+    public Task<int> MarkDirtyItemsSyncedAsync(IReadOnlyCollection<string> localIds) =>
+        RunExclusiveSyncDataOperationAsync(() => MarkDirtyItemsSyncedCoreAsync(localIds));
+
+    private async Task<int> MarkDirtyItemsSyncedCoreAsync(IReadOnlyCollection<string> localIds)
     {
         await CreateDiagnosticsBulkBackupAsync();
         var updated = await _repository.MarkSyncedByIdsAsync(localIds);
@@ -118,7 +157,10 @@ public sealed partial class MainViewModel
         return updated;
     }
 
-    public async Task<SyncResult> DiscardLocalChangesAsync(IReadOnlyCollection<string> localIds)
+    public Task<SyncResult> DiscardLocalChangesAsync(IReadOnlyCollection<string> localIds) =>
+        RunExclusiveSyncDataOperationAsync(() => DiscardLocalChangesCoreAsync(localIds));
+
+    private async Task<SyncResult> DiscardLocalChangesCoreAsync(IReadOnlyCollection<string> localIds)
     {
         await CreateDiagnosticsBulkBackupAsync();
         await SaveOAuthPathAsync();
@@ -128,13 +170,21 @@ public sealed partial class MainViewModel
         return result;
     }
 
-    public async Task ClearSyncDiagnosticsAsync()
+    public Task ClearSyncDiagnosticsAsync() =>
+        RunExclusiveSyncDataOperationAsync(ClearSyncDiagnosticsCoreAsync);
+
+    private async Task ClearSyncDiagnosticsCoreAsync()
     {
         await _syncService.ClearSyncDiagnosticsAsync();
     }
 
     public async Task RunAutomaticSyncIfDueAsync()
     {
+        if (Volatile.Read(ref _manualSyncFlowInProgress) != 0)
+        {
+            return;
+        }
+
         var settings = CreateSettingsSnapshot();
         if (settings.AutomaticSyncIntervalMinutes is not int interval
             || !CanSynchronize(settings)
@@ -162,16 +212,74 @@ public sealed partial class MainViewModel
             && File.Exists(settings.OAuthClientJsonPath);
     }
 
+    private async Task EnsureGoogleIdentityIntegrityAsync(IReadOnlySet<string>? localIds = null)
+    {
+        var broken = (await _repository.LoadDirtyEventsAsync())
+            .Where(item => localIds is null || localIds.Contains(item.Id))
+            .Where(item => string.IsNullOrWhiteSpace(item.GoogleEventId))
+            .Where(item => item.LastSyncedAt is not null || !string.IsNullOrWhiteSpace(item.LastSyncedGoogleEtag))
+            .ToArray();
+        if (broken.Length == 0)
+        {
+            return;
+        }
+
+        var sample = broken[0];
+        throw new InvalidOperationException(
+            $"Google Event ID が失われた同期済み予定を {broken.Length} 件検出しました。"
+            + $" 重複作成を防ぐため同期を中止しました。対象例: {sample.Title} ({sample.Start:g})。"
+            + " Google同期診断またはバックアップから紐付けを確認してください。");
+    }
+
     private async Task<SyncResult?> SynchronizeAsync(bool reportErrors, SyncInvocationKind invocationKind)
     {
-        if (Interlocked.Exchange(ref _syncInProgress, 1) != 0)
+        if (Volatile.Read(ref _databaseMaintenanceInProgress) != 0)
         {
-            RequestSyncRerun(invocationKind);
+            if (reportErrors)
+            {
+                Status = "データベースのリストア中はGoogle同期を開始できません。";
+            }
             return null;
         }
 
+        if (Interlocked.Exchange(ref _syncInProgress, 1) != 0)
+        {
+            if (invocationKind != SyncInvocationKind.Automatic)
+            {
+                RequestSyncRerun(invocationKind);
+            }
+            return null;
+        }
+
+        // Close the race where restore starts after the first maintenance check but
+        // before this invocation acquires the sync-in-progress flag.
+        if (Volatile.Read(ref _databaseMaintenanceInProgress) != 0)
+        {
+            Interlocked.Exchange(ref _syncInProgress, 0);
+            if (reportErrors)
+            {
+                Status = "データベースのリストア中はGoogle同期を開始できません。";
+            }
+            return null;
+        }
+
+        var syncDataGateEntered = false;
         try
         {
+            await _syncDataOperationGate.WaitAsync();
+            syncDataGateEntered = true;
+
+            // A diagnostic operation can keep the gate busy long enough for restore
+            // maintenance to begin after the earlier checks. Re-check after acquiring it.
+            if (Volatile.Read(ref _databaseMaintenanceInProgress) != 0)
+            {
+                if (reportErrors)
+                {
+                    Status = "データベースのリストア中はGoogle同期を開始できません。";
+                }
+                return null;
+            }
+
             await SaveOAuthPathAsync();
             var syncSettings = CreateSettingsSnapshot();
             if (!CanSynchronize(syncSettings))
@@ -184,6 +292,7 @@ public sealed partial class MainViewModel
                 return null;
             }
 
+            await EnsureGoogleIdentityIntegrityAsync();
             Status = "Googleカレンダーと同期中...";
             IsSynchronizing = true;
             var result = await _syncService.SyncAsync(
@@ -211,7 +320,7 @@ public sealed partial class MainViewModel
             try
             {
                 _eventColorPalette = await _syncService.RefreshEventColorPaletteAsync();
-                await ReloadAvailableCalendarsAsync();
+                await ReloadAvailableCalendarsCoreAsync();
                 await RefreshCalendarAsync();
             }
             catch (Exception reloadEx)
@@ -231,27 +340,106 @@ public sealed partial class MainViewModel
         catch (Exception ex) when (reportErrors)
         {
             Debug.WriteLine(ex);
-            await _syncService.RecordFailedSyncAsync(ex.Message, CreateSettingsSnapshot().EnableSyncDiagnostics);
+            await RecordFailedSyncSafelyAsync(ex);
             Status = "同期に失敗しました。Google同期診断を確認してください。";
             throw;
         }
         catch (Exception ex) when (!reportErrors)
         {
             Debug.WriteLine(ex);
-            await _syncService.RecordFailedSyncAsync(ex.Message, CreateSettingsSnapshot().EnableSyncDiagnostics);
+            await RecordFailedSyncSafelyAsync(ex);
             Status = $"同期に失敗しました。Google同期診断を確認してください。未同期の変更は保持されています: {ex.Message}";
             return null;
         }
         finally
         {
+            if (syncDataGateEntered)
+            {
+                _syncDataOperationGate.Release();
+            }
+
             Interlocked.Exchange(ref _syncInProgress, 0);
             IsSynchronizing = false;
-            await RefreshOperationalStatusAsync(null);
             var pendingInvocationKind = Interlocked.Exchange(ref _pendingSyncInvocationKind, NoPendingSyncInvocationKind);
+            await RefreshOperationalStatusSafelyAsync();
             if (pendingInvocationKind != NoPendingSyncInvocationKind)
             {
-                await SynchronizeAsync(reportErrors: false, (SyncInvocationKind)pendingInvocationKind);
+                try
+                {
+                    await SynchronizeAsync(reportErrors: false, (SyncInvocationKind)pendingInvocationKind);
+                }
+                catch (Exception rerunEx)
+                {
+                    Debug.WriteLine(rerunEx);
+                    _logger?.LogError(rerunEx, "Queued Google calendar sync rerun failed.");
+                }
             }
+        }
+    }
+
+    private void EnsureSyncDataOperationAllowed()
+    {
+        if (Volatile.Read(ref _databaseMaintenanceInProgress) != 0)
+        {
+            throw new InvalidOperationException("データベースのリストア中は同期データ操作を開始できません。");
+        }
+    }
+
+    private async Task RunExclusiveSyncDataOperationAsync(Func<Task> operation)
+    {
+        EnsureSyncDataOperationAllowed();
+        await _syncDataOperationGate.WaitAsync();
+        try
+        {
+            EnsureSyncDataOperationAllowed();
+            await operation();
+        }
+        finally
+        {
+            _syncDataOperationGate.Release();
+        }
+    }
+
+    private async Task<T> RunExclusiveSyncDataOperationAsync<T>(Func<Task<T>> operation)
+    {
+        EnsureSyncDataOperationAllowed();
+        await _syncDataOperationGate.WaitAsync();
+        try
+        {
+            EnsureSyncDataOperationAllowed();
+            return await operation();
+        }
+        finally
+        {
+            _syncDataOperationGate.Release();
+        }
+    }
+
+    private async Task RecordFailedSyncSafelyAsync(Exception sourceException)
+    {
+        try
+        {
+            await _syncService.RecordFailedSyncAsync(
+                sourceException.Message,
+                CreateSettingsSnapshot().EnableSyncDiagnostics);
+        }
+        catch (Exception diagnosticsEx)
+        {
+            Debug.WriteLine(diagnosticsEx);
+            _logger?.LogError(diagnosticsEx, "Failed to persist Google sync diagnostics.");
+        }
+    }
+
+    private async Task RefreshOperationalStatusSafelyAsync()
+    {
+        try
+        {
+            await RefreshOperationalStatusAsync(null);
+        }
+        catch (Exception statusEx)
+        {
+            Debug.WriteLine(statusEx);
+            _logger?.LogError(statusEx, "Failed to refresh operational status after Google sync.");
         }
     }
 

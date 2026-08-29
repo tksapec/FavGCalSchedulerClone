@@ -1,4 +1,6 @@
+using System.Windows;
 using System.Windows.Media;
+using System.Windows.Threading;
 
 namespace FavGCalSchedulerClone.App.Services;
 
@@ -9,12 +11,13 @@ public sealed class SoundReminderNotifier : IReminderNotifier, IReminderNotifier
     private readonly double _volume;
     private readonly Func<string, bool> _fileExists;
     private readonly Action<string, double> _playSound;
+    private readonly Dispatcher? _dispatcher;
     private MediaPlayer? _player;
     private ReminderSoundStatus _lastSoundStatus = ReminderSoundStatus.NotConfigured;
     private string? _lastSoundError;
 
     public SoundReminderNotifier(IReminderNotifier inner, string? filePath, int volume)
-        : this(inner, filePath, volume, File.Exists, null)
+        : this(inner, filePath, volume, File.Exists, null, Application.Current?.Dispatcher)
     {
     }
 
@@ -23,13 +26,15 @@ public sealed class SoundReminderNotifier : IReminderNotifier, IReminderNotifier
         string? filePath,
         int volume,
         Func<string, bool> fileExists,
-        Action<string, double>? playSound)
+        Action<string, double>? playSound,
+        Dispatcher? dispatcher = null)
     {
         _inner = inner;
         _filePath = filePath;
         _volume = Math.Clamp(volume, 0, 100) / 100.0;
         _fileExists = fileExists;
         _playSound = playSound ?? PlayWithMediaPlayer;
+        _dispatcher = dispatcher;
     }
 
     public string DeliveryMethodName => _inner is IReminderNotifierMetadata metadata ? $"Sound + {metadata.DeliveryMethodName}" : "Sound";
@@ -42,7 +47,7 @@ public sealed class SoundReminderNotifier : IReminderNotifier, IReminderNotifier
 
     public async Task ShowAsync(ReminderNotification notification, CancellationToken cancellationToken = default)
     {
-        TryPlay();
+        await TryPlayAsync(cancellationToken);
         await _inner.ShowAsync(notification, cancellationToken);
     }
 
@@ -80,6 +85,19 @@ public sealed class SoundReminderNotifier : IReminderNotifier, IReminderNotifier
             _lastSoundStatus = ReminderSoundStatus.Failed;
             _lastSoundError = ex.Message;
         }
+    }
+
+    private async Task TryPlayAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_dispatcher is null || _dispatcher.CheckAccess())
+        {
+            TryPlay();
+            return;
+        }
+
+        await _dispatcher.InvokeAsync(TryPlay).Task;
+        cancellationToken.ThrowIfCancellationRequested();
     }
 
     private void PlayWithMediaPlayer(string filePath, double volume)

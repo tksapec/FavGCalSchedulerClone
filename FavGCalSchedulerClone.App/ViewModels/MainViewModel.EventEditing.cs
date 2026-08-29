@@ -50,16 +50,23 @@ public sealed partial class MainViewModel
         var dayShift = (targetDate.Date - clipboard.Event.Start.Date).Days;
         pasted.Start = pasted.Start.AddDays(dayShift);
         pasted.End = pasted.End.AddDays(dayShift);
-        await _repository.SaveEventAsync(pasted);
+        NormalizeTimedEventTimeZoneOffsets(pasted);
 
         if (clipboard.Cut)
         {
-            var source = clipboard.Event;
+            var sourceSnapshot = UndoService.Clone(clipboard.Event);
+            var source = CloneEventForEditing(clipboard.Event);
             source.IsDeleted = true;
             source.IsDirty = true;
-            await _repository.SaveEventAsync(source);
+            await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, [pasted, source]);
+            CaptureUndo("予定移動", [sourceSnapshot], [pasted.Id]);
             _labelClipboard = null;
             OnPropertyChanged(nameof(CanPasteEventLabel));
+        }
+        else
+        {
+            await _repository.SaveEventAsync(pasted);
+            CaptureUndo("予定貼り付け", [], [pasted.Id]);
         }
 
         _pendingSelectedDate = targetDate.Date;
@@ -94,7 +101,12 @@ public sealed partial class MainViewModel
 
     public async Task SaveCurrentEventAsync(RecurrenceEditScope? recurrenceScope = null)
     {
+        var wasNew = SelectedEvent is null;
         await SaveEventWithRecurrenceAsync(recurrenceScope);
+        if (wasNew && SelectedEvent is { IsDeleted: false } created)
+        {
+            CaptureUndo("予定追加", [], [created.Id]);
+        }
     }
 
     public async Task DeleteSelectedEventAsync(RecurrenceEditScope? recurrenceScope = null)
@@ -133,29 +145,35 @@ public sealed partial class MainViewModel
 
     private async Task SaveEventWithCalendarMoveAsync(CalendarEvent candidate, CalendarEvent? original)
     {
-        if (original is not null
-            && !string.IsNullOrWhiteSpace(original.GoogleEventId)
-            && !string.Equals(original.CalendarId, candidate.CalendarId, StringComparison.Ordinal))
-        {
-            var tombstone = CloneEventForEditing(original);
-            tombstone.Id = Guid.NewGuid().ToString("N");
-            tombstone.IsDeleted = true;
-            tombstone.IsDirty = true;
-            tombstone.LastSyncedAt = null;
-            await _repository.SaveEventAsync(tombstone);
+        NormalizeTimedEventTimeZoneOffsets(candidate);
+        await CalendarRepositoryAtomicWriter.SaveEventsAsync(
+            _repository,
+            PrepareCalendarMoveWrites(candidate, original));
+    }
 
-            candidate.GoogleEventId = null;
-            candidate.LastSyncedGoogleEtag = null;
-            candidate.LastSyncedAt = null;
-            if (candidate.IsRecurrenceException)
-            {
-                candidate.RecurringEventId = null;
-                candidate.RecurringParentId = null;
-                candidate.OriginalStart = null;
-            }
+    private static void NormalizeTimedEventTimeZoneOffsets(CalendarEvent calendarEvent)
+    {
+        if (calendarEvent.IsAllDay)
+        {
+            return;
         }
 
-        await _repository.SaveEventAsync(candidate);
+        if (!GoogleCalendarTimeZone.TryCreateDateTimeOffset(
+                calendarEvent.Start.DateTime,
+                calendarEvent.StartTimeZoneId,
+                calendarEvent.Start.Offset,
+                out var normalizedStart)
+            || !GoogleCalendarTimeZone.TryCreateDateTimeOffset(
+                calendarEvent.End.DateTime,
+                calendarEvent.EndTimeZoneId ?? calendarEvent.StartTimeZoneId,
+                calendarEvent.End.Offset,
+                out var normalizedEnd))
+        {
+            throw new InvalidOperationException("予定のタイムゾーンで移動後の日時を解釈できません。DST切替時刻を確認してください。");
+        }
+
+        calendarEvent.Start = normalizedStart;
+        calendarEvent.End = normalizedEnd;
     }
 
     private CalendarEvent? BuildEditedEventAsync()
@@ -174,6 +192,12 @@ public sealed partial class MainViewModel
         calendarEvent.Location = string.IsNullOrWhiteSpace(Location) ? null : Location.Trim();
         calendarEvent.CalendarId = ResolveEditorCalendarId();
         calendarEvent.IsAllDay = IsAllDay;
+        if (SelectedEvent is null && !IsAllDay)
+        {
+            calendarEvent.StartTimeZoneId = GoogleCalendarTimeZone.LocalIanaId;
+            calendarEvent.EndTimeZoneId = calendarEvent.StartTimeZoneId;
+        }
+
         var appReminderMinutes = IsAppReminderEnabled
             ? CalendarEvent.NormalizeReminderMinutes(AppReminderMinutesBeforeStart.Count > 0 ? AppReminderMinutesBeforeStart : ReminderMinutesBeforeStart is int appMinutes ? [appMinutes] : [])
             : [];
@@ -181,12 +205,20 @@ public sealed partial class MainViewModel
             ? CalendarEvent.NormalizeReminderMinutes(GoogleEmailReminderMinutesBeforeStart.Count > 0 ? GoogleEmailReminderMinutesBeforeStart : ReminderMinutesBeforeStart is int emailMinutes ? [emailMinutes] : [])
             : [];
         var reminderMinutes = appReminderMinutes.Count == 0 ? null : (int?)appReminderMinutes[0];
+        var reminderSettingsChanged = SelectedEvent is null
+            || !SelectedEvent.EffectiveAppReminderMinutesBeforeStart.SequenceEqual(appReminderMinutes)
+            || !SelectedEvent.EffectiveGoogleEmailReminderMinutesBeforeStart.SequenceEqual(googleEmailReminderMinutes)
+            || SelectedEvent.IsAppReminderEnabled != (appReminderMinutes.Count > 0)
+            || SelectedEvent.IsGoogleEmailReminderEnabled != (googleEmailReminderMinutes.Count > 0);
         calendarEvent.ReminderMinutesBeforeStart = reminderMinutes;
         calendarEvent.AppReminderMinutesBeforeStart = appReminderMinutes.ToList();
         calendarEvent.GoogleEmailReminderMinutesBeforeStart = googleEmailReminderMinutes.ToList();
         calendarEvent.IsAppReminderEnabled = appReminderMinutes.Count > 0;
         calendarEvent.IsGoogleEmailReminderEnabled = googleEmailReminderMinutes.Count > 0;
-        calendarEvent.GoogleReminderMetadata = CreateCommonGoogleReminderMetadata(calendarEvent.GoogleReminderMetadata, appReminderMinutes, googleEmailReminderMinutes);
+        if (reminderSettingsChanged)
+        {
+            calendarEvent.GoogleReminderMetadata = CreateCommonGoogleReminderMetadata(calendarEvent.GoogleReminderMetadata, appReminderMinutes, googleEmailReminderMinutes);
+        }
         calendarEvent.ColorId = EditorColorId;
         calendarEvent.IsDirty = true;
         calendarEvent.IsDeleted = false;
@@ -233,8 +265,25 @@ public sealed partial class MainViewModel
             }
             else
             {
-                calendarEvent.Start = new DateTimeOffset(StartDate.Date.Add(startTime));
-                calendarEvent.End = new DateTimeOffset(EndDate.Date.Add(endTime));
+                var startWallClock = StartDate.Date.Add(startTime);
+                var endWallClock = EndDate.Date.Add(endTime);
+                if (!GoogleCalendarTimeZone.TryCreateDateTimeOffset(
+                        startWallClock,
+                        calendarEvent.StartTimeZoneId,
+                        SelectedEvent?.Start.Offset,
+                        out var editedStart)
+                    || !GoogleCalendarTimeZone.TryCreateDateTimeOffset(
+                        endWallClock,
+                        calendarEvent.EndTimeZoneId ?? calendarEvent.StartTimeZoneId,
+                        SelectedEvent?.End.Offset,
+                        out var editedEnd))
+                {
+                    Status = "予定のタイムゾーンで日時を解釈できません。タイムゾーンまたはDST切替時刻を確認してください。";
+                    return null;
+                }
+
+                calendarEvent.Start = editedStart;
+                calendarEvent.End = editedEnd;
             }
             if (calendarEvent.End <= calendarEvent.Start)
             {
@@ -263,6 +312,8 @@ public sealed partial class MainViewModel
             Location = source.Location,
             Start = source.Start,
             End = source.End,
+            StartTimeZoneId = source.StartTimeZoneId,
+            EndTimeZoneId = source.EndTimeZoneId,
             IsAllDay = source.IsAllDay,
             ColorId = source.ColorId,
             ReminderMinutesBeforeStart = source.ReminderMinutesBeforeStart,
@@ -367,6 +418,12 @@ public sealed partial class MainViewModel
 
     private string ResolveEditorCalendarId()
     {
+        if (SelectedEvent is not null
+            && string.Equals(EditorCalendarId, SelectedEvent.CalendarId, StringComparison.Ordinal))
+        {
+            return SelectedEvent.CalendarId;
+        }
+
         if (AvailableCalendars.Any(item => item.Id == EditorCalendarId))
         {
             return EditorCalendarId;

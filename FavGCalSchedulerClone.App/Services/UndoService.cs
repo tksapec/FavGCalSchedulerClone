@@ -9,18 +9,38 @@ public sealed class UndoService
     public bool CanUndo => _lastOperation is not null;
     public string StatusText => _lastOperation?.Description ?? "";
 
-    public void Capture(string description, IEnumerable<CalendarEvent?> beforeEvents)
+    public void Capture(
+        string description,
+        IEnumerable<CalendarEvent?> beforeEvents,
+        IEnumerable<string>? createdEventIds = null)
     {
         var snapshots = beforeEvents
             .Where(item => item is not null)
             .Select(item => Clone(item!))
             .ToArray();
-        if (snapshots.Length == 0)
+        var createdIds = createdEventIds?
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray() ?? [];
+        if (snapshots.Length == 0 && createdIds.Length == 0)
         {
             return;
         }
 
-        _lastOperation = new UndoOperation(description, snapshots);
+        _lastOperation = new UndoOperation(description, snapshots, createdIds);
+    }
+
+    public UndoOperation? Peek() => _lastOperation;
+
+    public bool Consume(UndoOperation operation)
+    {
+        if (!ReferenceEquals(_lastOperation, operation))
+        {
+            return false;
+        }
+
+        _lastOperation = null;
+        return true;
     }
 
     public UndoOperation? Pop()
@@ -52,6 +72,8 @@ public sealed class UndoService
             Location = source.Location,
             Start = source.Start,
             End = source.End,
+            StartTimeZoneId = source.StartTimeZoneId,
+            EndTimeZoneId = source.EndTimeZoneId,
             IsAllDay = source.IsAllDay,
             ColorId = source.ColorId,
             RecurrenceJson = source.RecurrenceJson,

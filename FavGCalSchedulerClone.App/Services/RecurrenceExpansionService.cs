@@ -27,8 +27,25 @@ public static class RecurrenceExpansionService
             var seriesExceptions = recurrenceExceptions
                 .Where(item => BelongsToMaster(item, master))
                 .ToArray();
+            var occurrenceStarts = ExpandMasterOccurrencesSafely(master, rangeStart, rangeEnd);
+            if (occurrenceStarts is null)
+            {
+                // Preserve malformed persisted data in the visible calendar so the user
+                // can inspect and repair it instead of silently losing the whole series.
+                if (master.Start < rangeEnd && master.End > rangeStart)
+                {
+                    results.Add(Clone(master));
+                }
 
-            foreach (var occurrenceStart in RecurrenceRuleHelper.ExpandOccurrences(master, rangeStart, rangeEnd))
+                foreach (var exception in seriesExceptions.Where(item => !item.IsDeleted && item.Start < rangeEnd && item.End > rangeStart))
+                {
+                    results.Add(Clone(exception));
+                }
+
+                continue;
+            }
+
+            foreach (var occurrenceStart in occurrenceStarts)
             {
                 var exception = seriesExceptions
                     .Where(item => item.OriginalStart is not null)
@@ -75,6 +92,21 @@ public static class RecurrenceExpansionService
             .ToArray();
     }
 
+    private static IReadOnlyList<DateTimeOffset>? ExpandMasterOccurrencesSafely(
+        CalendarEvent master,
+        DateTimeOffset rangeStart,
+        DateTimeOffset rangeEnd)
+    {
+        try
+        {
+            return RecurrenceSetExpander.ExpandOccurrences(master, rangeStart, rangeEnd);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static bool BelongsToMaster(CalendarEvent exception, CalendarEvent master)
     {
         return MatchesKey(exception.RecurringParentId, master.Id)
@@ -107,6 +139,8 @@ public static class RecurrenceExpansionService
             Location = source.Location,
             Start = source.Start,
             End = source.End,
+            StartTimeZoneId = source.StartTimeZoneId,
+            EndTimeZoneId = source.EndTimeZoneId,
             IsAllDay = source.IsAllDay,
             ColorId = source.ColorId,
             RecurrenceJson = source.RecurrenceJson,
@@ -120,7 +154,7 @@ public static class RecurrenceExpansionService
             GoogleEmailReminderMinutesBeforeStart = [.. source.GoogleEmailReminderMinutesBeforeStart],
             AppReminderEnabled = source.AppReminderEnabled,
             GoogleEmailReminderEnabled = source.GoogleEmailReminderEnabled,
-            GoogleReminderMetadata = source.GoogleReminderMetadata,
+            GoogleReminderMetadata = source.GoogleReminderMetadata?.Clone(),
             DisplayColor = source.DisplayColor,
             DisplayForegroundColor = source.DisplayForegroundColor,
             IsGeneratedOccurrence = source.IsGeneratedOccurrence

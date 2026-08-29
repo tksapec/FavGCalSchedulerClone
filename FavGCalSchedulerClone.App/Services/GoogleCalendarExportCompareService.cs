@@ -14,12 +14,30 @@ public sealed class GoogleCalendarExportCompareService
         }
 
         using var archive = ZipFile.OpenRead(zipPath);
-        var entry = archive.Entries.FirstOrDefault(item => item.FullName.EndsWith(".ics", StringComparison.OrdinalIgnoreCase))
-            ?? throw new InvalidDataException("The zip does not contain any .ics files.");
+        var entries = archive.Entries
+            .Where(item => item.FullName.EndsWith(".ics", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (entries.Length == 0)
+        {
+            throw new InvalidDataException("The zip does not contain any .ics files.");
+        }
 
-        using var reader = new StreamReader(entry.Open(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-        var content = await reader.ReadToEndAsync(cancellationToken);
-        return ParseIcs(entry.FullName, content);
+        var calendars = new List<GoogleCalendarExportData>(entries.Length);
+        foreach (var entry in entries)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var reader = new StreamReader(entry.Open(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            var content = await reader.ReadToEndAsync(cancellationToken);
+            calendars.Add(ParseIcs(entry.FullName, content));
+        }
+
+        var calendarName = string.Join(", ", calendars
+            .Select(item => item.CalendarName)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.Ordinal));
+        return new GoogleCalendarExportData(
+            calendarName,
+            calendars.SelectMany(item => item.Events).ToArray());
     }
 
     public GoogleCalendarComparisonSummary Compare(IEnumerable<CalendarEvent> localEvents, IEnumerable<GoogleExportEvent> exportedEvents)
@@ -125,7 +143,43 @@ public sealed class GoogleCalendarExportCompareService
             return DateTimeOffset.ParseExact(value, "yyyyMMdd'T'HHmmss'Z'", null).ToLocalTime();
         }
 
-        return DateTimeOffset.ParseExact(value, "yyyyMMdd'T'HHmmss", null, System.Globalization.DateTimeStyles.AssumeLocal);
+        var wallClock = DateTime.ParseExact(
+            value,
+            "yyyyMMdd'T'HHmmss",
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.None);
+        var timeZoneId = TryGetIcsParameter(item.Key, "TZID");
+        if (!string.IsNullOrWhiteSpace(timeZoneId)
+            && GoogleCalendarTimeZone.TryCreateDateTimeOffset(wallClock, timeZoneId, preferredOffset: null, out var zonedValue))
+        {
+            return zonedValue;
+        }
+
+        return DateTimeOffset.ParseExact(
+            value,
+            "yyyyMMdd'T'HHmmss",
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeLocal);
+    }
+
+    private static string? TryGetIcsParameter(string key, string parameterName)
+    {
+        foreach (var part in key.Split(';').Skip(1))
+        {
+            var separator = part.IndexOf('=');
+            if (separator <= 0
+                || !string.Equals(part[..separator], parameterName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var value = part[(separator + 1)..].Trim();
+            return value.Length >= 2 && value[0] == '"' && value[^1] == '"'
+                ? value[1..^1]
+                : value;
+        }
+
+        return null;
     }
 
     private static string[] UnfoldLines(string content)

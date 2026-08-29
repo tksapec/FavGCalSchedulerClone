@@ -1,7 +1,16 @@
+using System.Text.Json;
+
 namespace FavGCalSchedulerClone.App.Models;
 
 public sealed class CalendarEvent
 {
+    private string? _startTimeZoneId;
+    private string? _endTimeZoneId;
+    private GoogleReminderMetadata? _googleReminderMetadata;
+    private List<int> _appReminderMinutesBeforeStart = [];
+    private List<int> _googleEmailReminderMinutesBeforeStart = [];
+    private string? _recurrenceJson;
+
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string? GoogleEventId { get; set; }
     public string? LastSyncedGoogleEtag { get; set; }
@@ -15,9 +24,49 @@ public sealed class CalendarEvent
     public string? Location { get; set; }
     public DateTimeOffset Start { get; set; }
     public DateTimeOffset End { get; set; }
+    public string? StartTimeZoneId
+    {
+        get => _startTimeZoneId ?? _googleReminderMetadata?.StartTimeZoneId;
+        set
+        {
+            _startTimeZoneId = value;
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                _googleReminderMetadata ??= new GoogleReminderMetadata();
+                _googleReminderMetadata.StartTimeZoneId = value;
+            }
+            else if (_googleReminderMetadata is not null)
+            {
+                _googleReminderMetadata.StartTimeZoneId = null;
+            }
+        }
+    }
+
+    public string? EndTimeZoneId
+    {
+        get => _endTimeZoneId ?? _googleReminderMetadata?.EndTimeZoneId;
+        set
+        {
+            _endTimeZoneId = value;
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                _googleReminderMetadata ??= new GoogleReminderMetadata();
+                _googleReminderMetadata.EndTimeZoneId = value;
+            }
+            else if (_googleReminderMetadata is not null)
+            {
+                _googleReminderMetadata.EndTimeZoneId = null;
+            }
+        }
+    }
+
     public bool IsAllDay { get; set; }
     public string? ColorId { get; set; }
-    public string? RecurrenceJson { get; set; }
+    public string? RecurrenceJson
+    {
+        get => _recurrenceJson;
+        set => _recurrenceJson = NormalizeRecurrenceJson(value);
+    }
     public bool IsDeleted { get; set; }
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
     public DateTimeOffset? LastSyncedAt { get; set; }
@@ -25,11 +74,50 @@ public sealed class CalendarEvent
     public string? DirtyFields { get; set; }
     public bool IsTodoLike { get; set; }
     public int? ReminderMinutesBeforeStart { get; set; }
-    public List<int> AppReminderMinutesBeforeStart { get; set; } = [];
-    public List<int> GoogleEmailReminderMinutesBeforeStart { get; set; } = [];
+    public List<int> AppReminderMinutesBeforeStart
+    {
+        get => _appReminderMinutesBeforeStart;
+        set => _appReminderMinutesBeforeStart = value ?? [];
+    }
+
+    public List<int> GoogleEmailReminderMinutesBeforeStart
+    {
+        get => _googleEmailReminderMinutesBeforeStart;
+        set => _googleEmailReminderMinutesBeforeStart = value ?? [];
+    }
+
     internal bool? AppReminderEnabled { get; set; }
     internal bool? GoogleEmailReminderEnabled { get; set; }
-    public GoogleReminderMetadata? GoogleReminderMetadata { get; set; }
+    public GoogleReminderMetadata? GoogleReminderMetadata
+    {
+        get => _googleReminderMetadata;
+        set
+        {
+            _googleReminderMetadata = value;
+            if (value is null)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(_startTimeZoneId))
+            {
+                value.StartTimeZoneId = _startTimeZoneId;
+            }
+            else
+            {
+                _startTimeZoneId = value.StartTimeZoneId;
+            }
+
+            if (!string.IsNullOrWhiteSpace(_endTimeZoneId))
+            {
+                value.EndTimeZoneId = _endTimeZoneId;
+            }
+            else
+            {
+                _endTimeZoneId = value.EndTimeZoneId;
+            }
+        }
+    }
     public string DisplayColor { get; set; } = "#FFFFFF";
     public string DisplayForegroundColor { get; set; } = "#111827";
     public string ToolTipText { get; set; } = "";
@@ -141,6 +229,36 @@ public sealed class CalendarEvent
     public bool IsRecurringMaster => !string.IsNullOrWhiteSpace(RecurrenceJson) && !IsRecurrenceException;
     public bool IsRecurringSeriesItem => IsRecurringMaster || IsRecurrenceException || IsGeneratedOccurrence || !string.IsNullOrWhiteSpace(RecurringEventId) || !string.IsNullOrWhiteSpace(RecurringParentId);
     public string DirtyFieldsDisplayText => Services.EventDirtyFieldTracker.ToDisplayText(DirtyFields);
+
+    private static string? NormalizeRecurrenceJson(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)
+            || !value.Contains("null", StringComparison.Ordinal))
+        {
+            return value;
+        }
+
+        try
+        {
+            var lines = JsonSerializer.Deserialize<List<string?>>(value);
+            if (lines is null)
+            {
+                return null;
+            }
+
+            var normalized = lines
+                .Where(line => !string.IsNullOrWhiteSpace(line))
+                .Select(line => line!)
+                .ToArray();
+            return normalized.Length == 0 ? null : JsonSerializer.Serialize(normalized);
+        }
+        catch (JsonException)
+        {
+            // Preserve malformed legacy data so higher-level recurrence handling can
+            // isolate it without silently converting the event to a non-recurring one.
+            return value;
+        }
+    }
 
     private static string SingleLine(string? value)
     {

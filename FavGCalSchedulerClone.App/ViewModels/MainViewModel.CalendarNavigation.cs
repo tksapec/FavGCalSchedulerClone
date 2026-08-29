@@ -12,6 +12,7 @@ namespace FavGCalSchedulerClone.App.ViewModels;
 public sealed partial class MainViewModel
 {
     internal bool IsCalendarMonthCached(DateTime month) => TryGetCalendarCache(month) is not null;
+    internal TimeSpan CalendarPrefetchDelay { get; set; } = TimeSpan.FromMilliseconds(150);
 
     public async Task GoToTodayAsync()
     {
@@ -456,24 +457,12 @@ public sealed partial class MainViewModel
         _dayDirectiveEvents = snapshot.DayDirectiveEvents;
         _visibleEvents = snapshot.VisibleEvents;
 
-        EnsureCalendarDayCapacity((snapshot.GridEnd - snapshot.GridStart).Days);
-        var index = 0;
-        for (var date = snapshot.GridStart; date < snapshot.GridEnd; date = date.AddDays(1), index++)
-        {
-            var day = CalendarDays[index];
-            // Render the shell and the finished event/segment state below; do not
-            // issue an intermediate empty collection Reset for every cell.
-            UpdateCalendarDayShell(day, date);
-            day.IsWorkdayOverride = TagService.HasWorkdayOverride(_dayDirectiveEvents, date);
-            var officialHoliday = JapaneseHolidayService.GetHolidayName(DateOnly.FromDateTime(date));
-            day.HolidayName = officialHoliday ?? (TagService.HasHolidayWithoutWorkdayOverride(_dayDirectiveEvents, date) ? "ユーザー指定休日" : null);
-            day.IsHoliday = !day.IsWorkdayOverride && (officialHoliday is not null || day.HolidayName is not null);
-        }
-
-        RefreshHolidayShells();
+        // Build the complete 42-day visual state while detached from WPF. Segment/event
+        // collection resets then have no live ItemsControl subscribers. Swap the finished
+        // day set into the UI with a single top-level Reset instead of mutating 42 live cells.
+        var days = BuildDetachedCalendarDays(snapshot);
+        _calendarDays.ReplaceAll(days);
         _monthWeekNumbers.ReplaceAll(CalendarWeekNumber.CreateRows(snapshot.GridStart, _settings.WeekStartsOnMonday));
-
-        ApplySegmentLayout(CalendarDays, IsMonthView ? _monthLaneCapacity : CalendarSegmentLayoutService.MaxLanes);
 
         CalendarDay? selectedDay;
         DateTime? visibleAnchorDate;
@@ -488,8 +477,9 @@ public sealed partial class MainViewModel
         }
         else
         {
-            selectedDay = SelectedDay is not null
-                ? CalendarDays.FirstOrDefault(d => d.Date == SelectedDay.Date) ?? FindOrCreateCalendarDay(SelectedDay.Date)
+            var previousSelectedDate = SelectedDay?.Date;
+            selectedDay = previousSelectedDate is not null
+                ? CalendarDays.FirstOrDefault(d => d.Date == previousSelectedDate.Value.Date) ?? FindOrCreateCalendarDay(previousSelectedDate.Value.Date)
                 : CalendarDays.FirstOrDefault(d => d.Date == DateTime.Today) ?? CalendarDays.FirstOrDefault();
             visibleAnchorDate = selectedDay?.Date;
         }
@@ -499,7 +489,37 @@ public sealed partial class MainViewModel
         UpdateSegmentSelection();
         RefreshSelectedDayEvents();
         RefreshSevenDayEvents();
-        _logger?.LogInfo($"Calendar apply {snapshot.Month:yyyy-MM}: layout+ui={stopwatch.ElapsedMilliseconds}ms");
+        _logger?.LogInfo($"Calendar apply {snapshot.Month:yyyy-MM}: bulk-layout+ui={stopwatch.ElapsedMilliseconds}ms");
+    }
+
+    private CalendarDay[] BuildDetachedCalendarDays(CalendarRefreshSnapshot snapshot)
+    {
+        var count = (snapshot.GridEnd - snapshot.GridStart).Days;
+        var days = Enumerable.Range(0, count)
+            .Select(offset => new CalendarDay
+            {
+                Date = snapshot.GridStart.AddDays(offset),
+                IsCurrentMonth = snapshot.GridStart.AddDays(offset).Month == snapshot.Month.Month
+            })
+            .ToArray();
+
+        foreach (var day in days)
+        {
+            ApplyHolidayState(day, day.Date, snapshot.DayDirectiveEvents);
+        }
+
+        var layoutResult = CalendarSegmentLayoutService.PopulateSegments(
+            days,
+            snapshot.VisibleEvents,
+            IsMonthView ? _monthLaneCapacity : CalendarSegmentLayoutService.MaxLanes);
+        foreach (var day in days)
+        {
+            var layoutDay = layoutResult.GetDay(day.Date);
+            day.ReplaceEvents(layoutDay.VisibleEvents);
+            day.HiddenEventCount = layoutDay.HiddenEventCount;
+        }
+
+        return days;
     }
 
     private bool ApplyCalendarSnapshotIfNeeded(
@@ -597,23 +617,22 @@ public sealed partial class MainViewModel
         }
 
         var (gridStart, gridEnd) = DateRangeHelper.MonthGridRange(month, _settings.WeekStartsOnMonday);
-        EnsureCalendarDayCapacity((gridEnd - gridStart).Days);
-        for (var index = 0; index < CalendarDays.Count; index++)
-        {
-            var day = CalendarDays[index];
-            UpdateCalendarDayShell(day, gridStart.AddDays(index));
-            day.ReplaceEvents(Array.Empty<CalendarEvent>());
-            day.ReplaceSegments(Array.Empty<CalendarEventSegment>());
-            day.HiddenEventCount = 0;
-            day.IsDropTarget = false;
-        }
+        var days = Enumerable.Range(0, (gridEnd - gridStart).Days)
+            .Select(offset =>
+            {
+                var date = gridStart.AddDays(offset);
+                return new CalendarDay
+                {
+                    Date = date,
+                    IsCurrentMonth = date.Month == month.Month
+                };
+            })
+            .ToArray();
+        _calendarDays.ReplaceAll(days);
+        _monthWeekNumbers.ReplaceAll(CalendarWeekNumber.CreateRows(gridStart, _settings.WeekStartsOnMonday));
 
         var anchor = _pendingSelectedDate?.Date ?? _navigationAnchorDate?.Date ?? month.Date;
-        if (CurrentViewMode != CalendarViewMode.Month || VisibleCalendarDays.Count != CalendarDays.Count)
-        {
-            RefreshVisibleCalendarDays(anchor);
-        }
-
+        RefreshVisibleCalendarDays(anchor);
         SetSelectedDayForImmediateNavigation(CalendarDays.FirstOrDefault(day => day.Date == anchor));
         SelectedDayEvents.Clear();
         SevenDayEvents.Clear();
@@ -784,6 +803,11 @@ public sealed partial class MainViewModel
         var enteredPipeline = false;
         try
         {
+            if (CalendarPrefetchDelay > TimeSpan.Zero)
+            {
+                await Task.Delay(CalendarPrefetchDelay, cancellationToken);
+            }
+
             await _calendarPrefetchPipelineGate.WaitAsync(cancellationToken);
             enteredPipeline = true;
             cancellationToken.ThrowIfCancellationRequested();
@@ -820,12 +844,6 @@ public sealed partial class MainViewModel
                     cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var (centerGridStart, centerGridEnd) = DateRangeHelper.MonthGridRange(request.Month, context.WeekStartsOnMonday);
-                var centerSnapshot = await Task.Run(
-                    () => BuildCalendarSnapshot(request.Month, centerGridStart, centerGridEnd, dataWindow, context, cancellationToken),
-                    cancellationToken);
-                cancellationToken.ThrowIfCancellationRequested();
-
                 lock (_calendarCacheLock)
                 {
                     if (!IsLatestCalendarRefresh(request) || dataVersion != _calendarDataVersion)
@@ -834,17 +852,11 @@ public sealed partial class MainViewModel
                     }
 
                     BeforeReplaceCalendarDataWindow?.Invoke(request.Month);
+                    // The snapshots are immutable month results keyed by data version/settings.
+                    // Recentering the wider data source does not invalidate them.
                     _calendarDataWindow = dataWindow;
-                    // Snapshots built from the narrow fallback window must not pin it.
-                    foreach (var key in _calendarCache.Keys.Where(key => key.DataVersion == dataVersion).ToArray())
-                    {
-                        _calendarCache.Remove(key);
-                    }
-                    _lastAppliedCalendarSnapshot = null;
-                    _lastAppliedCalendarSnapshotKey = null;
-                    StoreCalendarCache(centerSnapshot, CreateCalendarCacheKey(request.Month, context));
                 }
-                _logger?.LogInfo($"Calendar window replacement {request.Month:yyyy-MM}: db+expand={db.ElapsedMilliseconds}ms");
+                _logger?.LogInfo($"Calendar window replacement {request.Month:yyyy-MM}: db+expand={db.ElapsedMilliseconds}ms; snapshots preserved");
             }
             else
             {
@@ -964,15 +976,24 @@ public sealed partial class MainViewModel
             CreateCalendarCacheKey(CurrentMonth),
             CreateCalendarCacheKey(CurrentMonth.AddMonths(1))
         };
-        foreach (var cacheKey in _calendarCache.Keys.Where(candidate => !keep.Contains(candidate)).ToArray())
+        while (_calendarCache.Count > CalendarSnapshotCacheCapacity)
         {
-            _calendarCache.Remove(cacheKey);
-            if (_calendarCache.Count <= CalendarSnapshotCacheCapacity)
+            var evict = _calendarCache.Keys
+                .Where(candidate => !keep.Contains(candidate))
+                .OrderByDescending(candidate => Math.Abs(GetMonthDistance(candidate.Month, CurrentMonth)))
+                .ThenBy(candidate => candidate.Month)
+                .FirstOrDefault();
+            if (evict is null)
             {
                 break;
             }
+
+            _calendarCache.Remove(evict);
         }
     }
+
+    private static int GetMonthDistance(DateTime left, DateTime right) =>
+        ((left.Year - right.Year) * 12) + left.Month - right.Month;
 
     private void InvalidateCalendarCache()
     {
@@ -1016,7 +1037,7 @@ public sealed partial class MainViewModel
         var anchor = GetNavigationAnchorDate();
         var target = CurrentViewMode switch
         {
-            CalendarViewMode.Month => anchor.AddMonths(direction),
+            CalendarViewMode.Month => GetDisplayedMonthNavigationTarget(anchor, direction),
             CalendarViewMode.Week => anchor.AddDays(direction * 7),
             CalendarViewMode.Day => anchor.AddDays(direction),
             _ => anchor

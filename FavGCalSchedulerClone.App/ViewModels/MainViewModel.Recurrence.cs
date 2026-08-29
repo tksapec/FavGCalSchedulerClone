@@ -22,34 +22,34 @@ public sealed partial class MainViewModel
 
         if (SelectedEvent is null || recurrenceScope is null)
         {
-            if (SelectedEvent is not null)
+            var undoSnapshot = SelectedEvent is null ? null : UndoService.Clone(SelectedEvent);
+            await SaveEventWithCalendarMoveAsync(candidate, SelectedEvent);
+            if (undoSnapshot is not null)
             {
-                CaptureUndo("予定編集", [SelectedEvent]);
+                CaptureUndo("予定編集", [undoSnapshot]);
             }
 
-            await SaveEventWithCalendarMoveAsync(candidate, SelectedEvent);
             await RecordScheduleHistoryAsync(candidate);
-            SelectedEvent = candidate;
             await RefreshCalendarAsync();
+            SelectedEvent = candidate;
             Status = "予定を保存しました。";
             await SyncAfterLocalChangeAsync();
             return;
         }
 
-        CaptureUndo("繰り返し予定編集", [SelectedEvent]);
-
-        switch (recurrenceScope.Value)
+        var undoSnapshots = await LoadRecurrenceUndoSnapshotsAsync(
+            SelectedEvent,
+            recurrenceScope.Value,
+            isDelete: false,
+            targetCalendarId: candidate.CalendarId);
+        IReadOnlyList<string> createdEventIds = recurrenceScope.Value switch
         {
-            case RecurrenceEditScope.ThisOccurrence:
-                await SaveSingleOccurrenceAsync(candidate);
-                break;
-            case RecurrenceEditScope.ThisAndFollowing:
-                await SaveThisAndFollowingAsync(candidate);
-                break;
-            case RecurrenceEditScope.AllEvents:
-                await SaveEntireSeriesAsync(candidate);
-                break;
-        }
+            RecurrenceEditScope.ThisOccurrence => await SaveSingleOccurrenceAsync(candidate),
+            RecurrenceEditScope.ThisAndFollowing => await SaveThisAndFollowingAsync(candidate),
+            RecurrenceEditScope.AllEvents => await SaveEntireSeriesAsync(candidate),
+            _ => []
+        };
+        CaptureUndo("繰り返し予定編集", undoSnapshots, createdEventIds);
 
         await RefreshCalendarAsync();
         await RecordScheduleHistoryAsync(candidate);
@@ -66,8 +66,12 @@ public sealed partial class MainViewModel
 
         if (recurrenceScope is null)
         {
-            CaptureUndo("予定削除", [SelectedEvent]);
-            await _repository.DeleteEventAsync(SelectedEvent);
+            var undoSnapshot = UndoService.Clone(SelectedEvent);
+            var deleted = UndoService.Clone(SelectedEvent);
+            deleted.IsDeleted = true;
+            deleted.IsDirty = true;
+            await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, [deleted]);
+            CaptureUndo("予定削除", [undoSnapshot]);
             SelectedEvent = null;
             await RefreshCalendarAsync();
             Status = "予定を削除しました。";
@@ -75,20 +79,16 @@ public sealed partial class MainViewModel
             return;
         }
 
-        CaptureUndo("繰り返し予定削除", [SelectedEvent]);
-
-        switch (recurrenceScope.Value)
+        var selected = SelectedEvent;
+        var undoSnapshots = await LoadRecurrenceUndoSnapshotsAsync(selected, recurrenceScope.Value, isDelete: true);
+        IReadOnlyList<string> createdEventIds = recurrenceScope.Value switch
         {
-            case RecurrenceEditScope.ThisOccurrence:
-                await DeleteSingleOccurrenceAsync();
-                break;
-            case RecurrenceEditScope.ThisAndFollowing:
-                await DeleteThisAndFollowingAsync();
-                break;
-            case RecurrenceEditScope.AllEvents:
-                await DeleteEntireSeriesAsync();
-                break;
-        }
+            RecurrenceEditScope.ThisOccurrence => await DeleteSingleOccurrenceAsync(),
+            RecurrenceEditScope.ThisAndFollowing => await DeleteThisAndFollowingAsync(),
+            RecurrenceEditScope.AllEvents => await DeleteEntireSeriesAsync(),
+            _ => []
+        };
+        CaptureUndo("繰り返し予定削除", undoSnapshots, createdEventIds);
 
         SelectedEvent = null;
         await RefreshCalendarAsync();
@@ -96,11 +96,11 @@ public sealed partial class MainViewModel
         await SyncAfterLocalChangeAsync();
     }
 
-    private async Task SaveSingleOccurrenceAsync(CalendarEvent candidate)
+    private async Task<IReadOnlyList<string>> SaveSingleOccurrenceAsync(CalendarEvent candidate)
     {
         if (SelectedEvent is null)
         {
-            return;
+            return [];
         }
 
         if (!SelectedEvent.IsGeneratedOccurrence && SelectedEvent.IsRecurrenceException)
@@ -111,7 +111,7 @@ public sealed partial class MainViewModel
             candidate.OriginalStart = SelectedEvent.OriginalStart;
             await SaveEventWithCalendarMoveAsync(candidate, SelectedEvent);
             SelectedEvent = candidate;
-            return;
+            return [];
         }
 
         var master = await ResolveSeriesMasterAsync(SelectedEvent);
@@ -119,30 +119,29 @@ public sealed partial class MainViewModel
         {
             await SaveEventWithCalendarMoveAsync(candidate, SelectedEvent);
             SelectedEvent = candidate;
-            return;
+            return [];
         }
 
-        candidate.Id = SelectedEvent.IsGeneratedOccurrence ? Guid.NewGuid().ToString("N") : candidate.Id;
+        var created = SelectedEvent.IsGeneratedOccurrence;
+        candidate.Id = created ? Guid.NewGuid().ToString("N") : candidate.Id;
         candidate.GoogleEventId = SelectedEvent.GoogleEventId;
         candidate.RecurringParentId = master.Id;
         candidate.RecurringEventId = master.GoogleEventId;
         candidate.OriginalStart = SelectedEvent.OriginalStart ?? SelectedEvent.Start;
         candidate.IsRecurrenceException = true;
         candidate.RecurrenceJson = null;
-        master.RecurrenceJson = RecurrenceRuleHelper.AddExDate(master.RecurrenceJson, candidate.OriginalStart.Value, master.IsAllDay);
-        master.IsDirty = true;
-        await _repository.SaveEventAsync(master);
         await _repository.SaveEventAsync(candidate);
         SelectedEvent = candidate;
+        return created ? [candidate.Id] : [];
     }
 
-    private async Task SaveEntireSeriesAsync(CalendarEvent candidate)
+    private async Task<IReadOnlyList<string>> SaveEntireSeriesAsync(CalendarEvent candidate)
     {
         if (SelectedEvent is null)
         {
             await _repository.SaveEventAsync(candidate);
             SelectedEvent = candidate;
-            return;
+            return [];
         }
 
         var master = await ResolveSeriesMasterAsync(SelectedEvent);
@@ -150,21 +149,48 @@ public sealed partial class MainViewModel
         {
             await SaveEventWithCalendarMoveAsync(candidate, SelectedEvent);
             SelectedEvent = candidate;
-            return;
+            return [];
         }
 
         var target = CloneEventForEditing(master);
         ApplySeriesEditValues(target, candidate, SelectedEvent);
         target.IsDirty = true;
-        await SaveEventWithCalendarMoveAsync(target, master);
+        if (string.Equals(master.CalendarId, target.CalendarId, StringComparison.Ordinal))
+        {
+            await SaveEventWithCalendarMoveAsync(target, master);
+            SelectedEvent = target;
+            return [];
+        }
+
+        var writes = PrepareCalendarMoveWrites(target, master).ToList();
+        foreach (var child in await _repository.LoadSeriesEventsAsync(master.Id, master.GoogleEventId))
+        {
+            if (!child.IsRecurrenceException)
+            {
+                continue;
+            }
+
+            var movedChild = CloneEventForEditing(child);
+            movedChild.CalendarId = target.CalendarId;
+            movedChild.GoogleEventId = null;
+            movedChild.LastSyncedGoogleEtag = null;
+            movedChild.LastSyncedAt = null;
+            movedChild.RecurringParentId = target.Id;
+            movedChild.RecurringEventId = null;
+            movedChild.IsDirty = true;
+            writes.Add(movedChild);
+        }
+
+        await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes);
         SelectedEvent = target;
+        return [];
     }
 
-    private async Task SaveThisAndFollowingAsync(CalendarEvent candidate)
+    private async Task<IReadOnlyList<string>> SaveThisAndFollowingAsync(CalendarEvent candidate)
     {
         if (SelectedEvent is null)
         {
-            return;
+            return [];
         }
 
         var master = await ResolveSeriesMasterAsync(SelectedEvent);
@@ -172,14 +198,24 @@ public sealed partial class MainViewModel
         {
             await SaveEventWithCalendarMoveAsync(candidate, SelectedEvent);
             SelectedEvent = candidate;
-            return;
+            return [];
         }
 
         var splitStart = SelectedEvent.OriginalStart ?? SelectedEvent.Start;
+        if (splitStart <= master.Start)
+        {
+            // Splitting at the first occurrence is equivalent to editing the whole series.
+            // Keeping a one-occurrence source series would create two series at the same start.
+            return await SaveEntireSeriesAsync(candidate);
+        }
+
+        var writes = new List<CalendarEvent>();
+        var hardDeleteIds = new List<string>();
+        var createdIds = new List<string>();
         var original = CloneEventForEditing(master);
         original.RecurrenceJson = RecurrenceRuleHelper.BuildSplitSourceRecurrenceJson(master, splitStart);
         original.IsDirty = true;
-        await _repository.SaveEventAsync(original);
+        writes.Add(original);
 
         var future = CloneEventForEditing(master);
         future.Id = Guid.NewGuid().ToString("N");
@@ -189,10 +225,18 @@ public sealed partial class MainViewModel
         future.RecurringParentId = null;
         future.OriginalStart = null;
         future.IsRecurrenceException = false;
+        // The new series must be anchored at the occurrence where the split happens,
+        // not at the original master's DTSTART. ApplySeriesEditValues then applies any
+        // date/time change made in the editor relative to this occurrence.
+        future.Start = SelectedEvent.Start;
+        future.End = SelectedEvent.End;
+        future.StartTimeZoneId = SelectedEvent.StartTimeZoneId ?? master.StartTimeZoneId;
+        future.EndTimeZoneId = SelectedEvent.EndTimeZoneId ?? master.EndTimeZoneId ?? future.StartTimeZoneId;
         ApplySeriesEditValues(future, candidate, SelectedEvent);
         future.RecurrenceJson = RecurrenceRuleHelper.BuildSplitFutureRecurrenceJson(master, splitStart);
         future.IsDirty = true;
-        await _repository.SaveEventAsync(future);
+        writes.Add(future);
+        createdIds.Add(future.Id);
 
         foreach (var child in await _repository.LoadSeriesEventsAsync(master.Id, master.GoogleEventId))
         {
@@ -201,37 +245,65 @@ public sealed partial class MainViewModel
                 continue;
             }
 
+            // The exception is being transferred to the new future series. Retire the
+            // old-series row as part of the same transaction so it cannot reappear if
+            // the shortened source series is later extended again. Synced exceptions
+            // need a tombstone for Google; purely local exceptions can be removed.
+            if (string.IsNullOrWhiteSpace(child.GoogleEventId))
+            {
+                hardDeleteIds.Add(child.Id);
+            }
+            else
+            {
+                var retired = CloneEventForEditing(child);
+                retired.IsDeleted = true;
+                retired.IsDirty = true;
+                retired.LastSyncedAt = null;
+                writes.Add(retired);
+            }
+
             var moved = CloneEventForEditing(child);
             moved.Id = Guid.NewGuid().ToString("N");
+            moved.CalendarId = future.CalendarId;
             moved.GoogleEventId = null;
             moved.LastSyncedGoogleEtag = null;
+            moved.LastSyncedAt = null;
             moved.RecurringParentId = future.Id;
-            moved.RecurringEventId = future.GoogleEventId;
+            moved.RecurringEventId = null;
             moved.IsDirty = true;
-            await _repository.SaveEventAsync(moved);
+            writes.Add(moved);
+            createdIds.Add(moved.Id);
         }
 
+        await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes, hardDeleteIds);
         SelectedEvent = future;
+        return createdIds;
     }
 
-    private async Task DeleteSingleOccurrenceAsync()
+    private async Task<IReadOnlyList<string>> DeleteSingleOccurrenceAsync()
     {
         if (SelectedEvent is null)
         {
-            return;
+            return [];
         }
 
         if (SelectedEvent.IsRecurrenceException && !SelectedEvent.IsGeneratedOccurrence)
         {
-            await _repository.DeleteEventAsync(SelectedEvent);
-            return;
+            var deleted = CloneEventForEditing(SelectedEvent);
+            deleted.IsDeleted = true;
+            deleted.IsDirty = true;
+            await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, [deleted]);
+            return [];
         }
 
         var master = await ResolveSeriesMasterAsync(SelectedEvent);
         if (master is null)
         {
-            await _repository.DeleteEventAsync(SelectedEvent);
-            return;
+            var deleted = CloneEventForEditing(SelectedEvent);
+            deleted.IsDeleted = true;
+            deleted.IsDirty = true;
+            await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, [deleted]);
+            return [];
         }
 
         var tombstone = new CalendarEvent
@@ -252,57 +324,149 @@ public sealed partial class MainViewModel
             OriginalStart = SelectedEvent.OriginalStart ?? SelectedEvent.Start,
             IsRecurrenceException = true
         };
-        master.RecurrenceJson = RecurrenceRuleHelper.AddExDate(master.RecurrenceJson, tombstone.OriginalStart.Value, master.IsAllDay);
-        master.IsDirty = true;
-        await _repository.SaveEventAsync(master);
-        await _repository.SaveEventAsync(tombstone);
+        var masterWrite = CloneEventForEditing(master);
+        masterWrite.RecurrenceJson = RecurrenceRuleHelper.AddExDate(master.RecurrenceJson, tombstone.OriginalStart.Value, master.IsAllDay);
+        masterWrite.IsDirty = true;
+        await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, [masterWrite, tombstone]);
+        return [tombstone.Id];
     }
 
-    private async Task DeleteEntireSeriesAsync()
+    private async Task<IReadOnlyList<string>> DeleteEntireSeriesAsync()
     {
         if (SelectedEvent is null)
         {
-            return;
+            return [];
         }
 
         var master = await ResolveSeriesMasterAsync(SelectedEvent);
+        var writes = new List<CalendarEvent>();
         if (master is not null)
         {
-            await _repository.DeleteEventAsync(master);
+            var deletedMaster = CloneEventForEditing(master);
+            deletedMaster.IsDeleted = true;
+            deletedMaster.IsDirty = true;
+            writes.Add(deletedMaster);
         }
 
         foreach (var child in await _repository.LoadSeriesEventsAsync(master?.Id ?? SelectedEvent.RecurringParentId, master?.GoogleEventId ?? SelectedEvent.RecurringEventId))
         {
-            await _repository.DeleteEventAsync(child);
+            var deletedChild = CloneEventForEditing(child);
+            deletedChild.IsDeleted = true;
+            deletedChild.IsDirty = true;
+            writes.Add(deletedChild);
         }
+
+        if (master is null && writes.Count == 0)
+        {
+            var deleted = CloneEventForEditing(SelectedEvent);
+            deleted.IsDeleted = true;
+            deleted.IsDirty = true;
+            writes.Add(deleted);
+        }
+
+        await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes);
+        return [];
     }
 
-    private async Task DeleteThisAndFollowingAsync()
+    private async Task<IReadOnlyList<string>> DeleteThisAndFollowingAsync()
     {
         if (SelectedEvent is null)
         {
-            return;
+            return [];
         }
 
         var master = await ResolveSeriesMasterAsync(SelectedEvent);
         if (master is null)
         {
-            await _repository.DeleteEventAsync(SelectedEvent);
-            return;
+            var deleted = CloneEventForEditing(SelectedEvent);
+            deleted.IsDeleted = true;
+            deleted.IsDirty = true;
+            await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, [deleted]);
+            return [];
         }
 
         var splitStart = SelectedEvent.OriginalStart ?? SelectedEvent.Start;
-        master.RecurrenceJson = RecurrenceRuleHelper.BuildSplitSourceRecurrenceJson(master, splitStart);
-        master.IsDirty = true;
-        await _repository.SaveEventAsync(master);
+        if (splitStart <= master.Start)
+        {
+            return await DeleteEntireSeriesAsync();
+        }
+
+        var writes = new List<CalendarEvent>();
+        var masterWrite = CloneEventForEditing(master);
+        masterWrite.RecurrenceJson = RecurrenceRuleHelper.BuildSplitSourceRecurrenceJson(master, splitStart);
+        masterWrite.IsDirty = true;
+        writes.Add(masterWrite);
 
         foreach (var child in await _repository.LoadSeriesEventsAsync(master.Id, master.GoogleEventId))
         {
             if (child.OriginalStart is not null && child.OriginalStart >= splitStart)
             {
-                await _repository.DeleteEventAsync(child);
+                var deletedChild = CloneEventForEditing(child);
+                deletedChild.IsDeleted = true;
+                deletedChild.IsDirty = true;
+                writes.Add(deletedChild);
             }
         }
+
+        await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes);
+        return [];
+    }
+
+    private async Task<IReadOnlyList<CalendarEvent>> LoadRecurrenceUndoSnapshotsAsync(
+        CalendarEvent selectedEvent,
+        RecurrenceEditScope recurrenceScope,
+        bool isDelete,
+        string? targetCalendarId = null)
+    {
+        var master = await ResolveSeriesMasterAsync(selectedEvent);
+        if (master is null)
+        {
+            if (selectedEvent.IsGeneratedOccurrence)
+            {
+                return [];
+            }
+
+            return await _repository.FindMasterByIdAsync(selectedEvent.Id) is { } persisted
+                ? [UndoService.Clone(persisted)]
+                : [];
+        }
+
+        if (recurrenceScope == RecurrenceEditScope.ThisOccurrence)
+        {
+            if (selectedEvent.IsGeneratedOccurrence)
+            {
+                return isDelete ? [UndoService.Clone(master)] : [];
+            }
+
+            return await _repository.FindMasterByIdAsync(selectedEvent.Id) is { } persisted
+                ? [UndoService.Clone(persisted)]
+                : [];
+        }
+
+        var splitStart = selectedEvent.OriginalStart ?? selectedEvent.Start;
+        var affectsEntireSeries = recurrenceScope == RecurrenceEditScope.AllEvents || splitStart <= master.Start;
+        var splitsSeries = recurrenceScope == RecurrenceEditScope.ThisAndFollowing && splitStart > master.Start;
+        var movesEntireSeriesToAnotherCalendar = !isDelete
+            && affectsEntireSeries
+            && !string.IsNullOrWhiteSpace(targetCalendarId)
+            && !string.Equals(master.CalendarId, targetCalendarId, StringComparison.Ordinal);
+        if (!isDelete && !movesEntireSeriesToAnotherCalendar && !splitsSeries)
+        {
+            return [UndoService.Clone(master)];
+        }
+
+        var snapshots = new List<CalendarEvent> { UndoService.Clone(master) };
+        foreach (var child in await _repository.LoadSeriesEventsAsync(master.Id, master.GoogleEventId))
+        {
+            if (movesEntireSeriesToAnotherCalendar
+                || affectsEntireSeries
+                || child.OriginalStart is not null && child.OriginalStart >= splitStart)
+            {
+                snapshots.Add(UndoService.Clone(child));
+            }
+        }
+
+        return snapshots;
     }
 
     private async Task<CalendarEvent?> ResolveSeriesMasterAsync(CalendarEvent selectedEvent)
@@ -342,23 +506,49 @@ public sealed partial class MainViewModel
         target.AppReminderEnabled = candidate.AppReminderEnabled;
         target.GoogleEmailReminderEnabled = candidate.GoogleEmailReminderEnabled;
         target.GoogleReminderMetadata = candidate.GoogleReminderMetadata?.Clone();
-        target.Start = dayShift == 0
-            ? new DateTimeOffset(target.Start.Date.Add(candidate.Start.TimeOfDay), candidate.Start.Offset)
-            : target.Start.AddDays(dayShift).Date.Add(candidate.Start.TimeOfDay);
-        target.End = dayShift == 0
-            ? new DateTimeOffset(target.End.Date.Add(candidate.End.TimeOfDay), candidate.End.Offset)
-            : target.End.AddDays(dayShift).Date.Add(candidate.End.TimeOfDay);
+        target.StartTimeZoneId = candidate.IsAllDay ? null : candidate.StartTimeZoneId;
+        target.EndTimeZoneId = candidate.IsAllDay ? null : candidate.EndTimeZoneId ?? candidate.StartTimeZoneId;
 
+        var targetStartDate = target.Start.Date.AddDays(dayShift);
         if (candidate.IsAllDay)
         {
             var durationDays = Math.Max(1, (candidate.End.Date - candidate.Start.Date).Days);
-            target.Start = new DateTimeOffset(target.Start.Date);
-            target.End = new DateTimeOffset(target.Start.Date.AddDays(durationDays));
+            target.Start = new DateTimeOffset(targetStartDate);
+            target.End = new DateTimeOffset(targetStartDate.AddDays(durationDays));
+            return;
         }
-        else
+
+        var endDayOffset = (candidate.End.Date - candidate.Start.Date).Days;
+        var startWallClock = targetStartDate.Add(candidate.Start.TimeOfDay);
+        var endWallClock = targetStartDate.AddDays(endDayOffset).Add(candidate.End.TimeOfDay);
+        target.Start = CreateSeriesDateTimeOffset(
+            startWallClock,
+            target.StartTimeZoneId,
+            target.Start.Offset);
+        target.End = CreateSeriesDateTimeOffset(
+            endWallClock,
+            target.EndTimeZoneId ?? target.StartTimeZoneId,
+            target.End.Offset);
+    }
+
+    private static DateTimeOffset CreateSeriesDateTimeOffset(
+        DateTime wallClock,
+        string? timeZoneId,
+        TimeSpan preferredOffset)
+    {
+        if (GoogleCalendarTimeZone.TryCreateDateTimeOffset(
+                wallClock,
+                timeZoneId,
+                preferredOffset,
+                out var value))
         {
-            var duration = candidate.End - candidate.Start;
-            target.End = target.Start.Add(duration);
+            return value;
         }
+
+        // BuildEditedEventAsync already validates the edited occurrence. The only
+        // remaining failure case is normally an invalid wall-clock on the older series
+        // anchor date (for example a DST gap). Keep the prior offset rather than
+        // silently applying the machine-local zone.
+        return new DateTimeOffset(DateTime.SpecifyKind(wallClock, DateTimeKind.Unspecified), preferredOffset);
     }
 }

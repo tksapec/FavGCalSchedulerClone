@@ -94,12 +94,13 @@ internal static class TodoEditorDialog
             getProgress = () => complete.IsChecked == true ? 100 : (int)slider.Value;
         }
 
+        var calendarSelection = ResolveCalendarSelection(request);
         var calendar = new ComboBox
         {
-            ItemsSource = request.AvailableCalendars,
+            ItemsSource = calendarSelection.Options,
             DisplayMemberPath = nameof(GoogleCalendarSelectionItem.Summary),
             SelectedValuePath = nameof(GoogleCalendarSelectionItem.Id),
-            SelectedValue = request.CalendarId
+            SelectedValue = calendarSelection.CalendarId
         };
         var color = ui.CreateColorComboBox(request.ColorId);
         var title = new TextBox { Text = request.Title };
@@ -164,13 +165,86 @@ internal static class TodoEditorDialog
         }
 
         return new TodoEditorResult(
-            calendar.SelectedValue?.ToString() ?? request.CalendarId,
+            calendar.SelectedValue?.ToString() ?? calendarSelection.CalendarId,
             color.SelectedValue?.ToString(),
             dueDate.SelectedDate ?? request.DueDate,
             priority.SelectedItem?.ToString() ?? "A",
             getProgress(),
             title.Text,
             description.Text);
+    }
+
+    internal static (string CalendarId, IReadOnlyList<GoogleCalendarSelectionItem> Options) ResolveCalendarSelection(
+        TodoEditorRequest request)
+    {
+        var options = request.AvailableCalendars.ToList();
+        var requestedCalendarId = request.CalendarId;
+
+        if (request.IsNew)
+        {
+            // EditorCalendarId can reflect the last edited event, including a calendar
+            // that is currently hidden. New ToDos should default to a visible/selected
+            // calendar instead of disappearing into that transient editor target.
+            var requestedVisible = options.FirstOrDefault(item =>
+                item.IsSelected
+                && string.Equals(item.Id, requestedCalendarId, StringComparison.Ordinal));
+            var fallback = requestedVisible
+                ?? options.FirstOrDefault(item => item.IsSelected)
+                ?? options.FirstOrDefault();
+            if (fallback is not null)
+            {
+                return (fallback.Id, options);
+            }
+
+            var fallbackId = string.IsNullOrWhiteSpace(requestedCalendarId)
+                ? GoogleCalendarDefaults.PrimaryCalendarId
+                : requestedCalendarId;
+            options.Add(new GoogleCalendarSelectionItem
+            {
+                Id = fallbackId,
+                Summary = FormatUnavailableCalendarSummary(fallbackId, isExisting: false)
+            });
+            return (fallbackId, options);
+        }
+
+        if (!string.IsNullOrWhiteSpace(requestedCalendarId)
+            && options.Any(item => string.Equals(item.Id, requestedCalendarId, StringComparison.Ordinal)))
+        {
+            return (requestedCalendarId, options);
+        }
+
+        if (!string.IsNullOrWhiteSpace(requestedCalendarId))
+        {
+            options.Insert(0, new GoogleCalendarSelectionItem
+            {
+                Id = requestedCalendarId,
+                Summary = FormatUnavailableCalendarSummary(requestedCalendarId, isExisting: true)
+            });
+            return (requestedCalendarId, options);
+        }
+
+        var existingFallback = options.FirstOrDefault(item => item.IsSelected) ?? options.FirstOrDefault();
+        if (existingFallback is not null)
+        {
+            return (existingFallback.Id, options);
+        }
+
+        options.Add(new GoogleCalendarSelectionItem
+        {
+            Id = GoogleCalendarDefaults.PrimaryCalendarId,
+            Summary = "メインカレンダー"
+        });
+        return (GoogleCalendarDefaults.PrimaryCalendarId, options);
+    }
+
+    private static string FormatUnavailableCalendarSummary(string calendarId, bool isExisting)
+    {
+        if (string.Equals(calendarId, GoogleCalendarDefaults.PrimaryCalendarId, StringComparison.Ordinal))
+        {
+            return "メインカレンダー";
+        }
+
+        return isExisting ? $"現在のカレンダー ({calendarId})" : calendarId;
     }
 
     private static void AddTodoEditorLayout(

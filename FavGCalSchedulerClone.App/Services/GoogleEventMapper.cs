@@ -45,6 +45,8 @@ public static class GoogleEventMapper
             Location = googleEvent.Location,
             Start = start,
             End = end <= start ? start.AddHours(1) : end,
+            StartTimeZoneId = isAllDay ? null : googleEvent.Start?.TimeZone,
+            EndTimeZoneId = isAllDay ? null : googleEvent.End?.TimeZone ?? googleEvent.Start?.TimeZone,
             IsAllDay = isAllDay,
             ColorId = googleEvent.ColorId,
             RecurrenceJson = googleEvent.Recurrence is null ? null : JsonSerializer.Serialize(googleEvent.Recurrence),
@@ -74,14 +76,16 @@ public static class GoogleEventMapper
 
     public static Event ToGoogleEvent(LocalEvent localEvent)
     {
+        var startTimeZoneId = ResolveExportTimeZone(localEvent, localEvent.StartTimeZoneId);
+        var endTimeZoneId = ResolveExportTimeZone(localEvent, localEvent.EndTimeZoneId ?? localEvent.StartTimeZoneId);
         var googleEvent = new Event
         {
             Summary = localEvent.Title,
             Description = localEvent.Description,
             Location = localEvent.Location,
             ColorId = localEvent.ColorId,
-            Start = ToEventDateTime(localEvent.Start, localEvent.IsAllDay),
-            End = ToEventDateTime(localEvent.End, localEvent.IsAllDay),
+            Start = ToEventDateTime(localEvent.Start, localEvent.IsAllDay, startTimeZoneId),
+            End = ToEventDateTime(localEvent.End, localEvent.IsAllDay, endTimeZoneId),
             Status = localEvent.IsDeleted ? "cancelled" : "confirmed",
             Reminders = ToGoogleReminders(localEvent)
         };
@@ -93,10 +97,25 @@ public static class GoogleEventMapper
 
         if (localEvent.OriginalStart is { } originalStart)
         {
-            googleEvent.OriginalStartTime = ToEventDateTime(originalStart, localEvent.IsAllDay);
+            googleEvent.OriginalStartTime = ToEventDateTime(originalStart, localEvent.IsAllDay, startTimeZoneId);
         }
 
         return googleEvent;
+    }
+
+    private static string? ResolveExportTimeZone(LocalEvent localEvent, string? timeZoneId)
+    {
+        if (!string.IsNullOrWhiteSpace(timeZoneId))
+        {
+            return timeZoneId;
+        }
+
+        // A Google-sourced event that supplied only an explicit UTC offset must keep
+        // that representation on round-trip. Unsynced local events, however, need a
+        // named zone so Google can preserve wall-clock behavior across DST changes.
+        return string.IsNullOrWhiteSpace(localEvent.GoogleEventId)
+            ? GoogleCalendarTimeZone.LocalIanaId
+            : null;
     }
 
     private static GoogleReminderMetadata CreateReminderMetadata(
@@ -122,7 +141,6 @@ public static class GoogleEventMapper
 
         var useDefault = reminders?.UseDefault == true;
         var popupSource = useDefault ? metadata.DefaultPopupMinutes : metadata.PopupMinutes;
-        var emailSource = useDefault ? metadata.DefaultEmailMinutes : metadata.EmailMinutes;
         if (popupSource.Count > 0)
         {
             metadata.AdoptedReminderMinutes = popupSource.Min();
@@ -158,6 +176,15 @@ public static class GoogleEventMapper
         if (localEvent.IsTodoLike)
         {
             return TodoReminderPolicy.CreateGoogleRemindersDisabled();
+        }
+
+        if (localEvent.GoogleReminderMetadata?.UseDefault == true)
+        {
+            return new Event.RemindersData
+            {
+                UseDefault = true,
+                Overrides = []
+            };
         }
 
         var reminders = new Event.RemindersData
@@ -247,7 +274,7 @@ public static class GoogleEventMapper
         return value.DateTimeDateTimeOffset ?? DateTimeOffset.Now;
     }
 
-    private static EventDateTime ToEventDateTime(DateTimeOffset value, bool isAllDay)
+    private static EventDateTime ToEventDateTime(DateTimeOffset value, bool isAllDay, string? timeZoneId)
     {
         if (isAllDay)
         {
@@ -257,7 +284,7 @@ public static class GoogleEventMapper
         return new EventDateTime
         {
             DateTimeDateTimeOffset = value,
-            TimeZone = GoogleCalendarTimeZone.LocalIanaId
+            TimeZone = string.IsNullOrWhiteSpace(timeZoneId) ? null : timeZoneId
         };
     }
 }

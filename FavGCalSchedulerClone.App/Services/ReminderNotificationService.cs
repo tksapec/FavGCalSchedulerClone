@@ -21,6 +21,7 @@ public sealed class ReminderNotificationService : IDisposable
     private IReminderNotifier? _notifier;
     private bool _disposed;
     private bool _isRunning;
+    private bool _maintenancePaused;
     private DateTimeOffset? _startedAt;
     private DateTimeOffset? _lastDiagnosticsSavedAt;
     private string? _lastPersistedDiagnosticsSignature;
@@ -44,25 +45,91 @@ public sealed class ReminderNotificationService : IDisposable
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
-        if (_isRunning)
+        if (_disposed || _isRunning)
         {
             return;
         }
 
         _isRunning = true;
         _startedAt = DateTimeOffset.Now;
-        await CheckDueRemindersAsync(DateTimeOffset.Now, cancellationToken);
-        _timer.Change(CheckInterval, CheckInterval);
-        UpdateRuntimeState(DateTimeOffset.Now.Add(CheckInterval));
-        Debug.WriteLine("通知監視を開始しました");
+        try
+        {
+            await CheckDueRemindersAsync(DateTimeOffset.Now, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_disposed)
+            {
+                _isRunning = false;
+                UpdateRuntimeState(null);
+                return;
+            }
+
+            try
+            {
+                _timer.Change(CheckInterval, CheckInterval);
+            }
+            catch (ObjectDisposedException) when (_disposed)
+            {
+                _isRunning = false;
+                UpdateRuntimeState(null);
+                return;
+            }
+
+            UpdateRuntimeState(DateTimeOffset.Now.Add(CheckInterval));
+            Debug.WriteLine("通知監視を開始しました");
+        }
+        catch
+        {
+            _isRunning = false;
+            UpdateRuntimeState(null);
+            throw;
+        }
     }
 
     public void Stop()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
         _timer.Change(Timeout.Infinite, Timeout.Infinite);
         _isRunning = false;
         UpdateRuntimeState(null);
-        _ = SaveDiagnosticsAsync(force: true);
+        _ = SaveDiagnosticsSafelyAsync();
+    }
+
+    public async Task<bool> PauseForMaintenanceAsync(CancellationToken cancellationToken = default)
+    {
+        var wasRunning = _isRunning;
+        _timer.Change(Timeout.Infinite, Timeout.Infinite);
+        _isRunning = false;
+        Volatile.Write(ref _maintenancePaused, true);
+        UpdateRuntimeState(null);
+
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            await SaveDiagnosticsAsync(force: true);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        return wasRunning;
+    }
+
+    public async Task ResumeAfterMaintenanceAsync(bool resumeMonitoring, CancellationToken cancellationToken = default)
+    {
+        Volatile.Write(ref _maintenancePaused, false);
+        if (resumeMonitoring)
+        {
+            await StartAsync(cancellationToken);
+        }
+        else
+        {
+            UpdateRuntimeState(null);
+        }
     }
 
     public async Task<ReminderMonitoringSnapshot> LoadDiagnosticsAsync()
@@ -123,9 +190,17 @@ public sealed class ReminderNotificationService : IDisposable
         {
             Debug.WriteLine(ex);
             var error = $"{DateTimeOffset.Now:O} {ex}";
-            await _repository.SaveSettingValueAsync(ReminderLastErrorKey, error);
             _diagnostics = _diagnostics with { LastError = error, NextCheckAt = _isRunning ? DateTimeOffset.Now.Add(CheckInterval) : null };
-            await SaveDiagnosticsAsync(force: true);
+            try
+            {
+                await _repository.SaveSettingValueAsync(ReminderLastErrorKey, error);
+            }
+            catch (Exception persistenceException)
+            {
+                Debug.WriteLine(persistenceException);
+            }
+
+            await SaveDiagnosticsSafelyAsync();
         }
     }
 
@@ -144,10 +219,16 @@ public sealed class ReminderNotificationService : IDisposable
         await _gate.WaitAsync(cancellationToken);
         try
         {
+            if (_disposed || Volatile.Read(ref _maintenancePaused))
+            {
+                return;
+            }
+
             var fired = await LoadFiredStateAsync();
             var snoozed = await LoadSnoozeStateAsync();
             PruneFiredState(fired, current);
             PruneSnoozeState(snoozed, current.AddDays(-7));
+            PruneCompletedSnoozes(fired, snoozed);
 
             var windowStart = current.AddDays(-1);
             var windowEnd = current.AddDays(30);
@@ -367,6 +448,8 @@ public sealed class ReminderNotificationService : IDisposable
                     succeededCount++;
                     fired[notification.OccurrenceKey] = current.ToString("O");
                     snoozed.Remove(notification.OccurrenceKey);
+                    await SaveFiredStateAsync(fired);
+                    await SaveSnoozeStateAsync(snoozed);
                     await AddHistoryAsync(notification, current, null, deliverySucceeded: true, deliveryMethod: result.DeliveryMethod, result.UsedMessageBoxFallback, result.MessageBoxRole, result.ToastVerified, result.ToastStatus, result.SoundStatus, result.SoundError, deliveryError: null);
                 }
                 else
@@ -421,6 +504,11 @@ public sealed class ReminderNotificationService : IDisposable
         await _gate.WaitAsync();
         try
         {
+            if (Volatile.Read(ref _maintenancePaused))
+            {
+                return;
+            }
+
             var snoozed = await LoadSnoozeStateAsync();
             var snoozeUntil = current.AddMinutes(minutes);
             snoozed[occurrenceKey] = snoozeUntil.ToString("O");
@@ -458,7 +546,9 @@ public sealed class ReminderNotificationService : IDisposable
 
         try
         {
-            return JsonSerializer.Deserialize<List<ReminderHistoryItem>>(json) ?? [];
+            return (JsonSerializer.Deserialize<List<ReminderHistoryItem?>>(json) ?? [])
+                .OfType<ReminderHistoryItem>()
+                .ToArray();
         }
         catch (Exception ex) when (ex is JsonException or NotSupportedException)
         {
@@ -518,6 +608,8 @@ public sealed class ReminderNotificationService : IDisposable
         }
 
         _disposed = true;
+        _isRunning = false;
+        UpdateRuntimeState(null);
         _timer.Dispose();
         _gate.Dispose();
     }
@@ -537,9 +629,12 @@ public sealed class ReminderNotificationService : IDisposable
                 dispatched = true;
             }
 
-            if (ReminderTriggered is not null)
+            if (ReminderTriggered is { } triggered)
             {
-                await ReminderTriggered.Invoke(notification);
+                foreach (var handler in triggered.GetInvocationList().Cast<Func<ReminderNotification, Task>>())
+                {
+                    await handler(notification);
+                }
                 dispatched = true;
             }
 
@@ -547,6 +642,10 @@ public sealed class ReminderNotificationService : IDisposable
             return dispatched
                 ? ReminderDeliveryResult.Success(metadata?.DeliveryMethodName ?? notifier?.GetType().Name ?? "ReminderTriggered", metadata?.UsedMessageBoxFallback ?? false, metadata?.MessageBoxRole ?? MessageBoxNotificationRole.None, metadata?.ToastVerified ?? false, metadata?.ToastStatus, metadata?.SoundStatus ?? ReminderSoundStatus.NotConfigured, metadata?.SoundError)
                 : ReminderDeliveryResult.Failure("none", "No reminder notifier is configured.");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -716,6 +815,18 @@ public sealed class ReminderNotificationService : IDisposable
         await _repository.SaveSettingValueAsync(ReminderDiagnosticsKey, JsonSerializer.Serialize(_diagnostics));
         _lastDiagnosticsSavedAt = savedAt;
         _lastPersistedDiagnosticsSignature = signature;
+    }
+
+    private async Task SaveDiagnosticsSafelyAsync()
+    {
+        try
+        {
+            await SaveDiagnosticsAsync(force: true);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(ex);
+        }
     }
 
     private static string CreateDiagnosticsSignature(ReminderMonitoringSnapshot snapshot)
@@ -941,6 +1052,23 @@ public sealed class ReminderNotificationService : IDisposable
     {
         var json = history.Count == 0 ? null : JsonSerializer.Serialize(history);
         await _repository.SaveSettingValueAsync(ReminderHistoryKey, json);
+    }
+
+    private static void PruneCompletedSnoozes(
+        IReadOnlyDictionary<string, string> fired,
+        Dictionary<string, string> snoozed)
+    {
+        foreach (var key in snoozed
+                     .Where(pair =>
+                         DateTimeOffset.TryParse(pair.Value, out var snoozedUntil)
+                         && fired.TryGetValue(pair.Key, out var firedValue)
+                         && DateTimeOffset.TryParse(firedValue, out var firedAt)
+                         && firedAt >= snoozedUntil)
+                     .Select(pair => pair.Key)
+                     .ToArray())
+        {
+            snoozed.Remove(key);
+        }
     }
 
     private static void PruneFiredState(Dictionary<string, string> fired, DateTimeOffset now)

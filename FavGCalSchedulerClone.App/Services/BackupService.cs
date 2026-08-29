@@ -84,7 +84,14 @@ public sealed class BackupService
         var backupDirectory = Path.GetDirectoryName(Path.GetFullPath(databasePath))!;
         var rollbackPath = Path.Combine(backupDirectory, $"{Path.GetFileName(databasePath)}.restore-backup-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}");
         var tempRestorePath = Path.Combine(backupDirectory, $"{Path.GetFileName(databasePath)}.restore-{Guid.NewGuid():N}.tmp");
+        var preparedRestorePath = Path.Combine(backupDirectory, $"{Path.GetFileName(databasePath)}.restore-prepared-{Guid.NewGuid():N}.tmp");
+        var databaseWalPath = databasePath + "-wal";
+        var databaseShmPath = databasePath + "-shm";
+        var rollbackWalPath = rollbackPath + "-wal";
+        var rollbackShmPath = rollbackPath + "-shm";
         var currentMoved = false;
+        var walMoved = false;
+        var shmMoved = false;
 
         try
         {
@@ -98,6 +105,7 @@ public sealed class BackupService
             }
 
             await ValidateRestoredDatabaseAsync(tempRestorePath, cancellationToken);
+            await PrepareRestoredDatabaseAsync(tempRestorePath, preparedRestorePath, cancellationToken);
             SqliteConnection.ClearAllPools();
 
             if (File.Exists(databasePath))
@@ -106,24 +114,49 @@ public sealed class BackupService
                 currentMoved = true;
             }
 
-            await MoveFileWithRetryAsync(tempRestorePath, databasePath, overwrite: true, cancellationToken);
+            if (File.Exists(databaseWalPath))
+            {
+                await MoveFileWithRetryAsync(databaseWalPath, rollbackWalPath, overwrite: false, cancellationToken);
+                walMoved = true;
+            }
+
+            if (File.Exists(databaseShmPath))
+            {
+                await MoveFileWithRetryAsync(databaseShmPath, rollbackShmPath, overwrite: false, cancellationToken);
+                shmMoved = true;
+            }
+
+            await MoveFileWithRetryAsync(preparedRestorePath, databasePath, overwrite: true, cancellationToken);
             return new RestoreResult(databasePath, currentMoved ? rollbackPath : null);
         }
         catch
         {
             SqliteConnection.ClearAllPools();
 
-            if (File.Exists(tempRestorePath))
-            {
-                File.Delete(tempRestorePath);
-            }
-
+            // Once the current database has been displaced, rollback is recovery work and
+            // must not be aborted just because the caller's cancellation token was canceled.
             if (currentMoved && !File.Exists(databasePath) && File.Exists(rollbackPath))
             {
-                await MoveFileWithRetryAsync(rollbackPath, databasePath, overwrite: false, cancellationToken);
+                await MoveFileWithRetryAsync(rollbackPath, databasePath, overwrite: false, CancellationToken.None);
+            }
+
+            if (walMoved && !File.Exists(databaseWalPath) && File.Exists(rollbackWalPath))
+            {
+                await MoveFileWithRetryAsync(rollbackWalPath, databaseWalPath, overwrite: false, CancellationToken.None);
+            }
+
+            if (shmMoved && !File.Exists(databaseShmPath) && File.Exists(rollbackShmPath))
+            {
+                await MoveFileWithRetryAsync(rollbackShmPath, databaseShmPath, overwrite: false, CancellationToken.None);
             }
 
             throw;
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            TryDeleteSqliteFiles(tempRestorePath);
+            TryDeleteSqliteFiles(preparedRestorePath);
         }
     }
 
@@ -204,6 +237,33 @@ public sealed class BackupService
         }
     }
 
+    private static async Task PrepareRestoredDatabaseAsync(
+        string extractedDatabasePath,
+        string preparedDatabasePath,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var migrationRepository = new CalendarRepository(extractedDatabasePath);
+            await migrationRepository.InitializeAsync();
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // Re-copy through SQLite after migration so any WAL-backed schema/data changes
+            // are consolidated into a standalone database file before the live swap.
+            await CreateConsistentDatabaseCopyAsync(extractedDatabasePath, preparedDatabasePath, cancellationToken);
+            await ValidateRestoredDatabaseAsync(preparedDatabasePath, cancellationToken);
+        }
+        catch (SqliteException ex)
+        {
+            throw new InvalidDataException("The backup database schema could not be migrated.", ex);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+        }
+    }
+
     private static async Task MoveFileWithRetryAsync(string sourcePath, string destinationPath, bool overwrite, CancellationToken cancellationToken)
     {
         const int maxAttempts = 5;
@@ -254,6 +314,24 @@ public sealed class BackupService
         {
             DataSource = databasePath
         }.ToString();
+    }
+
+    private static void TryDeleteSqliteFiles(string databasePath)
+    {
+        foreach (var path in new[] { databasePath, databasePath + "-wal", databasePath + "-shm" })
+        {
+            try
+            {
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Temporary restore artifacts are best-effort cleanup only.
+            }
+        }
     }
 }
 

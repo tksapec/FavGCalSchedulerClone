@@ -35,7 +35,7 @@ internal static class EventListDialog
         window.Content = panel;
 
         var status = new TextBlock { Margin = new Thickness(0, 4, 0, 0) };
-        var toolbar = CreateToolbar(request, eventItems, status, currentFilter, filter => currentFilter = filter);
+        var toolbar = CreateToolbar(request, eventItems, status, currentFilter, filter => currentFilter = filter, window);
         DockPanel.SetDock(toolbar, Dock.Top);
         panel.Children.Add(toolbar);
 
@@ -63,7 +63,7 @@ internal static class EventListDialog
             FontSize = 12,
             GridLinesVisibility = DataGridGridLinesVisibility.All
         };
-        grid.MouseDoubleClick += async (_, e) =>
+        grid.MouseDoubleClick += (_, e) => DialogAsyncGuard.Run(window, async () =>
         {
             var calendarEvent = DataGridDoubleClickHelper.GetEditableRowItem<CalendarEvent>(e.OriginalSource);
             if (calendarEvent is null)
@@ -73,10 +73,10 @@ internal static class EventListDialog
 
             await request.EditEventAsync(calendarEvent);
             await ReloadAsync(request, eventItems, status, currentFilter);
-        };
+        }, "予定編集");
 
         AddColumns(grid);
-        var bulkToolbar = CreateBulkToolbar(ui, request, grid, eventItems, status, () => currentFilter);
+        var bulkToolbar = CreateBulkToolbar(ui, request, grid, eventItems, status, () => currentFilter, window);
         DockPanel.SetDock(bulkToolbar, Dock.Top);
         panel.Children.Add(bulkToolbar);
         panel.Children.Add(grid);
@@ -90,7 +90,8 @@ internal static class EventListDialog
         ObservableCollection<CalendarEvent> eventItems,
         TextBlock status,
         EventListFilter initialFilter,
-        Action<EventListFilter> updateCurrentFilter)
+        Action<EventListFilter> updateCurrentFilter,
+        Window window)
     {
         var root = new StackPanel { Orientation = Orientation.Vertical, Margin = new Thickness(0, 0, 0, 6) };
         var firstRow = new WrapPanel { VerticalAlignment = VerticalAlignment.Center };
@@ -128,11 +129,14 @@ internal static class EventListDialog
             endDate.SelectedDate = end;
         };
 
-        async void SearchClick(object? sender, RoutedEventArgs e)
+        void SearchClick(object? sender, RoutedEventArgs e)
         {
-            var nextFilter = CreateFilter(query, kind, range, startDate, endDate, calendar, initialFilter.ReferenceDate);
-            updateCurrentFilter(nextFilter);
-            await ReloadAsync(request, eventItems, status, nextFilter);
+            DialogAsyncGuard.Run(window, async () =>
+            {
+                var nextFilter = CreateFilter(query, kind, range, startDate, endDate, calendar, initialFilter.ReferenceDate);
+                updateCurrentFilter(nextFilter);
+                await ReloadAsync(request, eventItems, status, nextFilter);
+            }, "検索");
         }
 
         search.Click += SearchClick;
@@ -201,13 +205,14 @@ internal static class EventListDialog
         DataGrid grid,
         ObservableCollection<CalendarEvent> eventItems,
         TextBlock status,
-        Func<EventListFilter> getCurrentFilter)
+        Func<EventListFilter> getCurrentFilter,
+        Window window)
     {
         var panel = new WrapPanel { Margin = new Thickness(0, 0, 0, 6) };
         var bulkEdit = new Button { Content = "一括編集", MinWidth = 88, Height = 26, IsEnabled = request.BulkEditAsync is not null, Margin = new Thickness(0, 0, 8, 0) };
-        var bulkDelete = new Button { Content = "一括削除", MinWidth = 88, Height = 26, IsEnabled = request.BulkDeleteAsync is not null, Margin = new Thickness(0, 0, 8, 0) };
+        var bulkDelete = new Button { Content = "一括削除", MinWidth = 88, Height = 26, IsEnabled = request.BulkDeleteAsync is not null };
 
-        bulkEdit.Click += async (_, _) =>
+        bulkEdit.Click += (_, _) => DialogAsyncGuard.Run(window, async () =>
         {
             var ids = GetSelectedIds(grid);
             if (request.BulkEditAsync is null || ids.Count == 0)
@@ -225,9 +230,9 @@ internal static class EventListDialog
             var updated = await request.BulkEditAsync(ids, update);
             await ReloadAsync(request, eventItems, status, getCurrentFilter());
             status.Text = $"一括編集しました: {updated}件";
-        };
+        }, "一括編集");
 
-        bulkDelete.Click += async (_, _) =>
+        bulkDelete.Click += (_, _) => DialogAsyncGuard.Run(window, async () =>
         {
             var ids = GetSelectedIds(grid);
             if (request.BulkDeleteAsync is null || ids.Count == 0)
@@ -244,7 +249,7 @@ internal static class EventListDialog
             var deleted = await request.BulkDeleteAsync(ids);
             await ReloadAsync(request, eventItems, status, getCurrentFilter());
             status.Text = $"一括削除しました: {deleted}件";
-        };
+        }, "一括削除");
 
         panel.Children.Add(bulkEdit);
         panel.Children.Add(bulkDelete);

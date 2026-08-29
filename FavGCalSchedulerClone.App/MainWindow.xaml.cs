@@ -57,7 +57,7 @@ public partial class MainWindow : Window
         _viewModel.SetManualSyncPreviewConfirmation(preview => Task.FromResult(
             RunAsOwnedModal(() => SyncDialogs.ShowPreview(this, preview) == true)));
         _viewModel.SetWindowCommandHandlers(
-            () => RunAsOwnedModalAsync(ShowScheduleDialogAsync),
+            () => RunAsOwnedModalAsync(() => ShowScheduleDialogAsync(forceNew: true)),
             () => RunAsOwnedModalAsync(ShowTodoDialogAsync),
             () => RunAsOwnedModalAsync(BackupAllCalendarsAsync),
             () => RunAsOwnedModalAsync(RestoreAllCalendarsAsync),
@@ -687,7 +687,7 @@ public partial class MainWindow : Window
         var menu = new ContextMenu { PlacementTarget = placementTarget };
 
         var addSchedule = new MenuItem { Header = "スケジュールの追加" };
-        addSchedule.Click += async (_, _) => await RunUiActionAsync(ShowScheduleDialogAsync, "ContextMenu.AddSchedule");
+        addSchedule.Click += async (_, _) => await RunUiActionAsync(() => ShowScheduleDialogAsync(forceNew: true), "ContextMenu.AddSchedule");
         menu.Items.Add(addSchedule);
 
         var addTodo = new MenuItem { Header = "ToDoの追加" };
@@ -781,7 +781,7 @@ public partial class MainWindow : Window
 
     private async void AddScheduleMenu_Click(object sender, RoutedEventArgs e)
     {
-        await RunUiActionAsync(ShowScheduleDialogAsync, nameof(AddScheduleMenu_Click));
+        await RunUiActionAsync(() => ShowScheduleDialogAsync(forceNew: true), nameof(AddScheduleMenu_Click));
     }
 
     private async void AddTodoMenu_Click(object sender, RoutedEventArgs e)
@@ -849,6 +849,16 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            if (_viewModel.IsDatabaseRestartRequired)
+            {
+                MessageBox.Show(
+                    ex.Message,
+                    "リストア後の再起動が必要",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
             MessageBox.Show(this, ex.Message, "リストア失敗", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
@@ -1173,14 +1183,19 @@ public partial class MainWindow : Window
         Close();
     }
 
-    private async Task ShowScheduleDialogAsync()
+    private async Task ShowScheduleDialogAsync(bool forceNew = false)
     {
         var date = _viewModel.SelectedDay?.Date ?? DateTime.Today;
-        var editingEvent = _viewModel.SelectedEvent;
+        var editingEvent = forceNew ? null : _viewModel.SelectedEvent;
         if (editingEvent is null)
         {
             _viewModel.BeginNewEvent(date);
         }
+
+        var scheduleCalendarId = editingEvent is not null && !string.IsNullOrWhiteSpace(editingEvent.CalendarId)
+            ? editingEvent.CalendarId
+            : _viewModel.ResolveScheduleEditorCalendarId(editingEvent);
+        var scheduleCalendarOptions = _viewModel.CreateScheduleEditorCalendarOptions(editingEvent, scheduleCalendarId);
 
         var result = ScheduleEditorDialog.Show(
             DialogUi,
@@ -1195,13 +1210,13 @@ public partial class MainWindow : Window
                 editingEvent?.IsAppReminderEnabled ?? _viewModel.IsAppReminderEnabled,
                 editingEvent?.IsGoogleEmailReminderEnabled ?? _viewModel.IsGoogleEmailReminderEnabled,
                 editingEvent?.Location ?? _viewModel.Location,
-                editingEvent?.CalendarId ?? _viewModel.EditorCalendarId,
+                scheduleCalendarId,
                 editingEvent?.ColorId,
                 editingEvent?.Title ?? _viewModel.Title,
                 editingEvent?.Description ?? string.Empty,
                 await _viewModel.LoadScheduleLocationHistoryAsync(),
                 await _viewModel.LoadScheduleTitleHistoryAsync(),
-                _viewModel.AvailableCalendars,
+                scheduleCalendarOptions,
                 _viewModel.ReminderOptions,
                 GoogleReminderDisplayFormatter.FormatEmailReminderText(editingEvent?.GoogleReminderMetadata),
                 editingEvent?.EffectiveAppReminderMinutesBeforeStart ?? _viewModel.AppReminderMinutesBeforeStart,
