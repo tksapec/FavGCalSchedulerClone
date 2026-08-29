@@ -25,6 +25,22 @@ public sealed class RecurrenceExceptionRecoveryRegressionTests
         Assert.Equal("instance-remote", persisted.GoogleEventId);
     }
 
+    [Fact]
+    public async Task SyncAsync_WhenRecurrenceInstanceCannotBeResolved_DoesNotInsertStandaloneEvent()
+    {
+        await using var fixture = await SyncFixture.CreateAsync(includeRemoteInstanceId: false);
+
+        var result = await fixture.Service.SyncAsync(fixture.Settings);
+
+        Assert.Equal(0, fixture.Client.InsertCount);
+        Assert.True(result.Failed > 0);
+        Assert.Equal(0, result.Recreated);
+        var persisted = await fixture.Repository.FindEventByIdAsync("exception-local");
+        Assert.NotNull(persisted);
+        Assert.True(persisted!.IsDirty);
+        Assert.Null(persisted.GoogleEventId);
+    }
+
     private sealed class SyncFixture : IAsyncDisposable
     {
         private readonly string _databasePath;
@@ -51,7 +67,7 @@ public sealed class RecurrenceExceptionRecoveryRegressionTests
         public GoogleCalendarSyncService Service { get; }
         public AppSettings Settings { get; }
 
-        public static async Task<SyncFixture> CreateAsync()
+        public static async Task<SyncFixture> CreateAsync(bool includeRemoteInstanceId = true)
         {
             var databasePath = Path.Combine(Path.GetTempPath(), $"recurrence-recovery-{Guid.NewGuid():N}.db");
             var oauthPath = Path.Combine(Path.GetTempPath(), $"oauth-{Guid.NewGuid():N}.json");
@@ -75,7 +91,7 @@ public sealed class RecurrenceExceptionRecoveryRegressionTests
             await repository.SaveEventAsync(new CalendarEvent
             {
                 Id = "exception-local",
-                GoogleEventId = "instance-remote",
+                GoogleEventId = includeRemoteInstanceId ? "instance-remote" : null,
                 RecurringEventId = "series-remote",
                 RecurringParentId = "series-local",
                 OriginalStart = originalStart,
