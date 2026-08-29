@@ -70,6 +70,28 @@ public sealed class ReturnToTodaySettingTests
     }
 
     [Fact]
+    public async Task QuickToggle_WhenPersistenceFails_RestoresPreviousValue()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var repository = new CalendarRepository(directory);
+            var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+
+            Assert.True(viewModel.ReturnToTodayWhenDeactivated);
+
+            await Assert.ThrowsAnyAsync<Exception>(() => viewModel.ToggleReturnToTodayWhenDeactivatedAsync());
+
+            Assert.True(viewModel.ReturnToTodayWhenDeactivated);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Setting_IsWiredIntoDeactivationSettingsDialogAndQuickMenu()
     {
         var app = await ReadAppFileAsync("App.xaml.cs");
