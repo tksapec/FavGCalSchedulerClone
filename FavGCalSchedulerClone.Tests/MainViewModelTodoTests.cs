@@ -258,6 +258,41 @@ public sealed class MainViewModelTodoTests
     }
 
     [Fact]
+    public async Task ApplyCalendarSelectionAsync_ClearsSelectedEventWhenItsCalendarIsHidden()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var repository = new CalendarRepository(dbPath);
+        await repository.InitializeAsync();
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Title = "Primary event",
+            CalendarId = "primary",
+            Start = new DateTimeOffset(DateTime.Today.AddHours(9)),
+            End = new DateTimeOffset(DateTime.Today.AddHours(10))
+        });
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Title = "Team event",
+            CalendarId = "team",
+            Start = new DateTimeOffset(DateTime.Today.AddHours(11)),
+            End = new DateTimeOffset(DateTime.Today.AddHours(12))
+        });
+        await repository.SaveSettingsAsync(new AppSettings { VisibleCalendarIds = ["primary", "team"] });
+
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+        await viewModel.InitializeAsync();
+        viewModel.SelectedEvent = viewModel.SelectedDayEvents.Single(item => item.CalendarId == "primary");
+        viewModel.AvailableCalendars.Single(item => item.Id == "primary").IsSelected = false;
+        viewModel.AvailableCalendars.Single(item => item.Id == "team").IsSelected = true;
+
+        await viewModel.ApplyCalendarSelectionAsync();
+
+        Assert.Null(viewModel.SelectedEvent);
+    }
+
+    [Fact]
     public async Task ApplyCalendarSelectionAsync_RestoresFirstCalendarWhenAllUnchecked()
     {
         var viewModel = await CreateViewModelAsync();
