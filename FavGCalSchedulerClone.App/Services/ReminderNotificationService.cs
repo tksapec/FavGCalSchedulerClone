@@ -228,6 +228,7 @@ public sealed class ReminderNotificationService : IDisposable
             var snoozed = await LoadSnoozeStateAsync();
             PruneFiredState(fired, current);
             PruneSnoozeState(snoozed, current.AddDays(-7));
+            PruneCompletedSnoozes(fired, snoozed);
 
             var windowStart = current.AddDays(-1);
             var windowEnd = current.AddDays(30);
@@ -1051,6 +1052,23 @@ public sealed class ReminderNotificationService : IDisposable
     {
         var json = history.Count == 0 ? null : JsonSerializer.Serialize(history);
         await _repository.SaveSettingValueAsync(ReminderHistoryKey, json);
+    }
+
+    private static void PruneCompletedSnoozes(
+        IReadOnlyDictionary<string, string> fired,
+        Dictionary<string, string> snoozed)
+    {
+        foreach (var key in snoozed
+                     .Where(pair =>
+                         DateTimeOffset.TryParse(pair.Value, out var snoozedUntil)
+                         && fired.TryGetValue(pair.Key, out var firedValue)
+                         && DateTimeOffset.TryParse(firedValue, out var firedAt)
+                         && firedAt >= snoozedUntil)
+                     .Select(pair => pair.Key)
+                     .ToArray())
+        {
+            snoozed.Remove(key);
+        }
     }
 
     private static void PruneFiredState(Dictionary<string, string> fired, DateTimeOffset now)
