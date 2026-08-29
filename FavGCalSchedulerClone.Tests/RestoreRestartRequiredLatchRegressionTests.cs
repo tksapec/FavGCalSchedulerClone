@@ -140,7 +140,7 @@ public sealed class RestoreRestartRequiredLatchRegressionTests
         var initializeStart = source.IndexOf("public async Task InitializeAsync", StringComparison.Ordinal);
         var disableOwner = source.IndexOf("owner.IsEnabled = false;", initializeStart, StringComparison.Ordinal);
         var initializeViewModel = source.IndexOf("await _viewModel.InitializeAsync();", initializeStart, StringComparison.Ordinal);
-        var restoreOwner = source.IndexOf("owner.IsEnabled = ownerWasEnabled;", initializeViewModel, StringComparison.Ordinal);
+        var restoreOwner = source.IndexOf("owner.IsEnabled = ownerWasEnabled.Value;", initializeViewModel, StringComparison.Ordinal);
 
         Assert.True(initializeStart >= 0 && disableOwner > initializeStart && disableOwner < initializeViewModel,
             "The user must not be able to start restore while startup initialization is still using the database.");
@@ -164,6 +164,7 @@ public sealed class RestoreRestartRequiredLatchRegressionTests
     public async Task RestoreUi_RestartRequiredWarningDoesNotUseDisabledMainWindowAsMessageBoxOwner()
     {
         var source = await File.ReadAllTextAsync(Path.Combine(AppRoot, "MainWindow.xaml.cs"));
+        source = source.ReplaceLineEndings("\n");
         var methodStart = source.IndexOf("private async Task RestoreAllCalendarsAsync()", StringComparison.Ordinal);
         var nextMethod = source.IndexOf("private async Task ImportCsvAsync()", methodStart, StringComparison.Ordinal);
         Assert.True(methodStart >= 0 && nextMethod > methodStart);
@@ -172,7 +173,7 @@ public sealed class RestoreRestartRequiredLatchRegressionTests
         var catchStart = method.IndexOf("catch (Exception ex)", StringComparison.Ordinal);
         var restartCheck = method.IndexOf("_viewModel.IsDatabaseRestartRequired", catchStart, StringComparison.Ordinal);
         var restartTitle = method.IndexOf("リストア後の再起動が必要", catchStart, StringComparison.Ordinal);
-        var ownerlessWarning = method.IndexOf("MessageBox.Show(\n                ex.Message", catchStart, StringComparison.Ordinal);
+        var ownerlessWarning = method.IndexOf("MessageBox.Show(\n                    ex.Message", catchStart, StringComparison.Ordinal);
         var ownedFailure = method.IndexOf("MessageBox.Show(this, ex.Message, \"リストア失敗\"", catchStart, StringComparison.Ordinal);
 
         Assert.True(catchStart >= 0 && restartCheck > catchStart,

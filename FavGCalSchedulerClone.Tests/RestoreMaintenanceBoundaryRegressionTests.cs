@@ -30,7 +30,18 @@ public sealed class RestoreMaintenanceBoundaryRegressionTests
         Assert.Contains("nameof(MainViewModel.IsDatabaseRestartRequired)", interactionSource, StringComparison.Ordinal);
         Assert.Contains("Dispatcher.Invoke(ApplyDatabaseMaintenanceInteractionState)", interactionSource, StringComparison.Ordinal);
         Assert.Contains("IsEnabled = false;", interactionSource, StringComparison.Ordinal);
-        Assert.Contains("IsEnabled = wasEnabled;", interactionSource, StringComparison.Ordinal);
+        Assert.Contains("IsEnabled = restoredMainWindowEnabled;", interactionSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RestoreUi_UsesDistinctLocalNamesForCapturingAndRestoringWindowEnabledState()
+    {
+        var interactionSource = await File.ReadAllTextAsync(Path.Combine(
+            AppRoot, "MainWindow.RestoreMaintenance.cs"));
+
+        Assert.Contains("var capturedMainWindowEnabled = IsEnabled;", interactionSource, StringComparison.Ordinal);
+        Assert.Contains("IsEnabled = restoredMainWindowEnabled;", interactionSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("var wasEnabled = IsEnabled;", interactionSource, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -113,7 +124,7 @@ public sealed class RestoreMaintenanceBoundaryRegressionTests
     }
 
     [Fact]
-    public async Task RestoreAllCalendarsAsync_WhenReminderRestartFails_ReportsDatabaseAlreadyRestoredWithoutLockingUi()
+    public async Task RestoreAllCalendarsAsync_WhenReminderCheckFailsDuringResume_CompletesRestoreWithoutLockingUi()
     {
         var directory = Path.Combine(Path.GetTempPath(), $"restore-reminder-restart-failure-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
@@ -159,15 +170,12 @@ public sealed class RestoreMaintenanceBoundaryRegressionTests
                 reminderMaintenanceStarted = true;
             };
 
-            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                viewModel.RestoreAllCalendarsAsync(backupPath));
+            await viewModel.RestoreAllCalendarsAsync(backupPath);
 
-            Assert.Contains("DBの復元は完了", exception.Message, StringComparison.Ordinal);
-            Assert.Contains("通知監視", exception.Message, StringComparison.Ordinal);
-            Assert.Contains("再起動", exception.Message, StringComparison.Ordinal);
             Assert.Equal(5, (await targetRepository.LoadSettingsAsync()).StartupTabIndex);
             Assert.False(viewModel.IsDatabaseMaintenanceInProgress);
             Assert.False(viewModel.IsDatabaseRestartRequired);
+            Assert.True(localReminderService.IsRunning);
         }
         finally
         {
@@ -217,9 +225,33 @@ public sealed class RestoreMaintenanceBoundaryRegressionTests
         finally
         {
             SqliteConnection.ClearAllPools();
-            if (Directory.Exists(directory))
+            await DeleteDirectoryAfterClearingSqlitePoolsAsync(directory);
+        }
+    }
+
+    private static Task DeleteDirectoryAfterClearingSqlitePoolsAsync(string directory)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
             {
-                Directory.Delete(directory, recursive: true);
+                SqliteConnection.ClearAllPools();
+                if (Directory.Exists(directory))
+                {
+                    Directory.Delete(directory, recursive: true);
+                }
+
+                return Task.CompletedTask;
+            }
+            catch (IOException) when (attempt < 2)
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
+            catch (UnauthorizedAccessException) when (attempt < 2)
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
             }
         }
     }

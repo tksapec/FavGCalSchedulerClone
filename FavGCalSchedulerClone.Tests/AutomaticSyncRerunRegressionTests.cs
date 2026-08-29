@@ -57,7 +57,7 @@ public sealed class AutomaticSyncRerunRegressionTests
             var viewModel = new MainViewModel(repository, syncService);
             var settings = viewModel.CreateSettingsSnapshot();
             settings.OAuthClientJsonPath = oauthPath;
-            settings.AutomaticSyncIntervalMinutes = 5;
+            settings.AutomaticSyncIntervalMinutes = 30;
             settings.LastAutomaticSyncAt = null;
             await viewModel.SaveApplicationSettingsAsync(settings);
             return new SyncFixture(databasePath, oauthPath, client, viewModel);

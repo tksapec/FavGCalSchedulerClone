@@ -23,15 +23,18 @@ public sealed class ApplicationStartupService : IApplicationStartupService, IDis
         _automaticSyncTimer.Tick += AutomaticSyncTimer_Tick;
     }
 
-    public async Task InitializeAsync(Window owner, Func<IReminderNotifier> notifierFactory)
+    public async Task InitializeAsync(Window? owner, Func<IReminderNotifier> notifierFactory)
     {
         if (_disposed)
         {
             return;
         }
 
-        var ownerWasEnabled = owner.IsEnabled;
-        owner.IsEnabled = false;
+        var ownerWasEnabled = owner?.IsEnabled;
+        if (owner is not null)
+        {
+            owner.IsEnabled = false;
+        }
         try
         {
             try
@@ -106,11 +109,13 @@ public sealed class ApplicationStartupService : IApplicationStartupService, IDis
         }
         finally
         {
-            if (!_disposed
+            if (owner is not null
+                && ownerWasEnabled is not null
+                && !_disposed
                 && !_viewModel.IsDatabaseMaintenanceInProgress
                 && !_viewModel.IsDatabaseRestartRequired)
             {
-                owner.IsEnabled = ownerWasEnabled;
+                owner.IsEnabled = ownerWasEnabled.Value;
             }
         }
     }

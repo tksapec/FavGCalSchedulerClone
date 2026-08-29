@@ -52,7 +52,7 @@ public sealed class StartupShutdownRegressionTests
         source = source.ReplaceLineEndings("\n");
 
         Assert.Contains(
-            "MessageBox.Show(owner, ex.Message, \"初期化エラー\", MessageBoxButton.OK, MessageBoxImage.Error);\n            throw;",
+            "MessageBox.Show(owner, ex.Message, \"初期化エラー\", MessageBoxButton.OK, MessageBoxImage.Error);\n                throw;",
             source,
             StringComparison.Ordinal);
     }

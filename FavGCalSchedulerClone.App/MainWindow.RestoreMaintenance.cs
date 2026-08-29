@@ -57,8 +57,8 @@ public partial class MainWindow
         {
             if (_mainWindowEnabledBeforeDatabaseMaintenance is null)
             {
-                var wasEnabled = IsEnabled;
-                _mainWindowEnabledBeforeDatabaseMaintenance = wasEnabled;
+                var capturedMainWindowEnabled = IsEnabled;
+                _mainWindowEnabledBeforeDatabaseMaintenance = capturedMainWindowEnabled;
                 IsEnabled = false;
             }
 
@@ -80,10 +80,10 @@ public partial class MainWindow
             }
         }
 
-        if (_mainWindowEnabledBeforeDatabaseMaintenance is { } wasEnabled)
+        if (_mainWindowEnabledBeforeDatabaseMaintenance is { } restoredMainWindowEnabled)
         {
             _mainWindowEnabledBeforeDatabaseMaintenance = null;
-            IsEnabled = wasEnabled;
+            IsEnabled = restoredMainWindowEnabled;
         }
     }
 }

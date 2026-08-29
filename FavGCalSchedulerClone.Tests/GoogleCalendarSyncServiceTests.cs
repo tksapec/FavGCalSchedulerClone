@@ -1285,7 +1285,7 @@ public sealed class GoogleCalendarSyncServiceTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task SyncAsync_FullSyncFetchesOldDirtyLinkedEventBeforeApplyingEtagConflictPolicy(bool recoverAfter410)
+    public async Task SyncAsync_FullSyncKeepsOldDirtyLinkedEventWithoutFallbackLookupWhenItIsListed(bool recoverAfter410)
     {
         var repository = await CreateRepositoryAsync();
         var api = new FakeGoogleCalendarApi { HonorInitialFullTimeMin = true };
@@ -1321,12 +1321,12 @@ public sealed class GoogleCalendarSyncServiceTests
 
         Assert.Equal(0, result.Pushed);
         Assert.Equal(1, result.Skipped);
-        Assert.Contains(api.Operations, operation => operation == "get:work:remote-old-conflict");
+        Assert.DoesNotContain(api.Operations, operation => operation == "get:work:remote-old-conflict");
         Assert.True((await repository.FindEventByIdAsync(local.Id))!.IsDirty);
     }
 
     [Fact]
-    public async Task SyncAsync_FullSyncDoesNotAdvanceTokenWhenOldDirtyLinkedEventLookupFails()
+    public async Task SyncAsync_FullSyncAdvancesTokenWhenOldDirtyLinkedEventIsIncludedWithoutFallbackLookup()
     {
         var repository = await CreateRepositoryAsync();
         var api = new FakeGoogleCalendarApi { HonorInitialFullTimeMin = true, GetFailuresRemaining = 1 };
@@ -1352,8 +1352,10 @@ public sealed class GoogleCalendarSyncServiceTests
 
         var result = await new GoogleCalendarSyncService(repository, api).SyncAsync(settings);
 
-        Assert.Equal(1, result.Failed);
+        Assert.Equal(0, result.Failed);
         Assert.Equal(0, result.Pushed);
+        Assert.Equal(1, result.Skipped);
+        Assert.DoesNotContain(api.Operations, operation => operation == "get:work:remote-old-lookup-failure");
         Assert.Null(await repository.GetSyncTokenAsync("work"));
         Assert.True((await repository.FindEventByIdAsync(local.Id))!.IsDirty);
     }

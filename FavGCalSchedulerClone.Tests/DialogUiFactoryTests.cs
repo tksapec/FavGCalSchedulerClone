@@ -1,4 +1,5 @@
 using FavGCalSchedulerClone.App.Models;
+using FavGCalSchedulerClone.App.ViewModels;
 using FavGCalSchedulerClone.App.Views.Dialogs;
 
 namespace FavGCalSchedulerClone.Tests;
