@@ -15,7 +15,7 @@ public sealed partial class MainViewModel
         var query = SearchQuery;
         var generation = Interlocked.Increment(ref _searchGeneration);
 
-        if (!await RunSearchForYearAsync(year, query, generation, previousView))
+        if (!await RunSearchForYearAsync(year, query, generation, previousView, requireCurrentYearMatch: true))
         {
             return;
         }
@@ -35,12 +35,14 @@ public sealed partial class MainViewModel
         int year,
         string query,
         int generation,
-        CalendarViewMode expectedView)
+        CalendarViewMode expectedView,
+        bool requireCurrentYearMatch = false)
     {
         var results = await SearchYearEventsAsync(new DateTime(year, 1, 1), query);
         if (generation != Volatile.Read(ref _searchGeneration)
             || !string.Equals(SearchQuery, query, StringComparison.Ordinal)
-            || CurrentViewMode != expectedView)
+            || CurrentViewMode != expectedView
+            || (requireCurrentYearMatch && CurrentMonth.Year != year))
         {
             return false;
         }
