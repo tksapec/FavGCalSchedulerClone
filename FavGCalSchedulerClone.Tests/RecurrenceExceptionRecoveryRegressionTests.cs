@@ -41,6 +41,21 @@ public sealed class RecurrenceExceptionRecoveryRegressionTests
         Assert.Null(persisted.GoogleEventId);
     }
 
+    [Fact]
+    public async Task PreviewAsync_WhenRecurrenceInstanceIsMissing_DoesNotPromiseStandaloneRecreation()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        await fixture.Repository.SaveSyncTokenAsync(GoogleCalendarDefaults.PrimaryCalendarId, null);
+
+        var preview = await fixture.Service.PreviewAsync(fixture.Settings);
+
+        var item = Assert.Single(preview.PushItems, candidate => candidate.LocalId == "exception-local");
+        Assert.DoesNotContain("再作成予定", item.Detail, StringComparison.Ordinal);
+        Assert.Contains("繰り返し予定", item.Detail, StringComparison.Ordinal);
+        Assert.Contains("未同期", item.Detail, StringComparison.Ordinal);
+        Assert.Equal(0, fixture.Client.InsertCount);
+    }
+
     private sealed class SyncFixture : IAsyncDisposable
     {
         private readonly string _databasePath;
