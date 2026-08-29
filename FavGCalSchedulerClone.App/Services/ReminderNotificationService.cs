@@ -447,6 +447,8 @@ public sealed class ReminderNotificationService : IDisposable
                     succeededCount++;
                     fired[notification.OccurrenceKey] = current.ToString("O");
                     snoozed.Remove(notification.OccurrenceKey);
+                    await SaveFiredStateAsync(fired);
+                    await SaveSnoozeStateAsync(snoozed);
                     await AddHistoryAsync(notification, current, null, deliverySucceeded: true, deliveryMethod: result.DeliveryMethod, result.UsedMessageBoxFallback, result.MessageBoxRole, result.ToastVerified, result.ToastStatus, result.SoundStatus, result.SoundError, deliveryError: null);
                 }
                 else
