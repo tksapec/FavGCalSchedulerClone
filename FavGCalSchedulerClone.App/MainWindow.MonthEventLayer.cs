@@ -26,6 +26,9 @@ public partial class MainWindow
 
     private async void MonthEventLayer_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        _dragStartPoint = null;
+        _dragSegment = null;
+
         await RunUiActionAsync(async () =>
         {
             if (sender is not MonthEventLayer layer
