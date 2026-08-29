@@ -129,6 +129,25 @@ public sealed class InitialSyncRecurrenceWindowRegressionTests
     }
 
     [Fact]
+    public async Task PullAsync_WhenSyncTokenExpires_PreservesCleanGoogleBackedEventReturnedByRecoveryFullSync()
+    {
+        var remoteEvent = CreateGoogleEvent("existing-google", "Remote title");
+        await using var fixture = await SyncFixture.CreateAsync(
+            throwGoneOnFirstList: true,
+            listItems: [remoteEvent]);
+        await SeedCleanGoogleBackedEventAsync(fixture.Repository, "existing-local", "existing-google");
+        await fixture.Repository.SaveSyncTokenAsync(GoogleCalendarDefaults.PrimaryCalendarId, "expired-pull-token");
+
+        await fixture.Service.PullAsync(fixture.Settings);
+
+        var stored = await fixture.Repository.FindEventByIdAsync("existing-local");
+        Assert.NotNull(stored);
+        Assert.Equal("existing-google", stored!.GoogleEventId);
+        Assert.Equal("Remote title", stored.Title);
+        Assert.Equal("next-sync-token", await fixture.Repository.GetSyncTokenAsync(GoogleCalendarDefaults.PrimaryCalendarId));
+    }
+
+    [Fact]
     public async Task PullAsync_WhenSyncTokenExpires_PreservesDirtyAndLocalOnlyEventsMissingFromRecoveryFullSync()
     {
         await using var fixture = await SyncFixture.CreateAsync(throwGoneOnFirstList: true);
@@ -162,6 +181,24 @@ public sealed class InitialSyncRecurrenceWindowRegressionTests
             Start = new DateTimeOffset(2026, 8, 29, 9, 0, 0, TimeSpan.Zero),
             End = new DateTimeOffset(2026, 8, 29, 10, 0, 0, TimeSpan.Zero),
             IsDirty = isDirty
+        };
+    }
+
+    private static Event CreateGoogleEvent(string id, string summary)
+    {
+        return new Event
+        {
+            Id = id,
+            Summary = summary,
+            ETag = $"etag-{id}",
+            Start = new EventDateTime
+            {
+                DateTimeDateTimeOffset = new DateTimeOffset(2026, 8, 29, 9, 0, 0, TimeSpan.Zero)
+            },
+            End = new EventDateTime
+            {
+                DateTimeDateTimeOffset = new DateTimeOffset(2026, 8, 29, 10, 0, 0, TimeSpan.Zero)
+            }
         };
     }
 
@@ -199,7 +236,10 @@ public sealed class InitialSyncRecurrenceWindowRegressionTests
         public GoogleCalendarSyncService Service { get; }
         public AppSettings Settings { get; }
 
-        public static async Task<SyncFixture> CreateAsync(bool throwGoneOnFirstList = false, bool throwOnSecondList = false)
+        public static async Task<SyncFixture> CreateAsync(
+            bool throwGoneOnFirstList = false,
+            bool throwOnSecondList = false,
+            IReadOnlyList<Event>? listItems = null)
         {
             var databasePath = Path.Combine(Path.GetTempPath(), $"initial-sync-window-{Guid.NewGuid():N}.db");
             var oauthPath = Path.Combine(Path.GetTempPath(), $"oauth-{Guid.NewGuid():N}.json");
@@ -207,7 +247,7 @@ public sealed class InitialSyncRecurrenceWindowRegressionTests
 
             var repository = new CalendarRepository(databasePath);
             await repository.InitializeAsync();
-            var client = new RecordingClient(throwGoneOnFirstList, throwOnSecondList);
+            var client = new RecordingClient(throwGoneOnFirstList, throwOnSecondList, listItems);
             var service = new GoogleCalendarSyncService(repository, new RecordingApi(client));
             var settings = new AppSettings
             {
@@ -247,7 +287,10 @@ public sealed class InitialSyncRecurrenceWindowRegressionTests
         public Task ClearTokensAsync() => Task.CompletedTask;
     }
 
-    private sealed class RecordingClient(bool throwGoneOnFirstList, bool throwOnSecondList) : IGoogleCalendarClient
+    private sealed class RecordingClient(
+        bool throwGoneOnFirstList,
+        bool throwOnSecondList,
+        IReadOnlyList<Event>? listItems) : IGoogleCalendarClient
     {
         private bool _throwGoneOnFirstList = throwGoneOnFirstList;
         public List<GoogleEventListRequest> Requests { get; } = [];
@@ -269,7 +312,7 @@ public sealed class InitialSyncRecurrenceWindowRegressionTests
                 throw new HttpRequestException("recovery full sync failed");
             }
 
-            return Task.FromResult(new GoogleEventPage([], null, "next-sync-token"));
+            return Task.FromResult(new GoogleEventPage(listItems ?? [], null, "next-sync-token"));
         }
 
         public Task<Event> InsertEventAsync(string calendarId, Event googleEvent, CancellationToken cancellationToken = default) =>
