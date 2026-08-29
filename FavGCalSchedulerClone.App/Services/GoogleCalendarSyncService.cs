@@ -1015,11 +1015,7 @@ public sealed class GoogleCalendarSyncService
         }
         catch (GoogleApiException ex) when (IsNotFound(ex))
         {
-            var googleEvent = GoogleEventMapper.ToGoogleEvent(localEvent);
-            localEvent.GoogleReminderMetadata = GoogleEventMapper.FromGoogleEvent(googleEvent, calendarId).GoogleReminderMetadata;
-            var inserted = await client.InsertEventAsync(calendarId, googleEvent, cancellationToken);
-            await _repository.MarkSyncedAsync(localEvent, inserted.Id, inserted.ETag);
-            return SyncPushOutcome.RecreatedEvent;
+            throw;
         }
     }
 
