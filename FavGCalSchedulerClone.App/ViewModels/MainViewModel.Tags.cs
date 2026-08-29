@@ -144,6 +144,13 @@ public sealed partial class MainViewModel
         try
         {
             await RefreshCalendarAsync();
+            if (SelectedEvent is not null
+                && AvailableCalendars.Count > 0
+                && !AvailableCalendars.Any(item => item.IsSelected
+                    && string.Equals(item.Id, SelectedEvent.CalendarId, StringComparison.Ordinal)))
+            {
+                SelectedEvent = null;
+            }
         }
         catch (Exception ex)
         {
