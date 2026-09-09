@@ -1,0 +1,42 @@
+name: Apply final sync race fixes
+
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-final-sync-race-fixes.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - name: Apply production fixes
+        run: python scripts/apply-final-sync-race-fixes.py
+      - name: Restore
+        run: dotnet restore FavGCalSchedulerClone.sln
+      - name: Format touched atomic writer
+        run: dotnet format FavGCalSchedulerClone.sln whitespace --no-restore --include FavGCalSchedulerClone.App/Services/CalendarRepositoryAtomicWriter.cs
+      - name: Build
+        run: dotnet build FavGCalSchedulerClone.sln --configuration Release --no-restore
+      - name: Run sync race regression tests
+        run: dotnet test FavGCalSchedulerClone.Tests/FavGCalSchedulerClone.Tests.csproj --configuration Release --no-build --filter "FullyQualifiedName~SyncEditRaceRegressionTests|FullyQualifiedName~SyncPullEditRaceRegressionTests|FullyQualifiedName~SyncTodoCleanupEditRaceRegressionTests|FullyQualifiedName~SyncCalendarMoveRaceRegressionTests"
+      - name: Run Google calendar sync service tests
+        run: dotnet test FavGCalSchedulerClone.Tests/FavGCalSchedulerClone.Tests.csproj --configuration Release --no-build --filter "FullyQualifiedName~GoogleCalendarSyncServiceTests"
+      - name: Commit verified fixes
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm scripts/apply-final-sync-race-fixes.py .github/workflows/apply-final-sync-race-fixes.yml .github/workflows/verify-new-sync-races-red.yml
+          git add FavGCalSchedulerClone.App/Services/CalendarRepository.cs FavGCalSchedulerClone.App/Services/GoogleCalendarSyncService.cs FavGCalSchedulerClone.App/Services/CalendarRepositoryAtomicWriter.cs
+          git diff --cached --check
+          git commit -m "fix: close remaining sync edit races"
+          git push origin HEAD:fix/sync-edit-race-20260909
