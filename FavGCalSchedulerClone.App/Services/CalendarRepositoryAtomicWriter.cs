@@ -81,20 +81,7 @@ internal static class CalendarRepositoryAtomicWriter
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(current.GoogleEventId))
-        {
-            if (string.IsNullOrWhiteSpace(existing.GoogleEventId))
-            {
-                return;
-            }
-
-            current.GoogleEventId = existing.GoogleEventId;
-        }
-        else if (!string.Equals(existing.GoogleEventId, current.GoogleEventId, StringComparison.Ordinal))
-        {
-            return;
-        }
-
+        current.GoogleEventId = existing.GoogleEventId;
         current.LastSyncedAt = existing.LastSyncedAt;
         current.LastSyncedGoogleEtag = existing.LastSyncedGoogleEtag;
     }
