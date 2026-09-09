@@ -67,6 +67,30 @@ public sealed class SyncEditRaceRegressionTests
         Assert.Equal("etag-created", stored.LastSyncedGoogleEtag);
     }
 
+    [Fact]
+    public async Task SaveEventAsync_PreservesLatestSyncMetadata_WhenEditorStartedBeforeSyncCompleted()
+    {
+        var repository = await CreateRepositoryAsync();
+        var local = CreateEvent("editor-race", "google-editor", "etag-1");
+        local.IsDirty = false;
+        await repository.SaveEventAsync(local);
+
+        var staleEditorSnapshot = (await repository.FindEventByIdAsync(local.Id))!;
+        var syncSnapshot = (await repository.FindEventByIdAsync(local.Id))!;
+        await repository.MarkSyncedAsync(syncSnapshot, lastSyncedGoogleEtag: "etag-2");
+        var syncedState = (await repository.FindEventByIdAsync(local.Id))!;
+        Assert.NotNull(syncedState.LastSyncedAt);
+
+        staleEditorSnapshot.Title = "Edited after sync completed";
+        staleEditorSnapshot.IsDirty = true;
+        await repository.SaveEventAsync(staleEditorSnapshot);
+
+        var stored = (await repository.FindEventByIdAsync(local.Id))!;
+        Assert.True(stored.IsDirty);
+        Assert.Equal("etag-2", stored.LastSyncedGoogleEtag);
+        Assert.Equal(syncedState.LastSyncedAt, stored.LastSyncedAt);
+    }
+
     private static async Task<CalendarRepository> CreateRepositoryAsync()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
