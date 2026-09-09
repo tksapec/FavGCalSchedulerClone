@@ -1,0 +1,27 @@
+name: Verify new sync race RED
+
+on:
+  push:
+    paths:
+      - '.github/workflows/verify-new-sync-races-red.yml'
+
+jobs:
+  verify-red:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - name: Restore
+        run: dotnet restore FavGCalSchedulerClone.sln
+      - name: Build
+        run: dotnet build FavGCalSchedulerClone.sln --configuration Release --no-restore
+      - name: Run new regression tests and require RED
+        shell: pwsh
+        run: |
+          dotnet test FavGCalSchedulerClone.Tests/FavGCalSchedulerClone.Tests.csproj --configuration Release --no-build --filter "FullyQualifiedName~SyncTodoCleanupEditRaceRegressionTests|FullyQualifiedName~SyncCalendarMoveRaceRegressionTests"
+          if ($LASTEXITCODE -eq 0) {
+            throw "Expected new regression tests to fail before production fix, but they passed."
+          }
+          Write-Host "Expected RED confirmed."
