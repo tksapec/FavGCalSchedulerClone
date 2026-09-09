@@ -91,6 +91,53 @@ public sealed class SyncTodoCleanupEditRaceRegressionTests
         }
     }
 
+    [Fact]
+    public async Task ApplyTodoReminderCleanupStateAsync_DoesNotClearRemindersAfterTodoBecomesNormalEvent()
+    {
+        var repository = await CreateRepositoryAsync();
+        var local = new CalendarEvent
+        {
+            Id = "todo-converted-to-normal-race",
+            CalendarId = "primary",
+            GoogleEventId = "remote-todo-converted-to-normal-race",
+            LastSyncedGoogleEtag = "etag-1",
+            Title = "#todoA0% Planned todo",
+            Description = "Planned todo description",
+            Start = new DateTimeOffset(2026, 9, 12, 9, 0, 0, TimeSpan.FromHours(9)),
+            End = new DateTimeOffset(2026, 9, 12, 10, 0, 0, TimeSpan.FromHours(9)),
+            IsDirty = true,
+            ReminderMinutesBeforeStart = 30,
+            IsAppReminderEnabled = true,
+            AppReminderMinutesBeforeStart = [30]
+        };
+        await repository.SaveEventAsync(local);
+        var plannedTodo = (await repository.FindEventByIdAsync(local.Id))!;
+        Assert.True(plannedTodo.IsTodoLike);
+
+        var converted = (await repository.FindEventByIdAsync(local.Id))!;
+        converted.Title = "Normal event after sync planning";
+        converted.Description = "No todo marker remains";
+        converted.ReminderMinutesBeforeStart = 45;
+        converted.IsAppReminderEnabled = true;
+        converted.AppReminderMinutesBeforeStart = [45];
+        converted.IsDirty = true;
+        await repository.SaveEventAsync(converted);
+
+        var current = (await repository.FindEventByIdAsync(local.Id))!;
+        Assert.False(current.IsTodoLike);
+        Assert.Equal([45], current.EffectiveAppReminderMinutesBeforeStart);
+
+        await repository.ApplyTodoReminderCleanupStateAsync(
+            plannedTodo.Id,
+            preserveDirtyState: true);
+
+        var stored = (await repository.FindEventByIdAsync(local.Id))!;
+        Assert.False(stored.IsTodoLike);
+        Assert.True(stored.IsDirty);
+        Assert.Equal([45], stored.EffectiveAppReminderMinutesBeforeStart);
+        Assert.Equal(45, stored.ReminderMinutesBeforeStart);
+    }
+
     private static async Task<CalendarRepository> CreateRepositoryAsync()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
