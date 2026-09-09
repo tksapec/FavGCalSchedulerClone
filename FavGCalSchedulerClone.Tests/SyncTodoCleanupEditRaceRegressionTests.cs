@@ -138,6 +138,95 @@ public sealed class SyncTodoCleanupEditRaceRegressionTests
         Assert.Equal(45, stored.ReminderMinutesBeforeStart);
     }
 
+    [Fact]
+    public async Task SyncAsync_DoesNotRemoveGoogleRemindersAfterPlannedTodoBecomesNormalEvent()
+    {
+        var repository = await CreateRepositoryAsync();
+        var local = new CalendarEvent
+        {
+            Id = "todo-remote-cleanup-race",
+            CalendarId = "primary",
+            GoogleEventId = "remote-todo-remote-cleanup-race",
+            LastSyncedGoogleEtag = "etag-1",
+            Title = "#todoA0% Planned todo",
+            Description = "Planned todo description",
+            Start = new DateTimeOffset(2026, 9, 13, 0, 0, 0, TimeSpan.FromHours(9)),
+            End = new DateTimeOffset(2026, 9, 14, 0, 0, 0, TimeSpan.FromHours(9)),
+            IsAllDay = true,
+            IsDirty = false,
+            ReminderMinutesBeforeStart = 30,
+            IsAppReminderEnabled = true,
+            AppReminderMinutesBeforeStart = [30]
+        };
+        await repository.SaveEventAsync(local);
+        var savedTodo = (await repository.FindEventByIdAsync(local.Id))!;
+        Assert.True(savedTodo.IsTodoLike);
+        Assert.False(savedTodo.IsDirty);
+        await repository.SaveSyncTokenAsync("primary", "old-token");
+
+        var getStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var continueGet = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var api = new PausingGoogleCalendarApi(
+            new Event
+            {
+                Id = local.GoogleEventId,
+                ETag = "etag-1",
+                Summary = local.Title,
+                Description = local.Description,
+                Status = "confirmed",
+                Start = new EventDateTime { Date = "2026-09-13" },
+                End = new EventDateTime { Date = "2026-09-14" },
+                Reminders = new Event.RemindersData
+                {
+                    UseDefault = false,
+                    Overrides = [new EventReminder { Method = "popup", Minutes = 30 }]
+                }
+            },
+            getStarted,
+            continueGet);
+        var oauthPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(oauthPath, "{}");
+        var settings = new AppSettings
+        {
+            OAuthClientJsonPath = oauthPath,
+            ActiveCalendarId = "primary",
+            VisibleCalendarIds = ["primary"],
+            SyncConflictPolicy = SyncConflictPolicy.SkipLocalDirty
+        };
+
+        try
+        {
+            var service = new GoogleCalendarSyncService(repository, api);
+            var syncTask = service.SyncAsync(settings);
+            await getStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            var converted = (await repository.FindEventByIdAsync(local.Id))!;
+            converted.Title = "Normal event while sync is planning";
+            converted.Description = "No todo marker remains";
+            converted.ReminderMinutesBeforeStart = 45;
+            converted.IsAppReminderEnabled = true;
+            converted.AppReminderMinutesBeforeStart = [45];
+            converted.IsDirty = true;
+            await repository.SaveEventAsync(converted);
+
+            continueGet.TrySetResult();
+            var result = await syncTask;
+
+            var stored = (await repository.FindEventByIdAsync(local.Id))!;
+            Assert.False(stored.IsTodoLike);
+            Assert.True(stored.IsDirty);
+            Assert.Equal([45], stored.EffectiveAppReminderMinutesBeforeStart);
+            Assert.Equal(0, api.UpdateCallCount);
+            Assert.Equal(1, result.Skipped);
+            Assert.Equal(1, result.Conflicts);
+        }
+        finally
+        {
+            continueGet.TrySetResult();
+            File.Delete(oauthPath);
+        }
+    }
+
     private static async Task<CalendarRepository> CreateRepositoryAsync()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
@@ -162,6 +251,8 @@ public sealed class SyncTodoCleanupEditRaceRegressionTests
             _continueGet = continueGet;
         }
 
+        public int UpdateCallCount { get; private set; }
+
         public Task<IGoogleCalendarClient> CreateClientAsync(string clientJsonPath, CancellationToken cancellationToken = default)
             => Task.FromResult<IGoogleCalendarClient>(this);
 
@@ -178,6 +269,7 @@ public sealed class SyncTodoCleanupEditRaceRegressionTests
 
         public Task<Event> UpdateEventAsync(string calendarId, string eventId, Event googleEvent, CancellationToken cancellationToken = default)
         {
+            UpdateCallCount++;
             googleEvent.ETag = "etag-2";
             return Task.FromResult(googleEvent);
         }
