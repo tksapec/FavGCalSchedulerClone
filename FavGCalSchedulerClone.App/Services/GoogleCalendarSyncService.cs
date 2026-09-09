@@ -1225,12 +1225,22 @@ public sealed class GoogleCalendarSyncService
                 case SyncPlanAction.PullRemote:
                     try
                     {
-                        await _repository.UpsertSyncedEventAsync(GoogleEventMapper.FromGoogleEvent(
-                            executableItem.RemoteEvent!,
-                            calendarId,
-                            GetDefaultReminders(reminderDefaults, calendarId),
-                            adoptEmailRemindersAsLocalNotifications));
-                        pulled++;
+                        var applied = await _repository.TryUpsertSyncedEventAsync(
+                            GoogleEventMapper.FromGoogleEvent(
+                                executableItem.RemoteEvent!,
+                                calendarId,
+                                GetDefaultReminders(reminderDefaults, calendarId),
+                                adoptEmailRemindersAsLocalNotifications),
+                            executableItem.LocalEvent);
+                        if (applied)
+                        {
+                            pulled++;
+                        }
+                        else
+                        {
+                            skipped++;
+                            conflicts++;
+                        }
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {

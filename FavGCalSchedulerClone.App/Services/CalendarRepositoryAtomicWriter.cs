@@ -28,10 +28,10 @@ internal static class CalendarRepositoryAtomicWriter
         try
         {
             var mutationSnapshots = items.Select(EventMutationSnapshot.Capture).ToArray();
-        await using var connection = repository.OpenConnection();
-        await using var transaction = connection.BeginTransaction();
-        try
-        {
+            await using var connection = repository.OpenConnection();
+            await using var transaction = connection.BeginTransaction();
+            try
+            {
             foreach (var calendarEvent in items)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -55,17 +55,17 @@ internal static class CalendarRepositoryAtomicWriter
                 await command.ExecuteNonQueryAsync(cancellationToken);
             }
 
-            await transaction.CommitAsync(cancellationToken);
-        }
-        catch
-        {
-            await RollbackSafelyAsync(transaction);
-            foreach (var snapshot in mutationSnapshots)
-            {
-                snapshot.Restore();
+                await transaction.CommitAsync(cancellationToken);
             }
-            throw;
-        }
+            catch
+            {
+                await RollbackSafelyAsync(transaction);
+                foreach (var snapshot in mutationSnapshots)
+                {
+                    snapshot.Restore();
+                }
+                throw;
+            }
         }
         finally
         {

@@ -540,6 +540,44 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         }
     }
 
+    public async Task<bool> TryUpsertSyncedEventAsync(CalendarEvent calendarEvent, CalendarEvent? plannedLocalEvent)
+    {
+        await EnterEventMutationAsync();
+        try
+        {
+            var existing = await FindEventByGoogleEventIdAsync(calendarEvent.CalendarId, calendarEvent.GoogleEventId);
+            if (plannedLocalEvent is null)
+            {
+                if (existing?.IsDirty == true)
+                {
+                    return false;
+                }
+            }
+            else if (existing is null
+                     || !string.Equals(existing.Id, plannedLocalEvent.Id, StringComparison.Ordinal)
+                     || existing.UpdatedAt.UtcTicks != plannedLocalEvent.UpdatedAt.UtcTicks)
+            {
+                return false;
+            }
+
+            if (existing is not null)
+            {
+                calendarEvent.Id = existing.Id;
+            }
+
+            calendarEvent.IsDirty = false;
+            calendarEvent.DirtyFields = null;
+            calendarEvent.LastSyncedAt = DateTimeOffset.Now;
+            calendarEvent.IsTodoLike = TagService.IsTodoLike(calendarEvent);
+            await UpsertEventAsync(calendarEvent);
+            return true;
+        }
+        finally
+        {
+            ExitEventMutation();
+        }
+    }
+
     public async Task MarkSyncedAsync(CalendarEvent calendarEvent, string? googleEventId = null, string? lastSyncedGoogleEtag = null)
     {
         await EnterEventMutationAsync();
