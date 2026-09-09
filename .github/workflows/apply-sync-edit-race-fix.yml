@@ -1,0 +1,44 @@
+name: Apply sync edit race fix
+
+on:
+  push:
+    branches:
+      - fix/sync-edit-race-20260909
+    paths:
+      - .github/workflows/apply-sync-edit-race-fix.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-sync-edit-race-fix
+  cancel-in-progress: false
+
+jobs:
+  apply-fix:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - name: Apply patch
+        run: python scripts/apply-sync-edit-race-fix.py
+      - name: Restore
+        run: dotnet restore FavGCalSchedulerClone.sln
+      - name: Build
+        run: dotnet build FavGCalSchedulerClone.sln --configuration Release --no-restore
+      - name: Run focused regression tests
+        run: dotnet test FavGCalSchedulerClone.Tests/FavGCalSchedulerClone.Tests.csproj --configuration Release --no-build --filter "FullyQualifiedName~SyncEditRaceRegressionTests"
+      - name: Commit verified fix
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm scripts/apply-sync-edit-race-fix.py .github/workflows/apply-sync-edit-race-fix.yml
+          git add FavGCalSchedulerClone.App/Services/CalendarRepository.cs FavGCalSchedulerClone.App/Services/CalendarRepositoryAtomicWriter.cs
+          git diff --cached --check
+          git commit -m "fix: preserve edits across sync races"
+          git push origin HEAD:fix/sync-edit-race-20260909
