@@ -25,3 +25,4 @@ jobs:
             throw "Expected new regression tests to fail before production fix, but they passed."
           }
           Write-Host "Expected RED confirmed."
+          $global:LASTEXITCODE = 0
