@@ -32,28 +32,28 @@ internal static class CalendarRepositoryAtomicWriter
             await using var transaction = connection.BeginTransaction();
             try
             {
-            foreach (var calendarEvent in items)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var existing = await LoadExistingAsync(connection, transaction, calendarEvent.Id, cancellationToken);
-                PreserveExistingRemoteLink(calendarEvent, existing);
-                calendarEvent.DirtyFields = EventDirtyFieldTracker.Merge(
-                    existing?.DirtyFields ?? calendarEvent.DirtyFields,
-                    existing,
-                    calendarEvent);
-                calendarEvent.UpdatedAt = DateTimeOffset.Now;
-                calendarEvent.IsTodoLike = TagService.IsTodoLike(calendarEvent);
-                await UpsertAsync(connection, transaction, calendarEvent, cancellationToken);
-            }
+                foreach (var calendarEvent in items)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var existing = await LoadExistingAsync(connection, transaction, calendarEvent.Id, cancellationToken);
+                    PreserveExistingRemoteLink(calendarEvent, existing);
+                    calendarEvent.DirtyFields = EventDirtyFieldTracker.Merge(
+                        existing?.DirtyFields ?? calendarEvent.DirtyFields,
+                        existing,
+                        calendarEvent);
+                    calendarEvent.UpdatedAt = DateTimeOffset.Now;
+                    calendarEvent.IsTodoLike = TagService.IsTodoLike(calendarEvent);
+                    await UpsertAsync(connection, transaction, calendarEvent, cancellationToken);
+                }
 
-            foreach (var id in deleteIds)
-            {
-                await using var command = connection.CreateCommand();
-                command.Transaction = transaction;
-                command.CommandText = "DELETE FROM events WHERE id = $id";
-                command.Parameters.AddWithValue("$id", id);
-                await command.ExecuteNonQueryAsync(cancellationToken);
-            }
+                foreach (var id in deleteIds)
+                {
+                    await using var command = connection.CreateCommand();
+                    command.Transaction = transaction;
+                    command.CommandText = "DELETE FROM events WHERE id = $id";
+                    command.Parameters.AddWithValue("$id", id);
+                    await command.ExecuteNonQueryAsync(cancellationToken);
+                }
 
                 await transaction.CommitAsync(cancellationToken);
             }

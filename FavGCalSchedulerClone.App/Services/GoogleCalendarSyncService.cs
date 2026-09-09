@@ -1260,7 +1260,9 @@ public sealed class GoogleCalendarSyncService
                         {
                             localEvent.IsDirty = true;
                             localEvent.DirtyFields = EventDirtyFieldTracker.MergeFieldNames(localEvent.DirtyFields, "Reminder");
-                            await _repository.SaveEventAsync(localEvent);
+                            await _repository.ApplyTodoReminderCleanupStateAsync(
+                                localEvent.Id,
+                                preserveDirtyState: true);
                         }
                     }
                     var operation = GetPushOperation(localEvent);
