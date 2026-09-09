@@ -19,7 +19,7 @@ jobs:
         with:
           dotnet-version: 9.0.x
       - name: Apply production fixes
-        run: python scripts/apply-final-sync-race-fixes.py
+        run: python scripts/apply-final-sync-race-fixes-v2.py
       - name: Restore
         run: dotnet restore FavGCalSchedulerClone.sln
       - name: Format touched atomic writer
@@ -35,7 +35,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm scripts/apply-final-sync-race-fixes.py .github/workflows/apply-final-sync-race-fixes.yml .github/workflows/verify-new-sync-races-red.yml
+          git rm scripts/apply-final-sync-race-fixes.py scripts/apply-final-sync-race-fixes-v2.py .github/workflows/apply-final-sync-race-fixes.yml .github/workflows/verify-new-sync-races-red.yml
           git add FavGCalSchedulerClone.App/Services/CalendarRepository.cs FavGCalSchedulerClone.App/Services/GoogleCalendarSyncService.cs FavGCalSchedulerClone.App/Services/CalendarRepositoryAtomicWriter.cs
           git diff --cached --check
           git commit -m "fix: close remaining sync edit races"
