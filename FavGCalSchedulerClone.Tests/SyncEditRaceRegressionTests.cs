@@ -91,6 +91,35 @@ public sealed class SyncEditRaceRegressionTests
         Assert.Equal(syncedState.LastSyncedAt, stored.LastSyncedAt);
     }
 
+    [Fact]
+    public async Task AtomicSave_PreservesLatestSyncMetadata_WhenTodoEditorStartedBeforeSyncCompleted()
+    {
+        var repository = await CreateRepositoryAsync();
+        var local = CreateEvent("todo-editor-race", "google-todo", "etag-1");
+        local.Description = "#todo[priority:A][progress:0]";
+        local.IsTodoLike = true;
+        local.IsAllDay = true;
+        local.Start = new DateTimeOffset(2026, 9, 9, 0, 0, 0, TimeSpan.Zero);
+        local.End = local.Start.AddDays(1);
+        local.IsDirty = false;
+        await repository.SaveEventAsync(local);
+
+        var staleEditorSnapshot = (await repository.FindEventByIdAsync(local.Id))!;
+        var syncSnapshot = (await repository.FindEventByIdAsync(local.Id))!;
+        await repository.MarkSyncedAsync(syncSnapshot, lastSyncedGoogleEtag: "etag-2");
+        var syncedState = (await repository.FindEventByIdAsync(local.Id))!;
+        Assert.NotNull(syncedState.LastSyncedAt);
+
+        staleEditorSnapshot.Description = "#todo[priority:A][progress:50]";
+        staleEditorSnapshot.IsDirty = true;
+        await CalendarRepositoryAtomicWriter.SaveEventsAsync(repository, [staleEditorSnapshot]);
+
+        var stored = (await repository.FindEventByIdAsync(local.Id))!;
+        Assert.True(stored.IsDirty);
+        Assert.Equal("etag-2", stored.LastSyncedGoogleEtag);
+        Assert.Equal(syncedState.LastSyncedAt, stored.LastSyncedAt);
+    }
+
     private static async Task<CalendarRepository> CreateRepositoryAsync()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
