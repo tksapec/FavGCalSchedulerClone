@@ -752,20 +752,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(calendarEvent.GoogleEventId))
-        {
-            if (string.IsNullOrWhiteSpace(existing.GoogleEventId))
-            {
-                return;
-            }
-
-            calendarEvent.GoogleEventId = existing.GoogleEventId;
-        }
-        else if (!string.Equals(existing.GoogleEventId, calendarEvent.GoogleEventId, StringComparison.Ordinal))
-        {
-            return;
-        }
-
+        calendarEvent.GoogleEventId = existing.GoogleEventId;
         calendarEvent.LastSyncedAt = existing.LastSyncedAt;
         calendarEvent.LastSyncedGoogleEtag = existing.LastSyncedGoogleEtag;
     }
