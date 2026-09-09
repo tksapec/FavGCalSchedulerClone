@@ -24,7 +24,10 @@ internal static class CalendarRepositoryAtomicWriter
             return;
         }
 
-        var mutationSnapshots = items.Select(EventMutationSnapshot.Capture).ToArray();
+        await repository.EnterEventMutationAsync(cancellationToken);
+        try
+        {
+            var mutationSnapshots = items.Select(EventMutationSnapshot.Capture).ToArray();
         await using var connection = repository.OpenConnection();
         await using var transaction = connection.BeginTransaction();
         try
@@ -63,19 +66,35 @@ internal static class CalendarRepositoryAtomicWriter
             }
             throw;
         }
+        }
+        finally
+        {
+            repository.ExitEventMutation();
+        }
     }
 
     private static void PreserveExistingRemoteLink(CalendarEvent current, CalendarEvent? existing)
     {
-        if (!string.IsNullOrWhiteSpace(current.GoogleEventId)
-            || existing is null
-            || string.IsNullOrWhiteSpace(existing.GoogleEventId)
+        if (existing is null
             || !string.Equals(existing.CalendarId, current.CalendarId, StringComparison.Ordinal))
         {
             return;
         }
 
-        current.GoogleEventId = existing.GoogleEventId;
+        if (string.IsNullOrWhiteSpace(current.GoogleEventId))
+        {
+            if (string.IsNullOrWhiteSpace(existing.GoogleEventId))
+            {
+                return;
+            }
+
+            current.GoogleEventId = existing.GoogleEventId;
+        }
+        else if (!string.Equals(existing.GoogleEventId, current.GoogleEventId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
         current.LastSyncedAt = existing.LastSyncedAt;
         current.LastSyncedGoogleEtag = existing.LastSyncedGoogleEtag;
     }

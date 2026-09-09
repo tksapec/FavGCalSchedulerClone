@@ -12,6 +12,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
     private readonly string _databasePath;
     private readonly object _maintenanceLock = new();
     private readonly AsyncLocal<MaintenanceAccessToken?> _maintenanceAccess = new();
+    private readonly SemaphoreSlim _eventMutationGate = new(1, 1);
     private bool _databaseMaintenanceRequested;
     private int _activeConnectionCount;
     private TaskCompletionSource<bool>? _connectionsDrained;
@@ -22,6 +23,11 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
     }
 
     public string DatabasePath => _databasePath;
+
+    internal Task EnterEventMutationAsync(CancellationToken cancellationToken = default)
+        => _eventMutationGate.WaitAsync(cancellationToken);
+
+    internal void ExitEventMutation() => _eventMutationGate.Release();
 
     internal async Task BeginMaintenanceAsync(CancellationToken cancellationToken = default)
     {
@@ -495,65 +501,90 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
 
     public async Task SaveEventAsync(CalendarEvent calendarEvent)
     {
-        var existing = await FindMasterByIdAsync(calendarEvent.Id);
-        await PreserveExistingRemoteLinkAsync(calendarEvent);
-        calendarEvent.DirtyFields = EventDirtyFieldTracker.Merge(existing?.DirtyFields ?? calendarEvent.DirtyFields, existing, calendarEvent);
-        calendarEvent.UpdatedAt = DateTimeOffset.Now;
-        calendarEvent.IsTodoLike = TagService.IsTodoLike(calendarEvent);
-        await UpsertEventAsync(calendarEvent);
+        await EnterEventMutationAsync();
+        try
+        {
+            var existing = await FindMasterByIdAsync(calendarEvent.Id);
+            PreserveExistingSyncState(calendarEvent, existing);
+            calendarEvent.DirtyFields = EventDirtyFieldTracker.Merge(existing?.DirtyFields ?? calendarEvent.DirtyFields, existing, calendarEvent);
+            calendarEvent.UpdatedAt = DateTimeOffset.Now;
+            calendarEvent.IsTodoLike = TagService.IsTodoLike(calendarEvent);
+            await UpsertEventAsync(calendarEvent);
+        }
+        finally
+        {
+            ExitEventMutation();
+        }
     }
 
     public async Task UpsertSyncedEventAsync(CalendarEvent calendarEvent)
     {
-        var existing = await FindEventByGoogleEventIdAsync(calendarEvent.CalendarId, calendarEvent.GoogleEventId);
-        if (existing is not null)
+        await EnterEventMutationAsync();
+        try
         {
-            calendarEvent.Id = existing.Id;
-        }
+            var existing = await FindEventByGoogleEventIdAsync(calendarEvent.CalendarId, calendarEvent.GoogleEventId);
+            if (existing is not null)
+            {
+                calendarEvent.Id = existing.Id;
+            }
 
-        calendarEvent.IsDirty = false;
-        calendarEvent.DirtyFields = null;
-        calendarEvent.LastSyncedAt = DateTimeOffset.Now;
-        calendarEvent.IsTodoLike = TagService.IsTodoLike(calendarEvent);
-        await UpsertEventAsync(calendarEvent);
+            calendarEvent.IsDirty = false;
+            calendarEvent.DirtyFields = null;
+            calendarEvent.LastSyncedAt = DateTimeOffset.Now;
+            calendarEvent.IsTodoLike = TagService.IsTodoLike(calendarEvent);
+            await UpsertEventAsync(calendarEvent);
+        }
+        finally
+        {
+            ExitEventMutation();
+        }
     }
 
     public async Task MarkSyncedAsync(CalendarEvent calendarEvent, string? googleEventId = null, string? lastSyncedGoogleEtag = null)
     {
-        await using var connection = OpenConnection();
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            UPDATE events
-            SET google_event_id = COALESCE($google_event_id, google_event_id),
-                is_dirty = 0,
-                dirty_fields = NULL,
-                app_reminder_enabled = $app_reminder_enabled,
-                google_email_reminder_enabled = $google_email_reminder_enabled,
-                google_reminder_metadata_json = $google_reminder_metadata_json,
-                app_reminder_minutes_json = $app_reminder_minutes_json,
-                google_email_reminder_minutes_json = $google_email_reminder_minutes_json,
-                last_synced_at = $last_synced_at,
-                last_synced_at_utc_ticks = $last_synced_at_utc_ticks,
-                last_synced_google_etag = COALESCE($last_synced_google_etag, last_synced_google_etag)
-            WHERE id = $id
-            """;
-        var appReminderMinutes = CalendarEvent.NormalizeReminderMinutes(calendarEvent.EffectiveAppReminderMinutesBeforeStart);
-        var googleEmailReminderMinutes = GetStoredGoogleEmailReminderMinutes(calendarEvent);
+        await EnterEventMutationAsync();
+        try
+        {
+            await using var connection = OpenConnection();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                UPDATE events
+                SET google_event_id = COALESCE($google_event_id, google_event_id),
+                    is_dirty = CASE WHEN updated_at_utc_ticks = $expected_updated_at_utc_ticks THEN 0 ELSE is_dirty END,
+                    dirty_fields = CASE WHEN updated_at_utc_ticks = $expected_updated_at_utc_ticks THEN NULL ELSE dirty_fields END,
+                    app_reminder_enabled = CASE WHEN updated_at_utc_ticks = $expected_updated_at_utc_ticks THEN $app_reminder_enabled ELSE app_reminder_enabled END,
+                    google_email_reminder_enabled = CASE WHEN updated_at_utc_ticks = $expected_updated_at_utc_ticks THEN $google_email_reminder_enabled ELSE google_email_reminder_enabled END,
+                    google_reminder_metadata_json = CASE WHEN updated_at_utc_ticks = $expected_updated_at_utc_ticks THEN $google_reminder_metadata_json ELSE google_reminder_metadata_json END,
+                    app_reminder_minutes_json = CASE WHEN updated_at_utc_ticks = $expected_updated_at_utc_ticks THEN $app_reminder_minutes_json ELSE app_reminder_minutes_json END,
+                    google_email_reminder_minutes_json = CASE WHEN updated_at_utc_ticks = $expected_updated_at_utc_ticks THEN $google_email_reminder_minutes_json ELSE google_email_reminder_minutes_json END,
+                    last_synced_at = $last_synced_at,
+                    last_synced_at_utc_ticks = $last_synced_at_utc_ticks,
+                    last_synced_google_etag = COALESCE($last_synced_google_etag, last_synced_google_etag)
+                WHERE id = $id
+                """;
+            var appReminderMinutes = CalendarEvent.NormalizeReminderMinutes(calendarEvent.EffectiveAppReminderMinutesBeforeStart);
+            var googleEmailReminderMinutes = GetStoredGoogleEmailReminderMinutes(calendarEvent);
 
-        command.Parameters.AddWithValue("$id", calendarEvent.Id);
-        command.Parameters.AddWithValue("$google_event_id", (object?)googleEventId ?? DBNull.Value);
-        command.Parameters.AddWithValue("$last_synced_google_etag", (object?)lastSyncedGoogleEtag ?? DBNull.Value);
-        command.Parameters.AddWithValue("$app_reminder_enabled", appReminderMinutes.Count > 0 ? 1 : 0);
-        command.Parameters.AddWithValue("$google_email_reminder_enabled", googleEmailReminderMinutes.Count > 0 ? 1 : 0);
-        command.Parameters.AddWithValue("$google_reminder_metadata_json", calendarEvent.GoogleReminderMetadata is null
-            ? DBNull.Value
-            : JsonSerializer.Serialize(calendarEvent.GoogleReminderMetadata));
-        command.Parameters.AddWithValue("$app_reminder_minutes_json", SerializeReminderMinutes(appReminderMinutes));
-        command.Parameters.AddWithValue("$google_email_reminder_minutes_json", SerializeReminderMinutes(googleEmailReminderMinutes));
-        var syncedAt = DateTimeOffset.Now;
-        command.Parameters.AddWithValue("$last_synced_at", syncedAt.ToString("O"));
-        command.Parameters.AddWithValue("$last_synced_at_utc_ticks", syncedAt.UtcTicks);
-        await command.ExecuteNonQueryAsync();
+            command.Parameters.AddWithValue("$id", calendarEvent.Id);
+            command.Parameters.AddWithValue("$expected_updated_at_utc_ticks", calendarEvent.UpdatedAt.UtcTicks);
+            command.Parameters.AddWithValue("$google_event_id", (object?)googleEventId ?? DBNull.Value);
+            command.Parameters.AddWithValue("$last_synced_google_etag", (object?)lastSyncedGoogleEtag ?? DBNull.Value);
+            command.Parameters.AddWithValue("$app_reminder_enabled", appReminderMinutes.Count > 0 ? 1 : 0);
+            command.Parameters.AddWithValue("$google_email_reminder_enabled", googleEmailReminderMinutes.Count > 0 ? 1 : 0);
+            command.Parameters.AddWithValue("$google_reminder_metadata_json", calendarEvent.GoogleReminderMetadata is null
+                ? DBNull.Value
+                : JsonSerializer.Serialize(calendarEvent.GoogleReminderMetadata));
+            command.Parameters.AddWithValue("$app_reminder_minutes_json", SerializeReminderMinutes(appReminderMinutes));
+            command.Parameters.AddWithValue("$google_email_reminder_minutes_json", SerializeReminderMinutes(googleEmailReminderMinutes));
+            var syncedAt = DateTimeOffset.Now;
+            command.Parameters.AddWithValue("$last_synced_at", syncedAt.ToString("O"));
+            command.Parameters.AddWithValue("$last_synced_at_utc_ticks", syncedAt.UtcTicks);
+            await command.ExecuteNonQueryAsync();
+        }
+        finally
+        {
+            ExitEventMutation();
+        }
     }
 
     public async Task<int> MarkSyncedByIdsAsync(IEnumerable<string> ids)
@@ -631,22 +662,28 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         await SaveEventAsync(calendarEvent);
     }
 
-    private async Task PreserveExistingRemoteLinkAsync(CalendarEvent calendarEvent)
+    private static void PreserveExistingSyncState(CalendarEvent calendarEvent, CalendarEvent? existing)
     {
-        if (!string.IsNullOrWhiteSpace(calendarEvent.GoogleEventId))
-        {
-            return;
-        }
-
-        var existing = await FindMasterByIdAsync(calendarEvent.Id);
         if (existing is null
-            || string.IsNullOrWhiteSpace(existing.GoogleEventId)
             || !string.Equals(existing.CalendarId, calendarEvent.CalendarId, StringComparison.Ordinal))
         {
             return;
         }
 
-        calendarEvent.GoogleEventId = existing.GoogleEventId;
+        if (string.IsNullOrWhiteSpace(calendarEvent.GoogleEventId))
+        {
+            if (string.IsNullOrWhiteSpace(existing.GoogleEventId))
+            {
+                return;
+            }
+
+            calendarEvent.GoogleEventId = existing.GoogleEventId;
+        }
+        else if (!string.Equals(existing.GoogleEventId, calendarEvent.GoogleEventId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
         calendarEvent.LastSyncedAt = existing.LastSyncedAt;
         calendarEvent.LastSyncedGoogleEtag = existing.LastSyncedGoogleEtag;
     }
