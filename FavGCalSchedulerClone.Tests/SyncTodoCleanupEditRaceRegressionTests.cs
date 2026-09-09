@@ -16,18 +16,19 @@ public sealed class SyncTodoCleanupEditRaceRegressionTests
             CalendarId = "primary",
             GoogleEventId = "remote-todo-cleanup-race",
             LastSyncedGoogleEtag = "etag-1",
-            Title = "Old todo title",
-            Description = "#todo[priority:A][progress:0]",
+            Title = "#todoA0% Old todo title",
+            Description = "Old todo description",
             Start = new DateTimeOffset(2026, 9, 10, 0, 0, 0, TimeSpan.FromHours(9)),
             End = new DateTimeOffset(2026, 9, 11, 0, 0, 0, TimeSpan.FromHours(9)),
             IsAllDay = true,
-            IsTodoLike = true,
             IsDirty = true,
             ReminderMinutesBeforeStart = 30,
             IsAppReminderEnabled = true,
             AppReminderMinutesBeforeStart = [30]
         };
         await repository.SaveEventAsync(local);
+        var savedTodo = (await repository.FindEventByIdAsync(local.Id))!;
+        Assert.True(savedTodo.IsTodoLike);
         await repository.SaveSyncTokenAsync("primary", "old-token");
 
         var getStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -67,8 +68,8 @@ public sealed class SyncTodoCleanupEditRaceRegressionTests
             await getStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
             var edited = (await repository.FindEventByIdAsync(local.Id))!;
-            edited.Title = "Newer local todo title";
-            edited.Description = "#todo[priority:A][progress:50]";
+            edited.Title = "#todoA50% Newer local todo title";
+            edited.Description = "Newer local todo description";
             edited.IsDirty = true;
             await repository.SaveEventAsync(edited);
 
@@ -76,8 +77,8 @@ public sealed class SyncTodoCleanupEditRaceRegressionTests
             var result = await syncTask;
 
             var stored = (await repository.FindEventByIdAsync(local.Id))!;
-            Assert.Equal("Newer local todo title", stored.Title);
-            Assert.Equal("#todo[priority:A][progress:50]", stored.Description);
+            Assert.Equal("#todoA50% Newer local todo title", stored.Title);
+            Assert.Equal("Newer local todo description", stored.Description);
             Assert.True(stored.IsDirty);
             Assert.Equal("etag-2", stored.LastSyncedGoogleEtag);
             Assert.Empty(stored.EffectiveAppReminderMinutesBeforeStart);
