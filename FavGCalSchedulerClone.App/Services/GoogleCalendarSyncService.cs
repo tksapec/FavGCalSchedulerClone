@@ -934,7 +934,6 @@ public sealed class GoogleCalendarSyncService
         }
     }
 
-
     private static void ApplyAppOwnedFields(Event destination, Event source, bool includeOriginalStartTime, bool includeRecurrence)
     {
         destination.Summary = source.Summary;
@@ -1186,32 +1185,48 @@ public sealed class GoogleCalendarSyncService
             var executableItem = item;
             if (item.RequiresTodoReminderCleanup && item.Action != SyncPlanAction.PushLocal)
             {
-                try
+                if (item.LocalEvent is { } plannedLocal)
                 {
-                    var currentRemote = item.RemoteEvent!;
-                    currentRemote.Reminders = TodoReminderPolicy.CreateGoogleRemindersDisabled();
-                    var cleanedRemote = client is IConditionalGoogleCalendarClient conditionalClient
-                        ? await conditionalClient.UpdateEventAsync(
-                            calendarId, currentRemote.Id, currentRemote, cancellationToken, currentRemote.ETag)
-                        : await client.UpdateEventAsync(calendarId, currentRemote.Id, currentRemote, cancellationToken);
-                    executableItem = item with { RemoteEvent = cleanedRemote };
-
-                    if (item.Action == SyncPlanAction.SkipConflict && item.LocalEvent is { } skippedLocal)
+                    var currentLocal = await _repository.FindEventByIdAsync(plannedLocal.Id);
+                    if (currentLocal is null
+                        || !currentLocal.IsTodoLike
+                        || currentLocal.IsDeleted
+                        || !string.Equals(currentLocal.CalendarId, calendarId, StringComparison.Ordinal)
+                        || !string.Equals(currentLocal.GoogleEventId, item.RemoteEvent?.Id, StringComparison.Ordinal))
                     {
-                        await _repository.ApplyTodoReminderCleanupStateAsync(
-                            skippedLocal.Id,
-                            preserveDirtyState: true);
+                        executableItem = item with { RequiresTodoReminderCleanup = false };
                     }
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+
+                if (executableItem.RequiresTodoReminderCleanup)
                 {
-                    var diagnostic = item.LocalEvent is { } localTodo
-                        ? CreateFailureDiagnostic(localTodo, "TodoReminderCleanup", ex, "ToDoのGoogle通知削除に失敗しました。")
-                            with { FailureCategory = "TodoReminderCleanup" }
-                        : CreatePullFailureDiagnostic(calendarId, null, null, ex, "TodoReminderCleanup", "ToDoのGoogle通知削除に失敗しました。");
-                    failures.Add(diagnostic);
-                    failed++;
-                    continue;
+                    try
+                    {
+                        var currentRemote = item.RemoteEvent!;
+                        currentRemote.Reminders = TodoReminderPolicy.CreateGoogleRemindersDisabled();
+                        var cleanedRemote = client is IConditionalGoogleCalendarClient conditionalClient
+                            ? await conditionalClient.UpdateEventAsync(
+                                calendarId, currentRemote.Id, currentRemote, cancellationToken, currentRemote.ETag)
+                            : await client.UpdateEventAsync(calendarId, currentRemote.Id, currentRemote, cancellationToken);
+                        executableItem = item with { RemoteEvent = cleanedRemote };
+
+                        if (item.Action == SyncPlanAction.SkipConflict && item.LocalEvent is { } skippedLocal)
+                        {
+                            await _repository.ApplyTodoReminderCleanupStateAsync(
+                                skippedLocal.Id,
+                                preserveDirtyState: true);
+                        }
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        var diagnostic = item.LocalEvent is { } localTodo
+                            ? CreateFailureDiagnostic(localTodo, "TodoReminderCleanup", ex, "ToDoのGoogle通知削除に失敗しました。")
+                                with { FailureCategory = "TodoReminderCleanup" }
+                            : CreatePullFailureDiagnostic(calendarId, null, null, ex, "TodoReminderCleanup", "ToDoのGoogle通知削除に失敗しました。");
+                        failures.Add(diagnostic);
+                        failed++;
+                        continue;
+                    }
                 }
             }
 
@@ -1534,7 +1549,7 @@ public sealed class GoogleCalendarSyncService
         }
         catch (GoogleApiException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.Gone)
         {
-            failures.Add(CreatePullFailureDiagnostic(calendarId, syncToken, pageToken, ex, "SyncTokenExpired", "410 Gone: sync token をリセットして再取得します。"));
+            failures.Add(CreatePullFailureDiagnostic(calendarId, syncToken, pageToken, ex, "SyncTokenExpired", "sync token was reset before retry."));
             await _repository.SaveSyncTokenAsync(calendarId, null);
             var retry = await PullRemoteEventsAsync(client, calendarId, conflictPolicy, failures, reminderDefaults, adoptEmailRemindersAsLocalNotifications, cancellationToken);
             return new SyncPullSummary(pulled + retry.Pulled, skipped + retry.Skipped, conflicts + retry.Conflicts, retry.Failed);
@@ -1925,7 +1940,6 @@ public sealed class GoogleCalendarSyncService
             return null;
         }
     }
-
 }
 
 public enum GoogleNotFoundSyncAction
@@ -1977,6 +1991,7 @@ internal sealed record RemoteDelta(
     bool Success,
     RemoteSyncMode Mode,
     DateTimeOffset? FullSyncStart);
+
 public sealed record GoogleReminderRefreshResult(int UpdatedExisting, int UpsertedMissing, int Skipped)
 {
     public int TotalAffected => UpdatedExisting + UpsertedMissing;
