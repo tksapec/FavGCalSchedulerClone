@@ -120,6 +120,63 @@ public sealed class SyncEditRaceRegressionTests
         Assert.Equal(syncedState.LastSyncedAt, stored.LastSyncedAt);
     }
 
+    [Fact]
+    public async Task SaveEventAsync_PreservesRecreatedRemoteIdentity_WhenEditorSnapshotHasOldGoogleId()
+    {
+        var repository = await CreateRepositoryAsync();
+        var local = CreateEvent("editor-recreate-race", "google-old", "etag-old");
+        local.IsDirty = false;
+        await repository.SaveEventAsync(local);
+
+        var staleEditorSnapshot = (await repository.FindEventByIdAsync(local.Id))!;
+        var syncSnapshot = (await repository.FindEventByIdAsync(local.Id))!;
+        await repository.MarkSyncedAsync(
+            syncSnapshot,
+            googleEventId: "google-recreated",
+            lastSyncedGoogleEtag: "etag-recreated");
+
+        staleEditorSnapshot.Title = "Edited after remote recreation";
+        staleEditorSnapshot.IsDirty = true;
+        await repository.SaveEventAsync(staleEditorSnapshot);
+
+        var stored = (await repository.FindEventByIdAsync(local.Id))!;
+        Assert.Equal("google-recreated", stored.GoogleEventId);
+        Assert.Equal("etag-recreated", stored.LastSyncedGoogleEtag);
+        Assert.True(stored.IsDirty);
+        Assert.Equal("Edited after remote recreation", stored.Title);
+    }
+
+    [Fact]
+    public async Task AtomicSave_PreservesRecreatedRemoteIdentity_WhenTodoEditorSnapshotHasOldGoogleId()
+    {
+        var repository = await CreateRepositoryAsync();
+        var local = CreateEvent("todo-recreate-race", "google-old-todo", "etag-old");
+        local.Description = "#todo[priority:A][progress:0]";
+        local.IsTodoLike = true;
+        local.IsAllDay = true;
+        local.Start = new DateTimeOffset(2026, 9, 9, 0, 0, 0, TimeSpan.Zero);
+        local.End = local.Start.AddDays(1);
+        local.IsDirty = false;
+        await repository.SaveEventAsync(local);
+
+        var staleEditorSnapshot = (await repository.FindEventByIdAsync(local.Id))!;
+        var syncSnapshot = (await repository.FindEventByIdAsync(local.Id))!;
+        await repository.MarkSyncedAsync(
+            syncSnapshot,
+            googleEventId: "google-recreated-todo",
+            lastSyncedGoogleEtag: "etag-recreated-todo");
+
+        staleEditorSnapshot.Description = "#todo[priority:A][progress:50]";
+        staleEditorSnapshot.IsDirty = true;
+        await CalendarRepositoryAtomicWriter.SaveEventsAsync(repository, [staleEditorSnapshot]);
+
+        var stored = (await repository.FindEventByIdAsync(local.Id))!;
+        Assert.Equal("google-recreated-todo", stored.GoogleEventId);
+        Assert.Equal("etag-recreated-todo", stored.LastSyncedGoogleEtag);
+        Assert.True(stored.IsDirty);
+        Assert.Contains("progress:50", stored.Description ?? string.Empty, StringComparison.Ordinal);
+    }
+
     private static async Task<CalendarRepository> CreateRepositoryAsync()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
