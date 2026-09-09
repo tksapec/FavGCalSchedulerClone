@@ -409,6 +409,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
                               'EndTimeZoneId', json_extract(google_reminder_metadata_json, '$.EndTimeZoneId'))
                       END
                   WHERE id = $id
+                    AND is_todo_like = 1
                   """
                 : """
                   UPDATE events
@@ -427,6 +428,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
                       END,
                       last_synced_google_etag = COALESCE($etag, last_synced_google_etag)
                   WHERE id = $id
+                    AND is_todo_like = 1
                   """;
             command.Parameters.AddWithValue("$id", localId);
             if (!preserveDirtyState)
