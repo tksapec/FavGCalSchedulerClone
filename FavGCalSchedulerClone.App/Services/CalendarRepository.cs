@@ -517,7 +517,7 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
             var existing = await FindMasterByIdAsync(calendarEvent.Id);
             PreserveExistingSyncState(calendarEvent, existing);
             calendarEvent.DirtyFields = EventDirtyFieldTracker.Merge(existing?.DirtyFields ?? calendarEvent.DirtyFields, existing, calendarEvent);
-            calendarEvent.UpdatedAt = DateTimeOffset.Now;
+            calendarEvent.UpdatedAt = CreateNextUpdatedAt(existing?.UpdatedAt);
             calendarEvent.IsTodoLike = TagService.IsTodoLike(calendarEvent);
             await UpsertEventAsync(calendarEvent);
         }
@@ -755,6 +755,14 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         calendarEvent.GoogleEventId = existing.GoogleEventId;
         calendarEvent.LastSyncedAt = existing.LastSyncedAt;
         calendarEvent.LastSyncedGoogleEtag = existing.LastSyncedGoogleEtag;
+    }
+
+    internal static DateTimeOffset CreateNextUpdatedAt(DateTimeOffset? existingUpdatedAt)
+    {
+        var now = DateTimeOffset.Now;
+        return existingUpdatedAt is not null && now.UtcTicks <= existingUpdatedAt.Value.UtcTicks
+            ? existingUpdatedAt.Value.AddTicks(1)
+            : now;
     }
 
     public async Task<string?> GetSyncTokenAsync(string calendarId)

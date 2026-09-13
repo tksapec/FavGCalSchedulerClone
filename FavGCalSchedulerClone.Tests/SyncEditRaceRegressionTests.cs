@@ -6,6 +6,39 @@ namespace FavGCalSchedulerClone.Tests;
 public sealed class SyncEditRaceRegressionTests
 {
     [Fact]
+    public async Task SaveEventAsync_AssignsRevisionAfterExistingTimestampWhenClockIsEarlier()
+    {
+        var repository = await CreateRepositoryAsync();
+        var existing = CreateEvent("monotonic-save", "google-monotonic-save", "etag-1");
+        existing.UpdatedAt = DateTimeOffset.Now.AddMinutes(1);
+        await repository.UpsertSyncedEventAsync(existing);
+
+        var edited = CreateEvent(existing.Id, existing.GoogleEventId, existing.LastSyncedGoogleEtag);
+        edited.Title = "Edited after a future persisted timestamp";
+        await repository.SaveEventAsync(edited);
+
+        var stored = (await repository.FindEventByIdAsync(existing.Id))!;
+        Assert.True(stored.UpdatedAt > existing.UpdatedAt);
+    }
+
+    [Fact]
+    public async Task AtomicSave_AssignsRevisionAfterExistingTimestampWhenClockIsEarlier()
+    {
+        var repository = await CreateRepositoryAsync();
+        var existing = CreateEvent("monotonic-atomic", "google-monotonic-atomic", "etag-1");
+        existing.UpdatedAt = DateTimeOffset.Now.AddMinutes(1);
+        await repository.UpsertSyncedEventAsync(existing);
+
+        var edited = CreateEvent(existing.Id, existing.GoogleEventId, existing.LastSyncedGoogleEtag);
+        edited.Description = "#todo[priority:A][progress:50]";
+        edited.IsTodoLike = true;
+        await CalendarRepositoryAtomicWriter.SaveEventsAsync(repository, [edited]);
+
+        var stored = (await repository.FindEventByIdAsync(existing.Id))!;
+        Assert.True(stored.UpdatedAt > existing.UpdatedAt);
+    }
+
+    [Fact]
     public async Task MarkSyncedAsync_PreservesNewerDirtyEdit_WhenOlderSyncSnapshotCompletes()
     {
         var repository = await CreateRepositoryAsync();

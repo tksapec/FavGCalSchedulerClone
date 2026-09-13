@@ -18,7 +18,7 @@ public sealed class TodoReminderCleanupTimeZoneRegressionTests
             CalendarId = "work",
             GoogleEventId = "google-todo-timezone",
             LastSyncedGoogleEtag = "etag-before-cleanup",
-            Title = "Timed todo",
+            Title = "#todoA0% Timed todo",
             Start = new DateTimeOffset(2026, 8, 24, 9, 0, 0, TimeSpan.FromHours(9)),
             End = new DateTimeOffset(2026, 8, 24, 10, 0, 0, TimeSpan.FromHours(9)),
             StartTimeZoneId = "Asia/Tokyo",

@@ -7,6 +7,54 @@ namespace FavGCalSchedulerClone.Tests;
 public sealed class SyncTodoCleanupEditRaceRegressionTests
 {
     [Fact]
+    public async Task SyncAsync_DisablesGoogleRemindersWhenImportingRemoteOnlyTodo()
+    {
+        var repository = await CreateRepositoryAsync();
+        var listStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var continueList = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        continueList.TrySetResult();
+        var api = new PausingGoogleCalendarApi(
+            new Event
+            {
+                Id = "remote-only-todo",
+                ETag = "etag-1",
+                Summary = "#todoA0% Remote only todo",
+                Status = "confirmed",
+                Start = new EventDateTime { Date = "2026-09-14" },
+                End = new EventDateTime { Date = "2026-09-15" },
+                Reminders = new Event.RemindersData
+                {
+                    UseDefault = false,
+                    Overrides = [new EventReminder { Method = "popup", Minutes = 30 }]
+                }
+            },
+            listStarted,
+            continueList,
+            pauseListEvents: true);
+        var oauthPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(oauthPath, "{}");
+        try
+        {
+            var settings = new AppSettings
+            {
+                OAuthClientJsonPath = oauthPath,
+                ActiveCalendarId = "primary",
+                VisibleCalendarIds = ["primary"]
+            };
+
+            var result = await new GoogleCalendarSyncService(repository, api).SyncAsync(settings);
+
+            Assert.Equal(1, api.UpdateCallCount);
+            Assert.Equal(1, result.Pulled);
+            Assert.True((await repository.FindEventByGoogleEventIdAsync("primary", "remote-only-todo"))!.IsTodoLike);
+        }
+        finally
+        {
+            File.Delete(oauthPath);
+        }
+    }
+
+    [Fact]
     public async Task SyncAsync_TodoReminderCleanupDoesNotOverwriteNewerLocalEdit()
     {
         var repository = await CreateRepositoryAsync();
@@ -138,8 +186,10 @@ public sealed class SyncTodoCleanupEditRaceRegressionTests
         Assert.Equal(45, stored.ReminderMinutesBeforeStart);
     }
 
-    [Fact]
-    public async Task SyncAsync_DoesNotRemoveGoogleRemindersAfterPlannedTodoBecomesNormalEvent()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SyncAsync_DoesNotRemoveGoogleRemindersAfterPlannedTodoBecomesNormalEvent(bool hasLocalReminderToClean)
     {
         var repository = await CreateRepositoryAsync();
         var local = new CalendarEvent
@@ -154,9 +204,9 @@ public sealed class SyncTodoCleanupEditRaceRegressionTests
             End = new DateTimeOffset(2026, 9, 14, 0, 0, 0, TimeSpan.FromHours(9)),
             IsAllDay = true,
             IsDirty = false,
-            ReminderMinutesBeforeStart = 30,
-            IsAppReminderEnabled = true,
-            AppReminderMinutesBeforeStart = [30]
+            ReminderMinutesBeforeStart = hasLocalReminderToClean ? 30 : null,
+            IsAppReminderEnabled = hasLocalReminderToClean,
+            AppReminderMinutesBeforeStart = hasLocalReminderToClean ? [30] : []
         };
         await repository.SaveEventAsync(local);
         var savedTodo = (await repository.FindEventByIdAsync(local.Id))!;
@@ -183,7 +233,8 @@ public sealed class SyncTodoCleanupEditRaceRegressionTests
                 }
             },
             getStarted,
-            continueGet);
+            continueGet,
+            pauseListEvents: !hasLocalReminderToClean);
         var oauthPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.json");
         await File.WriteAllTextAsync(oauthPath, "{}");
         var settings = new AppSettings
@@ -240,15 +291,18 @@ public sealed class SyncTodoCleanupEditRaceRegressionTests
         private readonly Event _remoteEvent;
         private readonly TaskCompletionSource _getStarted;
         private readonly TaskCompletionSource _continueGet;
+        private readonly bool _pauseListEvents;
 
         public PausingGoogleCalendarApi(
             Event remoteEvent,
             TaskCompletionSource getStarted,
-            TaskCompletionSource continueGet)
+            TaskCompletionSource continueGet,
+            bool pauseListEvents = false)
         {
             _remoteEvent = remoteEvent;
             _getStarted = getStarted;
             _continueGet = continueGet;
+            _pauseListEvents = pauseListEvents;
         }
 
         public int UpdateCallCount { get; private set; }
@@ -284,8 +338,17 @@ public sealed class SyncTodoCleanupEditRaceRegressionTests
             return _remoteEvent;
         }
 
-        public Task<GoogleEventPage> ListEventsAsync(GoogleEventListRequest request, CancellationToken cancellationToken = default)
-            => Task.FromResult(new GoogleEventPage([], null, "next-token"));
+        public async Task<GoogleEventPage> ListEventsAsync(GoogleEventListRequest request, CancellationToken cancellationToken = default)
+        {
+            if (!_pauseListEvents)
+            {
+                return new GoogleEventPage([], null, "next-token");
+            }
+
+            _getStarted.TrySetResult();
+            await _continueGet.Task.WaitAsync(cancellationToken);
+            return new GoogleEventPage([_remoteEvent], null, "next-token");
+        }
 
         public Task<IReadOnlyList<Event>> ListInstancesAsync(
             string calendarId,

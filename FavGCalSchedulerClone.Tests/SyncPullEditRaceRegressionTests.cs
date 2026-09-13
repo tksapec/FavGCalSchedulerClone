@@ -7,6 +7,90 @@ namespace FavGCalSchedulerClone.Tests;
 public sealed class SyncPullEditRaceRegressionTests
 {
     [Fact]
+    public async Task PullAsync_PreservesEditQueuedAfterOlderReadBeforeRemoteWrite()
+    {
+        var repository = await CreateRepositoryAsync();
+        var local = new CalendarEvent
+        {
+            Id = "direct-pull-race",
+            CalendarId = "primary",
+            GoogleEventId = "remote-direct-pull-race",
+            LastSyncedGoogleEtag = "etag-1",
+            Title = "Original",
+            Start = new DateTimeOffset(2026, 9, 10, 9, 0, 0, TimeSpan.FromHours(9)),
+            End = new DateTimeOffset(2026, 9, 10, 10, 0, 0, TimeSpan.FromHours(9)),
+            IsDirty = false
+        };
+        await repository.UpsertSyncedEventAsync(local);
+
+        await repository.EnterEventMutationAsync();
+        try
+        {
+            var edited = (await repository.FindEventByIdAsync(local.Id))!;
+            edited.Title = "Local edit queued before remote write";
+            edited.IsDirty = true;
+            var saveTask = repository.SaveEventAsync(edited);
+
+            var listStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var continueList = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var api = new PausingGoogleCalendarApi(
+                new Event
+                {
+                    Id = local.GoogleEventId,
+                    ETag = "etag-2",
+                    Summary = "Remote changed",
+                    Status = "confirmed",
+                    Start = new EventDateTime { DateTimeDateTimeOffset = local.Start },
+                    End = new EventDateTime { DateTimeDateTimeOffset = local.End }
+                },
+                listStarted,
+                continueList);
+            var oauthPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.json");
+            await File.WriteAllTextAsync(oauthPath, "{}");
+            try
+            {
+                var settings = new AppSettings
+                {
+                    OAuthClientJsonPath = oauthPath,
+                    ActiveCalendarId = "primary",
+                    VisibleCalendarIds = ["primary"],
+                    SyncConflictPolicy = SyncConflictPolicy.PreferGoogle
+                };
+                var pullTask = new GoogleCalendarSyncService(repository, api).PullAsync(settings);
+                await listStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                continueList.TrySetResult();
+                await Task.Delay(100);
+
+                repository.ExitEventMutation();
+                await saveTask;
+                var pulled = await pullTask;
+
+                var stored = (await repository.FindEventByIdAsync(local.Id))!;
+                Assert.Equal("Local edit queued before remote write", stored.Title);
+                Assert.True(stored.IsDirty);
+                Assert.Equal("etag-1", stored.LastSyncedGoogleEtag);
+                Assert.Equal(0, pulled);
+            }
+            finally
+            {
+                continueList.TrySetResult();
+                File.Delete(oauthPath);
+            }
+        }
+        finally
+        {
+            try
+            {
+                repository.ExitEventMutation();
+            }
+            catch (SemaphoreFullException)
+            {
+                // The test releases the gate before awaiting the queued mutations.
+            }
+        }
+    }
+
+    [Fact]
     public async Task SyncAsync_PreservesLocalEditMadeAfterPullPlanSnapshot()
     {
         var repository = await CreateRepositoryAsync();
