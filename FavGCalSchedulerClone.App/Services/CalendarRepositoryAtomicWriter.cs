@@ -24,52 +24,58 @@ internal static class CalendarRepositoryAtomicWriter
             return;
         }
 
-        var mutationSnapshots = items.Select(EventMutationSnapshot.Capture).ToArray();
-        await using var connection = repository.OpenConnection();
-        await using var transaction = connection.BeginTransaction();
+        await repository.EnterEventMutationAsync(cancellationToken);
         try
         {
-            foreach (var calendarEvent in items)
+            var mutationSnapshots = items.Select(EventMutationSnapshot.Capture).ToArray();
+            await using var connection = repository.OpenConnection();
+            await using var transaction = connection.BeginTransaction();
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var existing = await LoadExistingAsync(connection, transaction, calendarEvent.Id, cancellationToken);
-                PreserveExistingRemoteLink(calendarEvent, existing);
-                calendarEvent.DirtyFields = EventDirtyFieldTracker.Merge(
-                    existing?.DirtyFields ?? calendarEvent.DirtyFields,
-                    existing,
-                    calendarEvent);
-                calendarEvent.UpdatedAt = DateTimeOffset.Now;
-                calendarEvent.IsTodoLike = TagService.IsTodoLike(calendarEvent);
-                await UpsertAsync(connection, transaction, calendarEvent, cancellationToken);
-            }
+                foreach (var calendarEvent in items)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var existing = await LoadExistingAsync(connection, transaction, calendarEvent.Id, cancellationToken);
+                    PreserveExistingRemoteLink(calendarEvent, existing);
+                    calendarEvent.DirtyFields = EventDirtyFieldTracker.Merge(
+                        existing?.DirtyFields ?? calendarEvent.DirtyFields,
+                        existing,
+                        calendarEvent);
+                    calendarEvent.UpdatedAt = CalendarRepository.CreateNextUpdatedAt(existing?.UpdatedAt);
+                    calendarEvent.IsTodoLike = TagService.IsTodoLike(calendarEvent);
+                    await UpsertAsync(connection, transaction, calendarEvent, cancellationToken);
+                }
 
-            foreach (var id in deleteIds)
+                foreach (var id in deleteIds)
+                {
+                    await using var command = connection.CreateCommand();
+                    command.Transaction = transaction;
+                    command.CommandText = "DELETE FROM events WHERE id = $id";
+                    command.Parameters.AddWithValue("$id", id);
+                    await command.ExecuteNonQueryAsync(cancellationToken);
+                }
+
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch
             {
-                await using var command = connection.CreateCommand();
-                command.Transaction = transaction;
-                command.CommandText = "DELETE FROM events WHERE id = $id";
-                command.Parameters.AddWithValue("$id", id);
-                await command.ExecuteNonQueryAsync(cancellationToken);
+                await RollbackSafelyAsync(transaction);
+                foreach (var snapshot in mutationSnapshots)
+                {
+                    snapshot.Restore();
+                }
+                throw;
             }
-
-            await transaction.CommitAsync(cancellationToken);
         }
-        catch
+        finally
         {
-            await RollbackSafelyAsync(transaction);
-            foreach (var snapshot in mutationSnapshots)
-            {
-                snapshot.Restore();
-            }
-            throw;
+            repository.ExitEventMutation();
         }
     }
 
     private static void PreserveExistingRemoteLink(CalendarEvent current, CalendarEvent? existing)
     {
-        if (!string.IsNullOrWhiteSpace(current.GoogleEventId)
-            || existing is null
-            || string.IsNullOrWhiteSpace(existing.GoogleEventId)
+        if (existing is null
             || !string.Equals(existing.CalendarId, current.CalendarId, StringComparison.Ordinal))
         {
             return;
@@ -93,7 +99,7 @@ internal static class CalendarRepositoryAtomicWriter
                    start, end, is_all_day, color_id, reminder_minutes_before_start,
                    app_reminder_enabled, google_email_reminder_enabled, recurrence_json,
                    is_deleted, last_synced_at, is_dirty, dirty_fields, google_reminder_metadata_json,
-                   app_reminder_minutes_json, google_email_reminder_minutes_json
+                   app_reminder_minutes_json, google_email_reminder_minutes_json, updated_at
             FROM events WHERE id = $id LIMIT 1
             """;
         command.Parameters.AddWithValue("$id", id);
@@ -126,7 +132,8 @@ internal static class CalendarRepositoryAtomicWriter
             DirtyFields = reader.IsDBNull(17) ? null : reader.GetString(17),
             GoogleReminderMetadata = reader.IsDBNull(18) ? null : DeserializeGoogleReminderMetadata(reader.GetString(18)),
             AppReminderMinutesBeforeStart = reader.IsDBNull(19) ? [] : DeserializeReminderMinutes(reader.GetString(19)),
-            GoogleEmailReminderMinutesBeforeStart = reader.IsDBNull(20) ? [] : DeserializeReminderMinutes(reader.GetString(20))
+            GoogleEmailReminderMinutesBeforeStart = reader.IsDBNull(20) ? [] : DeserializeReminderMinutes(reader.GetString(20)),
+            UpdatedAt = ParseDateTimeOffset(reader.GetString(21))
         };
     }
 

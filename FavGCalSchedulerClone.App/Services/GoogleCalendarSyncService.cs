@@ -934,7 +934,6 @@ public sealed class GoogleCalendarSyncService
         }
     }
 
-
     private static void ApplyAppOwnedFields(Event destination, Event source, bool includeOriginalStartTime, bool includeRecurrence)
     {
         destination.Summary = source.Summary;
@@ -1186,32 +1185,49 @@ public sealed class GoogleCalendarSyncService
             var executableItem = item;
             if (item.RequiresTodoReminderCleanup && item.Action != SyncPlanAction.PushLocal)
             {
-                try
+                var currentLocal = item.LocalEvent is { } plannedLocal
+                    ? await _repository.FindEventByIdAsync(plannedLocal.Id)
+                    : await _repository.FindEventByGoogleEventIdAsync(calendarId, item.RemoteEvent?.Id);
+                var missingPlannedLocal = item.LocalEvent is not null && currentLocal is null;
+                var invalidCurrentLocal = currentLocal is not null
+                    && (!currentLocal.IsTodoLike
+                        || currentLocal.IsDeleted
+                        || !string.Equals(currentLocal.CalendarId, calendarId, StringComparison.Ordinal)
+                        || !string.Equals(currentLocal.GoogleEventId, item.RemoteEvent?.Id, StringComparison.Ordinal));
+                if (missingPlannedLocal || invalidCurrentLocal)
                 {
-                    var currentRemote = item.RemoteEvent!;
-                    currentRemote.Reminders = TodoReminderPolicy.CreateGoogleRemindersDisabled();
-                    var cleanedRemote = client is IConditionalGoogleCalendarClient conditionalClient
-                        ? await conditionalClient.UpdateEventAsync(
-                            calendarId, currentRemote.Id, currentRemote, cancellationToken, currentRemote.ETag)
-                        : await client.UpdateEventAsync(calendarId, currentRemote.Id, currentRemote, cancellationToken);
-                    executableItem = item with { RemoteEvent = cleanedRemote };
-
-                    if (item.Action == SyncPlanAction.SkipConflict && item.LocalEvent is { } skippedLocal)
-                    {
-                        await _repository.ApplyTodoReminderCleanupStateAsync(
-                            skippedLocal.Id,
-                            preserveDirtyState: true);
-                    }
+                    executableItem = item with { RequiresTodoReminderCleanup = false };
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+
+                if (executableItem.RequiresTodoReminderCleanup)
                 {
-                    var diagnostic = item.LocalEvent is { } localTodo
-                        ? CreateFailureDiagnostic(localTodo, "TodoReminderCleanup", ex, "ToDoのGoogle通知削除に失敗しました。")
-                            with { FailureCategory = "TodoReminderCleanup" }
-                        : CreatePullFailureDiagnostic(calendarId, null, null, ex, "TodoReminderCleanup", "ToDoのGoogle通知削除に失敗しました。");
-                    failures.Add(diagnostic);
-                    failed++;
-                    continue;
+                    try
+                    {
+                        var currentRemote = item.RemoteEvent!;
+                        currentRemote.Reminders = TodoReminderPolicy.CreateGoogleRemindersDisabled();
+                        var cleanedRemote = client is IConditionalGoogleCalendarClient conditionalClient
+                            ? await conditionalClient.UpdateEventAsync(
+                                calendarId, currentRemote.Id, currentRemote, cancellationToken, currentRemote.ETag)
+                            : await client.UpdateEventAsync(calendarId, currentRemote.Id, currentRemote, cancellationToken);
+                        executableItem = item with { RemoteEvent = cleanedRemote };
+
+                        if (item.Action == SyncPlanAction.SkipConflict && item.LocalEvent is { } skippedLocal)
+                        {
+                            await _repository.ApplyTodoReminderCleanupStateAsync(
+                                skippedLocal.Id,
+                                preserveDirtyState: true);
+                        }
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        var diagnostic = item.LocalEvent is { } localTodo
+                            ? CreateFailureDiagnostic(localTodo, "TodoReminderCleanup", ex, "ToDoのGoogle通知削除に失敗しました。")
+                                with { FailureCategory = "TodoReminderCleanup" }
+                            : CreatePullFailureDiagnostic(calendarId, null, null, ex, "TodoReminderCleanup", "ToDoのGoogle通知削除に失敗しました。");
+                        failures.Add(diagnostic);
+                        failed++;
+                        continue;
+                    }
                 }
             }
 
@@ -1225,12 +1241,22 @@ public sealed class GoogleCalendarSyncService
                 case SyncPlanAction.PullRemote:
                     try
                     {
-                        await _repository.UpsertSyncedEventAsync(GoogleEventMapper.FromGoogleEvent(
-                            executableItem.RemoteEvent!,
-                            calendarId,
-                            GetDefaultReminders(reminderDefaults, calendarId),
-                            adoptEmailRemindersAsLocalNotifications));
-                        pulled++;
+                        var applied = await _repository.TryUpsertSyncedEventAsync(
+                            GoogleEventMapper.FromGoogleEvent(
+                                executableItem.RemoteEvent!,
+                                calendarId,
+                                GetDefaultReminders(reminderDefaults, calendarId),
+                                adoptEmailRemindersAsLocalNotifications),
+                            executableItem.LocalEvent);
+                        if (applied)
+                        {
+                            pulled++;
+                        }
+                        else
+                        {
+                            skipped++;
+                            conflicts++;
+                        }
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
@@ -1241,6 +1267,17 @@ public sealed class GoogleCalendarSyncService
 
                 case SyncPlanAction.PushLocal:
                     var localEvent = executableItem.LocalEvent!;
+                    var currentLocal = await _repository.FindEventByIdAsync(localEvent.Id);
+                    if (currentLocal is null
+                        || !string.Equals(currentLocal.Id, localEvent.Id, StringComparison.Ordinal)
+                        || !string.Equals(currentLocal.CalendarId, calendarId, StringComparison.Ordinal)
+                        || !string.Equals(currentLocal.GoogleEventId, localEvent.GoogleEventId, StringComparison.Ordinal)
+                        || currentLocal.UpdatedAt.UtcTicks != localEvent.UpdatedAt.UtcTicks)
+                    {
+                        skipped++;
+                        conflicts++;
+                        break;
+                    }
                     if (localEvent.IsTodoLike)
                     {
                         var requiresLocalCleanup = TodoReminderPolicy.RequiresLocalCleanup(localEvent)
@@ -1250,7 +1287,9 @@ public sealed class GoogleCalendarSyncService
                         {
                             localEvent.IsDirty = true;
                             localEvent.DirtyFields = EventDirtyFieldTracker.MergeFieldNames(localEvent.DirtyFields, "Reminder");
-                            await _repository.SaveEventAsync(localEvent);
+                            await _repository.ApplyTodoReminderCleanupStateAsync(
+                                localEvent.Id,
+                                preserveDirtyState: true);
                         }
                     }
                     var operation = GetPushOperation(localEvent);
@@ -1476,6 +1515,7 @@ public sealed class GoogleCalendarSyncService
         var pulled = 0;
         var skipped = 0;
         var conflicts = 0;
+        var canAdvanceSyncToken = true;
         string? pageToken = null;
 
         try
@@ -1502,17 +1542,31 @@ public sealed class GoogleCalendarSyncService
                         continue;
                     }
 
-                    await _repository.UpsertSyncedEventAsync(GoogleEventMapper.FromGoogleEvent(
-                        googleEvent,
-                        calendarId,
-                        GetDefaultReminders(reminderDefaults, calendarId),
-                        adoptEmailRemindersAsLocalNotifications));
-                    pulled++;
+                    var applied = await _repository.TryUpsertSyncedEventAsync(
+                        GoogleEventMapper.FromGoogleEvent(
+                            googleEvent,
+                            calendarId,
+                            GetDefaultReminders(reminderDefaults, calendarId),
+                            adoptEmailRemindersAsLocalNotifications),
+                        localEvent);
+                    if (applied)
+                    {
+                        pulled++;
+                    }
+                    else
+                    {
+                        skipped++;
+                        conflicts++;
+                        canAdvanceSyncToken = false;
+                    }
                 }
 
                 if (string.IsNullOrWhiteSpace(page.NextPageToken))
                 {
-                    await _repository.SaveSyncTokenAsync(calendarId, page.NextSyncToken);
+                    if (canAdvanceSyncToken)
+                    {
+                        await _repository.SaveSyncTokenAsync(calendarId, page.NextSyncToken);
+                    }
                     break;
                 }
 
@@ -1913,7 +1967,6 @@ public sealed class GoogleCalendarSyncService
             return null;
         }
     }
-
 }
 
 public enum GoogleNotFoundSyncAction
@@ -1965,6 +2018,7 @@ internal sealed record RemoteDelta(
     bool Success,
     RemoteSyncMode Mode,
     DateTimeOffset? FullSyncStart);
+
 public sealed record GoogleReminderRefreshResult(int UpdatedExisting, int UpsertedMissing, int Skipped)
 {
     public int TotalAffected => UpdatedExisting + UpsertedMissing;
