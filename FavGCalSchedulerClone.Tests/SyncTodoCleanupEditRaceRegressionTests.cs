@@ -136,6 +136,96 @@ public sealed class SyncTodoCleanupEditRaceRegressionTests
             Assert.Equal(0, result.Pushed);
             Assert.Equal(1, result.Skipped);
             Assert.Equal(1, result.Conflicts);
+            Assert.Equal("old-token", await repository.GetSyncTokenAsync("primary"));
+        }
+        finally
+        {
+            continueGet.TrySetResult();
+            File.Delete(oauthPath);
+        }
+    }
+
+    [Fact]
+    public async Task SyncAsync_TodoReminderCleanupDoesNotOverwriteNewerLocalEdit()
+    {
+        var repository = await CreateRepositoryAsync();
+        var local = new CalendarEvent
+        {
+            Id = "todo-cleanup-local-edit-race",
+            CalendarId = "primary",
+            GoogleEventId = "remote-todo-cleanup-local-edit-race",
+            LastSyncedGoogleEtag = "etag-1",
+            Title = "#todoA0% Old todo title",
+            Description = "Old todo description",
+            Start = new DateTimeOffset(2026, 9, 10, 0, 0, 0, TimeSpan.FromHours(9)),
+            End = new DateTimeOffset(2026, 9, 11, 0, 0, 0, TimeSpan.FromHours(9)),
+            IsAllDay = true,
+            IsDirty = true,
+            ReminderMinutesBeforeStart = 30,
+            IsAppReminderEnabled = true,
+            AppReminderMinutesBeforeStart = [30]
+        };
+        await repository.SaveEventAsync(local);
+        var savedTodo = (await repository.FindEventByIdAsync(local.Id))!;
+        Assert.True(savedTodo.IsTodoLike);
+        await repository.SaveSyncTokenAsync("primary", "old-token");
+
+        var getStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var continueGet = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var api = new PausingGoogleCalendarApi(
+            new Event
+            {
+                Id = local.GoogleEventId,
+                ETag = "etag-1",
+                Summary = local.Title,
+                Description = local.Description,
+                Status = "confirmed",
+                Start = new EventDateTime { Date = "2026-09-10" },
+                End = new EventDateTime { Date = "2026-09-11" },
+                Reminders = new Event.RemindersData
+                {
+                    UseDefault = false,
+                    Overrides = [new EventReminder { Method = "popup", Minutes = 30 }]
+                }
+            },
+            getStarted,
+            continueGet);
+        var oauthPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(oauthPath, "{}");
+        var settings = new AppSettings
+        {
+            OAuthClientJsonPath = oauthPath,
+            ActiveCalendarId = "primary",
+            VisibleCalendarIds = ["primary"],
+            SyncConflictPolicy = SyncConflictPolicy.PreferLocal
+        };
+
+        try
+        {
+            var service = new GoogleCalendarSyncService(repository, api);
+            var syncTask = service.SyncAsync(settings);
+            await getStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            var edited = (await repository.FindEventByIdAsync(local.Id))!;
+            edited.Title = "#todoA50% Newer local todo title";
+            edited.Description = "Newer local todo description";
+            edited.IsDirty = true;
+            await repository.SaveEventAsync(edited);
+
+            continueGet.TrySetResult();
+            var result = await syncTask;
+
+            var stored = (await repository.FindEventByIdAsync(local.Id))!;
+            Assert.Equal("#todoA50% Newer local todo title", stored.Title);
+            Assert.Equal("Newer local todo description", stored.Description);
+            Assert.True(stored.IsTodoLike);
+            Assert.True(stored.IsDirty);
+            Assert.Equal("etag-1", stored.LastSyncedGoogleEtag);
+            Assert.Equal([30], stored.EffectiveAppReminderMinutesBeforeStart);
+            Assert.Equal(0, api.UpdateCallCount);
+            Assert.Equal(0, result.Pushed);
+            Assert.Equal(1, result.Skipped);
+            Assert.Equal(1, result.Conflicts);
         }
         finally
         {

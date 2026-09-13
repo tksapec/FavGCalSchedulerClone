@@ -30,8 +30,6 @@ public sealed class SyncEditRaceRegressionTests
         await repository.UpsertSyncedEventAsync(existing);
 
         var edited = CreateEvent(existing.Id, existing.GoogleEventId, existing.LastSyncedGoogleEtag);
-        edited.Description = "#todo[priority:A][progress:50]";
-        edited.IsTodoLike = true;
         await CalendarRepositoryAtomicWriter.SaveEventsAsync(repository, [edited]);
 
         var stored = (await repository.FindEventByIdAsync(existing.Id))!;
@@ -129,8 +127,7 @@ public sealed class SyncEditRaceRegressionTests
     {
         var repository = await CreateRepositoryAsync();
         var local = CreateEvent("todo-editor-race", "google-todo", "etag-1");
-        local.Description = "#todo[priority:A][progress:0]";
-        local.IsTodoLike = true;
+        local.Title = "#todoA0% Original todo";
         local.IsAllDay = true;
         local.Start = new DateTimeOffset(2026, 9, 9, 0, 0, 0, TimeSpan.Zero);
         local.End = local.Start.AddDays(1);
@@ -143,11 +140,12 @@ public sealed class SyncEditRaceRegressionTests
         var syncedState = (await repository.FindEventByIdAsync(local.Id))!;
         Assert.NotNull(syncedState.LastSyncedAt);
 
-        staleEditorSnapshot.Description = "#todo[priority:A][progress:50]";
+        staleEditorSnapshot.Title = "#todoA50% Edited todo";
         staleEditorSnapshot.IsDirty = true;
         await CalendarRepositoryAtomicWriter.SaveEventsAsync(repository, [staleEditorSnapshot]);
 
         var stored = (await repository.FindEventByIdAsync(local.Id))!;
+        Assert.True(stored.IsTodoLike);
         Assert.True(stored.IsDirty);
         Assert.Equal("etag-2", stored.LastSyncedGoogleEtag);
         Assert.Equal(syncedState.LastSyncedAt, stored.LastSyncedAt);
@@ -184,8 +182,7 @@ public sealed class SyncEditRaceRegressionTests
     {
         var repository = await CreateRepositoryAsync();
         var local = CreateEvent("todo-recreate-race", "google-old-todo", "etag-old");
-        local.Description = "#todo[priority:A][progress:0]";
-        local.IsTodoLike = true;
+        local.Title = "#todoA0% Original todo";
         local.IsAllDay = true;
         local.Start = new DateTimeOffset(2026, 9, 9, 0, 0, 0, TimeSpan.Zero);
         local.End = local.Start.AddDays(1);
@@ -199,15 +196,16 @@ public sealed class SyncEditRaceRegressionTests
             googleEventId: "google-recreated-todo",
             lastSyncedGoogleEtag: "etag-recreated-todo");
 
-        staleEditorSnapshot.Description = "#todo[priority:A][progress:50]";
+        staleEditorSnapshot.Title = "#todoA50% Edited todo";
         staleEditorSnapshot.IsDirty = true;
         await CalendarRepositoryAtomicWriter.SaveEventsAsync(repository, [staleEditorSnapshot]);
 
         var stored = (await repository.FindEventByIdAsync(local.Id))!;
+        Assert.True(stored.IsTodoLike);
         Assert.Equal("google-recreated-todo", stored.GoogleEventId);
         Assert.Equal("etag-recreated-todo", stored.LastSyncedGoogleEtag);
         Assert.True(stored.IsDirty);
-        Assert.Contains("progress:50", stored.Description ?? string.Empty, StringComparison.Ordinal);
+        Assert.Equal("#todoA50% Edited todo", stored.Title);
     }
 
     private static async Task<CalendarRepository> CreateRepositoryAsync()
