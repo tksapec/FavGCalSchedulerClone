@@ -55,7 +55,7 @@ public sealed class SyncTodoCleanupEditRaceRegressionTests
     }
 
     [Fact]
-    public async Task SyncAsync_TodoReminderCleanupDoesNotOverwriteNewerLocalEdit()
+    public async Task SyncAsync_DoesNotPushStaleTodoAfterItBecomesNormalEvent()
     {
         var repository = await CreateRepositoryAsync();
         var local = new CalendarEvent
@@ -116,8 +116,11 @@ public sealed class SyncTodoCleanupEditRaceRegressionTests
             await getStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
             var edited = (await repository.FindEventByIdAsync(local.Id))!;
-            edited.Title = "#todoA50% Newer local todo title";
-            edited.Description = "Newer local todo description";
+            edited.Title = "Normal event after sync planning";
+            edited.Description = "No todo marker remains";
+            edited.ReminderMinutesBeforeStart = 45;
+            edited.IsAppReminderEnabled = true;
+            edited.AppReminderMinutesBeforeStart = [45];
             edited.IsDirty = true;
             await repository.SaveEventAsync(edited);
 
@@ -125,12 +128,14 @@ public sealed class SyncTodoCleanupEditRaceRegressionTests
             var result = await syncTask;
 
             var stored = (await repository.FindEventByIdAsync(local.Id))!;
-            Assert.Equal("#todoA50% Newer local todo title", stored.Title);
-            Assert.Equal("Newer local todo description", stored.Description);
+            Assert.Equal("Normal event after sync planning", stored.Title);
+            Assert.False(stored.IsTodoLike);
             Assert.True(stored.IsDirty);
-            Assert.Equal("etag-2", stored.LastSyncedGoogleEtag);
-            Assert.Empty(stored.EffectiveAppReminderMinutesBeforeStart);
-            Assert.Equal(1, result.Pushed);
+            Assert.Equal([45], stored.EffectiveAppReminderMinutesBeforeStart);
+            Assert.Equal(0, api.UpdateCallCount);
+            Assert.Equal(0, result.Pushed);
+            Assert.Equal(1, result.Skipped);
+            Assert.Equal(1, result.Conflicts);
         }
         finally
         {

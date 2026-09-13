@@ -1267,6 +1267,17 @@ public sealed class GoogleCalendarSyncService
 
                 case SyncPlanAction.PushLocal:
                     var localEvent = executableItem.LocalEvent!;
+                    var currentLocal = await _repository.FindEventByIdAsync(localEvent.Id);
+                    if (currentLocal is null
+                        || !string.Equals(currentLocal.Id, localEvent.Id, StringComparison.Ordinal)
+                        || !string.Equals(currentLocal.CalendarId, calendarId, StringComparison.Ordinal)
+                        || !string.Equals(currentLocal.GoogleEventId, localEvent.GoogleEventId, StringComparison.Ordinal)
+                        || currentLocal.UpdatedAt.UtcTicks != localEvent.UpdatedAt.UtcTicks)
+                    {
+                        skipped++;
+                        conflicts++;
+                        break;
+                    }
                     if (localEvent.IsTodoLike)
                     {
                         var requiresLocalCleanup = TodoReminderPolicy.RequiresLocalCleanup(localEvent)
@@ -1504,6 +1515,7 @@ public sealed class GoogleCalendarSyncService
         var pulled = 0;
         var skipped = 0;
         var conflicts = 0;
+        var canAdvanceSyncToken = true;
         string? pageToken = null;
 
         try
@@ -1545,12 +1557,16 @@ public sealed class GoogleCalendarSyncService
                     {
                         skipped++;
                         conflicts++;
+                        canAdvanceSyncToken = false;
                     }
                 }
 
                 if (string.IsNullOrWhiteSpace(page.NextPageToken))
                 {
-                    await _repository.SaveSyncTokenAsync(calendarId, page.NextSyncToken);
+                    if (canAdvanceSyncToken)
+                    {
+                        await _repository.SaveSyncTokenAsync(calendarId, page.NextSyncToken);
+                    }
                     break;
                 }
 

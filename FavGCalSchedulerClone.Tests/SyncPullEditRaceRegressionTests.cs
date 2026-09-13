@@ -22,6 +22,7 @@ public sealed class SyncPullEditRaceRegressionTests
             IsDirty = false
         };
         await repository.UpsertSyncedEventAsync(local);
+        await repository.SaveSyncTokenAsync("primary", "old-token");
 
         await repository.EnterEventMutationAsync();
         try
@@ -70,6 +71,7 @@ public sealed class SyncPullEditRaceRegressionTests
                 Assert.True(stored.IsDirty);
                 Assert.Equal("etag-1", stored.LastSyncedGoogleEtag);
                 Assert.Equal(0, pulled);
+                Assert.Equal("old-token", await repository.GetSyncTokenAsync("primary"));
             }
             finally
             {
