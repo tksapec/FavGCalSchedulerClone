@@ -8,6 +8,10 @@ public sealed record BulkEventOperationResult(
     int TodoReminderSkippedCount = 0,
     int UnchangedCount = 0)
 {
+    // Preserve count-only expectations while the UI consumes the richer outcome.
+    public static implicit operator BulkEventOperationResult(int affectedCount)
+        => new(affectedCount, affectedCount);
+
     public string FormatStatus(string operationLabel, string affectedLabel)
     {
         var parts = new List<string>
