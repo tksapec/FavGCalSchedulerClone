@@ -124,12 +124,13 @@ public sealed class BackupRestoreConcurrencyRegressionTests
         var targetPath = Path.Combine(directory, "calendar.db");
         var backupPath = Path.Combine(directory, "backup.zip");
         var backupService = new BackupService();
+        CalendarRepository? targetRepository = null;
 
         try
         {
             await CreateMigrationFailureBackupAsync(invalidDatabasePath, backupPath);
 
-            var targetRepository = new CalendarRepository(targetPath);
+            targetRepository = new CalendarRepository(targetPath);
             await targetRepository.InitializeAsync();
             await targetRepository.SaveSettingsAsync(new AppSettings { StartupTabIndex = 3 });
             using var reminderService = new ReminderNotificationService(targetRepository, new RecordingNotifier());
@@ -158,6 +159,11 @@ public sealed class BackupRestoreConcurrencyRegressionTests
         }
         finally
         {
+            if (targetRepository is not null)
+            {
+                await targetRepository.BeginMaintenanceAsync();
+            }
+
             SqliteConnection.ClearAllPools();
             if (Directory.Exists(directory))
             {
