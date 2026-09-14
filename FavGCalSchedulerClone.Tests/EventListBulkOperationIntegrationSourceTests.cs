@@ -15,6 +15,17 @@ public sealed class EventListBulkOperationIntegrationSourceTests
     }
 
     [Fact]
+    public void EventListDialog_DisablesSearchAndRowEditingWhileBulkMutationRuns()
+    {
+        var source = ReadSource("FavGCalSchedulerClone.App", "Views", "Dialogs", "EventListDialog.cs");
+
+        Assert.Contains("searchToolbar.IsEnabled = false;", source, StringComparison.Ordinal);
+        Assert.Contains("grid.IsEnabled = false;", source, StringComparison.Ordinal);
+        Assert.Contains("searchToolbar.IsEnabled = true;", source, StringComparison.Ordinal);
+        Assert.Contains("grid.IsEnabled = true;", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void MainViewModel_BulkApisReturnDetailedOperationResult()
     {
         var source = ReadSource("FavGCalSchedulerClone.App", "ViewModels", "MainViewModel.BulkUndo.cs");
