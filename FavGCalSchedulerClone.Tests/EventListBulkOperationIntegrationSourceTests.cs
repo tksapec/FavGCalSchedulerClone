@@ -15,12 +15,12 @@ public sealed class EventListBulkOperationIntegrationSourceTests
     }
 
     [Fact]
-    public void MainWindow_PassesDetailedBulkOperationApisToEventListDialog()
+    public void MainViewModel_ExposesBulkOperationResultFromCanonicalApis()
     {
-        var source = ReadSource("FavGCalSchedulerClone.App", "MainWindow.xaml.cs");
+        var source = ReadSource("FavGCalSchedulerClone.App", "ViewModels", "MainViewModel.BulkUndo.cs");
 
-        Assert.Contains("BulkUpdateEventsDetailedAsync", source, StringComparison.Ordinal);
-        Assert.Contains("BulkDeleteEventsDetailedAsync", source, StringComparison.Ordinal);
+        Assert.Contains("Task<BulkEventOperationResult> BulkUpdateEventsAsync", source, StringComparison.Ordinal);
+        Assert.Contains("Task<BulkEventOperationResult> BulkDeleteEventsAsync", source, StringComparison.Ordinal);
     }
 
     private static string ReadSource(params string[] relativePathParts)
