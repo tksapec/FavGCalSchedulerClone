@@ -12,7 +12,7 @@ public sealed class ReadmeTests
     {
         var readme = await File.ReadAllTextAsync(ReadmePath);
 
-        Assert.Contains("初回同期時は、既定で過去 5 年分の Google Calendar 予定を取得します。", readme);
+        Assert.Contains("初回同期では既定で過去5年分の予定を取得", readme);
     }
 
     [Fact]
