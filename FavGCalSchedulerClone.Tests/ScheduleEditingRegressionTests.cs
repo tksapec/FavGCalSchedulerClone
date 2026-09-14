@@ -159,6 +159,14 @@ public sealed class ScheduleEditingRegressionTests
     }
 
     [Fact]
+    public async Task ScheduleEditor_NullLocationUsesEmptyTextAtDialogBoundary()
+    {
+        var source = await ReadReliabilitySourceAsync();
+
+        Assert.Contains("editingEvent.Location ?? string.Empty,", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task MonthScheduleDoubleClick_UsesIdentityProtectedScheduleEditorPath()
     {
         var source = await File.ReadAllTextAsync(Path.Combine(AppRoot, "MainWindow.MonthEventLayer.cs"));
