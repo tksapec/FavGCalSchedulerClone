@@ -36,9 +36,9 @@ internal static class EventListDialog
         window.Content = panel;
 
         var status = new TextBlock { Margin = new Thickness(0, 4, 0, 0) };
-        var toolbar = CreateToolbar(request, eventItems, status, currentFilter, filter => currentFilter = filter, window);
-        DockPanel.SetDock(toolbar, Dock.Top);
-        panel.Children.Add(toolbar);
+        var searchToolbar = CreateToolbar(request, eventItems, status, currentFilter, filter => currentFilter = filter, window);
+        DockPanel.SetDock(searchToolbar, Dock.Top);
+        panel.Children.Add(searchToolbar);
 
         var close = new Button { Content = "閉じる", MinWidth = 96, Height = 28 };
         close.Click += (_, _) => window.Close();
@@ -77,7 +77,7 @@ internal static class EventListDialog
         }, "予定編集");
 
         AddColumns(grid);
-        var bulkToolbar = CreateBulkToolbar(ui, request, grid, eventItems, status, () => currentFilter, operationGate, window);
+        var bulkToolbar = CreateBulkToolbar(ui, request, grid, searchToolbar, eventItems, status, () => currentFilter, operationGate, window);
         DockPanel.SetDock(bulkToolbar, Dock.Top);
         panel.Children.Add(bulkToolbar);
         panel.Children.Add(grid);
@@ -204,6 +204,7 @@ internal static class EventListDialog
         DialogUiFactory ui,
         EventListDialogRequest request,
         DataGrid grid,
+        FrameworkElement searchToolbar,
         ObservableCollection<CalendarEvent> eventItems,
         TextBlock status,
         Func<EventListFilter> getCurrentFilter,
@@ -220,12 +221,16 @@ internal static class EventListDialog
             {
                 bulkEdit.IsEnabled = false;
                 bulkDelete.IsEnabled = false;
+                searchToolbar.IsEnabled = false;
+                grid.IsEnabled = false;
                 try
                 {
                     await operation();
                 }
                 finally
                 {
+                    searchToolbar.IsEnabled = true;
+                    grid.IsEnabled = true;
                     bulkEdit.IsEnabled = request.BulkEditAsync is not null;
                     bulkDelete.IsEnabled = request.BulkDeleteAsync is not null;
                 }
