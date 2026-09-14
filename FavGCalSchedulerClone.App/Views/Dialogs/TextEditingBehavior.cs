@@ -8,6 +8,14 @@ internal static class TextEditingBehavior
 {
     public static void Attach(TextBoxBase textBox)
     {
+        if (textBox is TextBox { AcceptsReturn: true })
+        {
+            // Keep WPF's native multiline editing behavior for description fields.
+            // The built-in TextBox context menu/commands handle cut, copy, paste,
+            // undo/redo and selection without an extra routed-command layer.
+            return;
+        }
+
         textBox.ContextMenu = CreateContextMenu(textBox);
     }
 
