@@ -36,6 +36,16 @@ internal static class EventListDialog
         window.Content = panel;
 
         var status = new TextBlock { Margin = new Thickness(0, 4, 0, 0) };
+        window.Closing += (_, e) =>
+        {
+            if (!operationGate.IsRunning)
+            {
+                return;
+            }
+
+            e.Cancel = true;
+            status.Text = "一括処理中は閉じられません。完了後に閉じてください。";
+        };
         var searchToolbar = CreateToolbar(request, eventItems, status, currentFilter, filter => currentFilter = filter, window);
         DockPanel.SetDock(searchToolbar, Dock.Top);
         panel.Children.Add(searchToolbar);
