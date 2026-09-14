@@ -21,11 +21,11 @@ public sealed class BulkEventOperationRegressionTests
             End = new DateTimeOffset(DateTime.Today.AddHours(10))
         });
 
-        var updated = await viewModel.BulkUpdateEventsAsync(
+        var result = await viewModel.BulkUpdateEventsAsync(
             ["no-op"],
             new BulkEventUpdateRequest(ColorId: "5", UpdateColor: true));
 
-        Assert.Equal(0, updated);
+        Assert.Equal(0, result.AffectedCount);
         var stored = await repository.FindMasterByIdAsync("no-op");
         Assert.NotNull(stored);
         Assert.Equal("5", stored!.ColorId);
@@ -49,14 +49,14 @@ public sealed class BulkEventOperationRegressionTests
             IsAllDay = true
         });
 
-        var updated = await viewModel.BulkUpdateEventsAsync(
+        var result = await viewModel.BulkUpdateEventsAsync(
             ["todo-reminder"],
             new BulkEventUpdateRequest(
                 ReminderMinutesBeforeStart: 15,
                 AppReminderEnabled: true,
                 GoogleEmailReminderEnabled: true));
 
-        Assert.Equal(0, updated);
+        Assert.Equal(0, result.AffectedCount);
         var stored = await repository.FindMasterByIdAsync("todo-reminder");
         Assert.NotNull(stored);
         Assert.True(stored!.IsTodoLike);
@@ -94,14 +94,14 @@ public sealed class BulkEventOperationRegressionTests
             IsAllDay = true
         });
 
-        var updated = await viewModel.BulkUpdateEventsAsync(
+        var result = await viewModel.BulkUpdateEventsAsync(
             ["schedule-reminder", "todo-reminder-mixed"],
             new BulkEventUpdateRequest(
                 ReminderMinutesBeforeStart: 30,
                 AppReminderEnabled: true,
                 GoogleEmailReminderEnabled: false));
 
-        Assert.Equal(1, updated);
+        Assert.Equal(1, result.AffectedCount);
         var schedule = await repository.FindMasterByIdAsync("schedule-reminder");
         var todo = await repository.FindMasterByIdAsync("todo-reminder-mixed");
         Assert.NotNull(schedule);
