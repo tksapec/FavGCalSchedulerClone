@@ -30,6 +30,14 @@ public sealed class BulkOperationUiSafetyTests
     }
 
     [Fact]
+    public void LegacyAffectedCountAssertion_AcceptsDetailedResult()
+    {
+        var result = new BulkEventOperationResult(SelectedCount: 2, AffectedCount: 2);
+
+        Assert.Equal(2, result);
+    }
+
+    [Fact]
     public async Task AsyncOperationGate_RejectsSecondOperationUntilFirstCompletes()
     {
         var gate = new AsyncOperationGate();
