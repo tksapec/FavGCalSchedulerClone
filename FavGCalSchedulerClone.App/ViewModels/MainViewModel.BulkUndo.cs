@@ -18,7 +18,7 @@ public sealed partial class MainViewModel
             return 0;
         }
 
-        var undoSnapshots = events.Select(UndoService.Clone).ToArray();
+        var undoSnapshots = new List<CalendarEvent>();
         var writes = new List<CalendarEvent>();
         var updated = 0;
         foreach (var calendarEvent in events)
@@ -34,7 +34,7 @@ public sealed partial class MainViewModel
                 calendarEvent.ColorId = request.ColorId;
             }
 
-            if (request.UpdatesReminder)
+            if (request.UpdatesReminder && !calendarEvent.IsTodoLike)
             {
                 var minutes = request.ReminderMinutesBeforeStart ?? calendarEvent.ReminderMinutesBeforeStart;
                 var appEnabled = request.AppReminderEnabled ?? calendarEvent.IsAppReminderEnabled;
@@ -61,10 +61,22 @@ public sealed partial class MainViewModel
                 }
             }
 
+            if (!HasBulkEditableChanges(original, calendarEvent))
+            {
+                continue;
+            }
+
+            undoSnapshots.Add(original);
             calendarEvent.IsDirty = true;
             NormalizeTimedEventTimeZoneOffsets(calendarEvent);
             writes.AddRange(PrepareCalendarMoveWrites(calendarEvent, original));
             updated++;
+        }
+
+        if (writes.Count == 0)
+        {
+            Status = "一括編集: 変更なし";
+            return 0;
         }
 
         await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes);
@@ -178,6 +190,16 @@ public sealed partial class MainViewModel
         Status = $"元に戻しました: {operation.Description}";
         await SyncAfterLocalChangeAsync();
         return true;
+    }
+
+    private static bool HasBulkEditableChanges(CalendarEvent before, CalendarEvent after)
+    {
+        return !string.Equals(before.CalendarId, after.CalendarId, StringComparison.Ordinal)
+            || !string.Equals(before.ColorId, after.ColorId, StringComparison.Ordinal)
+            || before.IsAppReminderEnabled != after.IsAppReminderEnabled
+            || before.IsGoogleEmailReminderEnabled != after.IsGoogleEmailReminderEnabled
+            || !before.EffectiveAppReminderMinutesBeforeStart.SequenceEqual(after.EffectiveAppReminderMinutesBeforeStart)
+            || !before.EffectiveGoogleEmailReminderMinutesBeforeStart.SequenceEqual(after.EffectiveGoogleEmailReminderMinutesBeforeStart);
     }
 
     private async Task<IReadOnlyList<CalendarEvent>> LoadEventsForBulkOperationAsync(IReadOnlyCollection<string> localIds)
