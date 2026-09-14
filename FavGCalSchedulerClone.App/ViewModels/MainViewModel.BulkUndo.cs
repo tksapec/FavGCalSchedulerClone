@@ -5,8 +5,10 @@ namespace FavGCalSchedulerClone.App.ViewModels;
 
 public sealed partial class MainViewModel
 {
-    public async Task<int> BulkUpdateEventsAsync(IReadOnlyCollection<string> localIds, BulkEventUpdateRequest request)
-        => (await BulkUpdateEventsDetailedAsync(localIds, request)).AffectedCount;
+    public Task<BulkEventOperationResult> BulkUpdateEventsAsync(
+        IReadOnlyCollection<string> localIds,
+        BulkEventUpdateRequest request)
+        => BulkUpdateEventsDetailedAsync(localIds, request);
 
     public async Task<BulkEventOperationResult> BulkUpdateEventsDetailedAsync(
         IReadOnlyCollection<string> localIds,
@@ -75,8 +77,8 @@ public sealed partial class MainViewModel
         return CreateBulkOperationResult(targets, updated, todoReminderSkipped, unchanged);
     }
 
-    public async Task<int> BulkDeleteEventsAsync(IReadOnlyCollection<string> localIds)
-        => (await BulkDeleteEventsDetailedAsync(localIds)).AffectedCount;
+    public Task<BulkEventOperationResult> BulkDeleteEventsAsync(IReadOnlyCollection<string> localIds)
+        => BulkDeleteEventsDetailedAsync(localIds);
 
     public async Task<BulkEventOperationResult> BulkDeleteEventsDetailedAsync(IReadOnlyCollection<string> localIds)
     {
