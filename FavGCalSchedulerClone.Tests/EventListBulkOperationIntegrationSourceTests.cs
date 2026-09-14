@@ -26,6 +26,16 @@ public sealed class EventListBulkOperationIntegrationSourceTests
     }
 
     [Fact]
+    public void EventListDialog_PreventsClosingWhileBulkMutationRuns()
+    {
+        var source = ReadSource("FavGCalSchedulerClone.App", "Views", "Dialogs", "EventListDialog.cs");
+
+        Assert.Contains("window.Closing +=", source, StringComparison.Ordinal);
+        Assert.Contains("operationGate.IsRunning", source, StringComparison.Ordinal);
+        Assert.Contains("e.Cancel = true;", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void MainViewModel_PreservesCountReturningBulkApisAndExposesDetailedApis()
     {
         var source = ReadSource("FavGCalSchedulerClone.App", "ViewModels", "MainViewModel.BulkUndo.cs");
