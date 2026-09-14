@@ -292,6 +292,12 @@ public sealed partial class MainViewModel
             }
         }
 
+        if (SelectedEvent is not null && !EventDirtyFieldTracker.HasChanges(SelectedEvent, calendarEvent))
+        {
+            Status = "予定に変更はありません。";
+            return null;
+        }
+
         return calendarEvent;
     }
 
