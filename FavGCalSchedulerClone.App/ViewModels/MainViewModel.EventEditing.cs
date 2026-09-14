@@ -188,7 +188,7 @@ public sealed partial class MainViewModel
             ? new CalendarEvent()
             : CloneEventForEditing(SelectedEvent);
         calendarEvent.Title = Title.Trim();
-        calendarEvent.Description = string.IsNullOrWhiteSpace(Description) ? null : Description.Trim();
+        calendarEvent.Description = string.IsNullOrWhiteSpace(Description) ? null : Description;
         calendarEvent.Location = string.IsNullOrWhiteSpace(Location) ? null : Location.Trim();
         calendarEvent.CalendarId = ResolveEditorCalendarId();
         calendarEvent.IsAllDay = IsAllDay;
