@@ -46,7 +46,9 @@ internal static class EventListDialog
             e.Cancel = true;
             status.Text = "一括処理中は閉じられません。完了後に閉じてください。";
         };
-        var searchToolbar = CreateToolbar(request, eventItems, status, currentFilter, filter => currentFilter = filter, window);
+        var searchToolbarState = CreateToolbar(request, eventItems, status, currentFilter, filter => currentFilter = filter, window);
+        var searchToolbar = searchToolbarState.Element;
+        var invalidatePendingSearch = searchToolbarState.InvalidatePendingSearch;
         DockPanel.SetDock(searchToolbar, Dock.Top);
         panel.Children.Add(searchToolbar);
 
@@ -82,12 +84,13 @@ internal static class EventListDialog
                 return;
             }
 
+            invalidatePendingSearch();
             await request.EditEventAsync(calendarEvent);
             await ReloadAsync(request, eventItems, status, currentFilter);
         }, "予定編集");
 
         AddColumns(grid);
-        var bulkToolbar = CreateBulkToolbar(ui, request, grid, searchToolbar, eventItems, status, () => currentFilter, operationGate, window);
+        var bulkToolbar = CreateBulkToolbar(ui, request, grid, searchToolbar, eventItems, status, () => currentFilter, invalidatePendingSearch, operationGate, window);
         DockPanel.SetDock(bulkToolbar, Dock.Top);
         panel.Children.Add(bulkToolbar);
         panel.Children.Add(grid);
@@ -96,7 +99,7 @@ internal static class EventListDialog
         window.ShowDialog();
     }
 
-    private static FrameworkElement CreateToolbar(
+    private static SearchToolbarState CreateToolbar(
         EventListDialogRequest request,
         ObservableCollection<CalendarEvent> eventItems,
         TextBlock status,
@@ -189,7 +192,7 @@ internal static class EventListDialog
 
         root.Children.Add(firstRow);
         root.Children.Add(secondRow);
-        return root;
+        return new SearchToolbarState(root, () => Interlocked.Increment(ref searchGeneration));
     }
 
     private static EventListFilter CreateFilter(
@@ -239,6 +242,7 @@ internal static class EventListDialog
         ObservableCollection<CalendarEvent> eventItems,
         TextBlock status,
         Func<EventListFilter> getCurrentFilter,
+        Action invalidatePendingSearch,
         AsyncOperationGate operationGate,
         Window window)
     {
@@ -250,6 +254,7 @@ internal static class EventListDialog
         {
             var accepted = await operationGate.TryRunAsync(async () =>
             {
+                invalidatePendingSearch();
                 bulkEdit.IsEnabled = false;
                 bulkDelete.IsEnabled = false;
                 searchToolbar.IsEnabled = false;
@@ -409,6 +414,7 @@ internal static class EventListDialog
         new("全件", EventSearchRange.All)
     ];
 
+    private sealed record SearchToolbarState(FrameworkElement Element, Action InvalidatePendingSearch);
     private sealed record Option<T>(string Label, T Value);
 }
 
