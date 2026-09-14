@@ -155,6 +155,34 @@ public sealed class BulkEventOperationRegressionTests
     }
 
     [Fact]
+    public async Task BulkUpdateEventsDetailedAsync_RecurringMasterIsUnsupportedAndRemainsClean()
+    {
+        var (viewModel, repository) = await CreateViewModelAsync();
+        await repository.UpsertSyncedEventAsync(new CalendarEvent
+        {
+            Id = "direct-series-update",
+            CalendarId = "primary",
+            GoogleEventId = "google-direct-series-update",
+            Title = "Recurring master",
+            RecurrenceJson = "[\"RRULE:FREQ=DAILY;COUNT=2\"]",
+            Start = new DateTimeOffset(DateTime.Today.AddHours(8)),
+            End = new DateTimeOffset(DateTime.Today.AddHours(9))
+        });
+
+        var result = await viewModel.BulkUpdateEventsDetailedAsync(
+            ["direct-series-update"],
+            new BulkEventUpdateRequest(ColorId: "7", UpdateColor: true));
+
+        Assert.Equal(1, result.SelectedCount);
+        Assert.Equal(0, result.AffectedCount);
+        Assert.Equal(1, result.UnsupportedRecurrenceCount);
+        var master = await repository.FindMasterByIdAsync("direct-series-update");
+        Assert.NotNull(master);
+        Assert.Null(master!.ColorId);
+        Assert.False(master.IsDirty);
+    }
+
+    [Fact]
     public async Task BulkUpdateEventsDetailedAsync_ReportsTodoReminderSkipped()
     {
         var (viewModel, repository) = await CreateViewModelAsync();
@@ -252,6 +280,32 @@ public sealed class BulkEventOperationRegressionTests
         var master = await repository.FindMasterByIdAsync("delete-series");
         Assert.True(normal!.IsDeleted);
         Assert.True(normal.IsDirty);
+        Assert.False(master!.IsDeleted);
+        Assert.False(master.IsDirty);
+    }
+
+    [Fact]
+    public async Task BulkDeleteEventsDetailedAsync_RecurringMasterIsUnsupportedAndRemainsClean()
+    {
+        var (viewModel, repository) = await CreateViewModelAsync();
+        await repository.UpsertSyncedEventAsync(new CalendarEvent
+        {
+            Id = "direct-series-delete",
+            CalendarId = "primary",
+            GoogleEventId = "google-direct-series-delete",
+            Title = "Recurring master",
+            RecurrenceJson = "[\"RRULE:FREQ=DAILY;COUNT=2\"]",
+            Start = new DateTimeOffset(DateTime.Today.AddHours(8)),
+            End = new DateTimeOffset(DateTime.Today.AddHours(9))
+        });
+
+        var result = await viewModel.BulkDeleteEventsDetailedAsync(["direct-series-delete"]);
+
+        Assert.Equal(1, result.SelectedCount);
+        Assert.Equal(0, result.AffectedCount);
+        Assert.Equal(1, result.UnsupportedRecurrenceCount);
+        var master = await repository.FindMasterByIdAsync("direct-series-delete");
+        Assert.NotNull(master);
         Assert.False(master!.IsDeleted);
         Assert.False(master.IsDirty);
     }
