@@ -21,11 +21,11 @@ public sealed class BulkEventOperationRegressionTests
             End = new DateTimeOffset(DateTime.Today.AddHours(10))
         });
 
-        var result = await viewModel.BulkUpdateEventsAsync(
+        var affected = await viewModel.BulkUpdateEventsAsync(
             ["no-op"],
             new BulkEventUpdateRequest(ColorId: "5", UpdateColor: true));
 
-        Assert.Equal(0, result.AffectedCount);
+        Assert.Equal(0, affected);
         var stored = await repository.FindMasterByIdAsync("no-op");
         Assert.NotNull(stored);
         Assert.Equal("5", stored!.ColorId);
@@ -49,14 +49,14 @@ public sealed class BulkEventOperationRegressionTests
             IsAllDay = true
         });
 
-        var result = await viewModel.BulkUpdateEventsAsync(
+        var affected = await viewModel.BulkUpdateEventsAsync(
             ["todo-reminder"],
             new BulkEventUpdateRequest(
                 ReminderMinutesBeforeStart: 15,
                 AppReminderEnabled: true,
                 GoogleEmailReminderEnabled: true));
 
-        Assert.Equal(0, result.AffectedCount);
+        Assert.Equal(0, affected);
         var stored = await repository.FindMasterByIdAsync("todo-reminder");
         Assert.NotNull(stored);
         Assert.True(stored!.IsTodoLike);
@@ -70,7 +70,7 @@ public sealed class BulkEventOperationRegressionTests
     }
 
     [Fact]
-    public async Task BulkUpdateEventsAsync_MixedScheduleAndTodoAppliesReminderOnlyToSchedule()
+    public async Task BulkUpdateEventsAsync_MixedScheduleAndTodoReturnsChangedScheduleCount()
     {
         var (viewModel, repository) = await CreateViewModelAsync();
         await repository.UpsertSyncedEventAsync(new CalendarEvent
@@ -94,14 +94,14 @@ public sealed class BulkEventOperationRegressionTests
             IsAllDay = true
         });
 
-        var result = await viewModel.BulkUpdateEventsAsync(
+        var affected = await viewModel.BulkUpdateEventsAsync(
             ["schedule-reminder", "todo-reminder-mixed"],
             new BulkEventUpdateRequest(
                 ReminderMinutesBeforeStart: 30,
                 AppReminderEnabled: true,
                 GoogleEmailReminderEnabled: false));
 
-        Assert.Equal(1, result.AffectedCount);
+        Assert.Equal(1, affected);
         var schedule = await repository.FindMasterByIdAsync("schedule-reminder");
         var todo = await repository.FindMasterByIdAsync("todo-reminder-mixed");
         Assert.NotNull(schedule);
@@ -191,6 +191,29 @@ public sealed class BulkEventOperationRegressionTests
         Assert.Equal(1, result.TodoReminderSkippedCount);
         Assert.Equal(0, result.UnsupportedRecurrenceCount);
         Assert.Equal(0, result.MissingCount);
+    }
+
+    [Fact]
+    public async Task BulkDeleteEventsAsync_ReturnsAffectedCount()
+    {
+        var (viewModel, repository) = await CreateViewModelAsync();
+        await repository.UpsertSyncedEventAsync(new CalendarEvent
+        {
+            Id = "delete-count",
+            CalendarId = "primary",
+            GoogleEventId = "google-delete-count",
+            Title = "Delete count",
+            Start = new DateTimeOffset(DateTime.Today.AddHours(14)),
+            End = new DateTimeOffset(DateTime.Today.AddHours(15))
+        });
+
+        var affected = await viewModel.BulkDeleteEventsAsync(["delete-count"]);
+
+        Assert.Equal(1, affected);
+        var stored = await repository.FindMasterByIdAsync("delete-count");
+        Assert.NotNull(stored);
+        Assert.True(stored!.IsDeleted);
+        Assert.True(stored.IsDirty);
     }
 
     [Fact]
