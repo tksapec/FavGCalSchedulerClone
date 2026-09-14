@@ -14,67 +14,78 @@ public sealed partial class MainViewModel
         IReadOnlyCollection<string> localIds,
         BulkEventUpdateRequest request)
     {
-        var targets = await LoadBulkOperationTargetsAsync(localIds);
-        if (!request.HasUpdates)
+        var outcome = await RunExclusiveSyncDataOperationAsync(async () =>
         {
-            return CreateBulkOperationResult(targets, affectedCount: 0, unchangedCount: targets.Events.Count);
-        }
-
-        var undoSnapshots = new List<CalendarEvent>();
-        var writes = new List<CalendarEvent>();
-        var updated = 0;
-        var unchanged = 0;
-        var todoReminderSkipped = 0;
-        foreach (var calendarEvent in targets.Events)
-        {
-            var original = UndoService.Clone(calendarEvent);
-            if (request.UpdatesCalendar && !string.IsNullOrWhiteSpace(request.CalendarId))
+            var targets = await LoadBulkOperationTargetsAsync(localIds);
+            if (!request.HasUpdates)
             {
-                calendarEvent.CalendarId = request.CalendarId;
+                return (Result: CreateBulkOperationResult(targets, affectedCount: 0, unchangedCount: targets.Events.Count), Persisted: false);
             }
 
-            if (request.UpdatesColor)
+            var undoSnapshots = new List<CalendarEvent>();
+            var writes = new List<CalendarEvent>();
+            var updated = 0;
+            var unchanged = 0;
+            var todoReminderSkipped = 0;
+            foreach (var calendarEvent in targets.Events)
             {
-                calendarEvent.ColorId = request.ColorId;
-            }
-
-            if (request.UpdatesReminder)
-            {
-                if (calendarEvent.IsTodoLike)
+                var original = UndoService.Clone(calendarEvent);
+                if (request.UpdatesCalendar && !string.IsNullOrWhiteSpace(request.CalendarId))
                 {
-                    todoReminderSkipped++;
+                    calendarEvent.CalendarId = request.CalendarId;
                 }
-                else
+
+                if (request.UpdatesColor)
                 {
-                    ApplyBulkReminderUpdate(calendarEvent, request);
+                    calendarEvent.ColorId = request.ColorId;
                 }
+
+                if (request.UpdatesReminder)
+                {
+                    if (calendarEvent.IsTodoLike)
+                    {
+                        todoReminderSkipped++;
+                    }
+                    else
+                    {
+                        ApplyBulkReminderUpdate(calendarEvent, request);
+                    }
+                }
+
+                if (!HasBulkEditableChanges(original, calendarEvent))
+                {
+                    unchanged++;
+                    continue;
+                }
+
+                undoSnapshots.Add(original);
+                calendarEvent.IsDirty = true;
+                NormalizeTimedEventTimeZoneOffsets(calendarEvent);
+                writes.AddRange(PrepareCalendarMoveWrites(calendarEvent, original));
+                updated++;
             }
 
-            if (!HasBulkEditableChanges(original, calendarEvent))
+            var result = CreateBulkOperationResult(targets, updated, todoReminderSkipped, unchanged);
+            if (writes.Count == 0)
             {
-                unchanged++;
-                continue;
+                return (Result: result, Persisted: false);
             }
 
-            undoSnapshots.Add(original);
-            calendarEvent.IsDirty = true;
-            NormalizeTimedEventTimeZoneOffsets(calendarEvent);
-            writes.AddRange(PrepareCalendarMoveWrites(calendarEvent, original));
-            updated++;
-        }
+            await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes);
+            CaptureUndo("一括編集", undoSnapshots);
+            return (Result: result, Persisted: true);
+        });
 
-        if (writes.Count == 0)
+        if (!outcome.Persisted)
         {
             Status = "一括編集: 変更なし";
-            return CreateBulkOperationResult(targets, updated, todoReminderSkipped, unchanged);
+            return outcome.Result;
         }
 
-        await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes);
-        CaptureUndo("一括編集", undoSnapshots);
         await RefreshCalendarAsync();
-        Status = $"一括編集しました: {updated} 件";
+        Status = $"一括編集しました: {outcome.Result.AffectedCount} 件";
         await SyncAfterLocalChangeAsync();
-        return CreateBulkOperationResult(targets, updated, todoReminderSkipped, unchanged);
+        return outcome.Result;
     }
 
     public Task<BulkEventOperationResult> BulkDeleteEventsAsync(IReadOnlyCollection<string> localIds)
@@ -82,38 +93,48 @@ public sealed partial class MainViewModel
 
     public async Task<BulkEventOperationResult> BulkDeleteEventsDetailedAsync(IReadOnlyCollection<string> localIds)
     {
-        var targets = await LoadBulkOperationTargetsAsync(localIds);
-        var undoSnapshots = new List<CalendarEvent>();
-        var writes = new List<CalendarEvent>();
-        var unchanged = 0;
-        foreach (var calendarEvent in targets.Events)
+        var outcome = await RunExclusiveSyncDataOperationAsync(async () =>
         {
-            if (calendarEvent.IsDeleted)
+            var targets = await LoadBulkOperationTargetsAsync(localIds);
+            var undoSnapshots = new List<CalendarEvent>();
+            var writes = new List<CalendarEvent>();
+            var unchanged = 0;
+            foreach (var calendarEvent in targets.Events)
             {
-                unchanged++;
-                continue;
+                if (calendarEvent.IsDeleted)
+                {
+                    unchanged++;
+                    continue;
+                }
+
+                undoSnapshots.Add(UndoService.Clone(calendarEvent));
+                calendarEvent.IsDeleted = true;
+                calendarEvent.IsDirty = true;
+                writes.Add(calendarEvent);
             }
 
-            undoSnapshots.Add(UndoService.Clone(calendarEvent));
-            calendarEvent.IsDeleted = true;
-            calendarEvent.IsDirty = true;
-            writes.Add(calendarEvent);
-        }
+            var result = CreateBulkOperationResult(targets, writes.Count, unchangedCount: unchanged);
+            if (writes.Count == 0)
+            {
+                return (Result: result, Persisted: false);
+            }
 
-        if (writes.Count == 0)
+            await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes);
+            CaptureUndo("一括削除", undoSnapshots);
+            return (Result: result, Persisted: true);
+        });
+
+        if (!outcome.Persisted)
         {
             Status = "一括削除: 対象なし";
-            return CreateBulkOperationResult(targets, affectedCount: 0, unchangedCount: unchanged);
+            return outcome.Result;
         }
 
-        await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes);
-        CaptureUndo("一括削除", undoSnapshots);
-        var deleted = writes.Count;
         SelectedEvent = null;
         await RefreshCalendarAsync();
-        Status = $"一括削除しました: {deleted} 件";
+        Status = $"一括削除しました: {outcome.Result.AffectedCount} 件";
         await SyncAfterLocalChangeAsync();
-        return CreateBulkOperationResult(targets, deleted, unchangedCount: unchanged);
+        return outcome.Result;
     }
 
     public async Task<bool> UndoLastChangeAsync()
