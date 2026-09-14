@@ -26,6 +26,7 @@ internal static class EventListDialog
     {
         var currentFilter = request.Filter;
         var eventItems = new ObservableCollection<CalendarEvent>(request.Events);
+        var operationGate = new AsyncOperationGate();
         var window = ui.CreateOwnedDialog(request.Title, 1180, 680);
         window.MinWidth = 900;
         window.MinHeight = 520;
@@ -76,7 +77,7 @@ internal static class EventListDialog
         }, "予定編集");
 
         AddColumns(grid);
-        var bulkToolbar = CreateBulkToolbar(ui, request, grid, eventItems, status, () => currentFilter, window);
+        var bulkToolbar = CreateBulkToolbar(ui, request, grid, eventItems, status, () => currentFilter, operationGate, window);
         DockPanel.SetDock(bulkToolbar, Dock.Top);
         panel.Children.Add(bulkToolbar);
         panel.Children.Add(grid);
@@ -206,11 +207,34 @@ internal static class EventListDialog
         ObservableCollection<CalendarEvent> eventItems,
         TextBlock status,
         Func<EventListFilter> getCurrentFilter,
+        AsyncOperationGate operationGate,
         Window window)
     {
         var panel = new WrapPanel { Margin = new Thickness(0, 0, 0, 6) };
         var bulkEdit = new Button { Content = "一括編集", MinWidth = 88, Height = 26, IsEnabled = request.BulkEditAsync is not null, Margin = new Thickness(0, 0, 8, 0) };
         var bulkDelete = new Button { Content = "一括削除", MinWidth = 88, Height = 26, IsEnabled = request.BulkDeleteAsync is not null };
+
+        async Task RunBulkOperationAsync(Func<Task> operation)
+        {
+            var accepted = await operationGate.TryRunAsync(async () =>
+            {
+                bulkEdit.IsEnabled = false;
+                bulkDelete.IsEnabled = false;
+                try
+                {
+                    await operation();
+                }
+                finally
+                {
+                    bulkEdit.IsEnabled = request.BulkEditAsync is not null;
+                    bulkDelete.IsEnabled = request.BulkDeleteAsync is not null;
+                }
+            });
+            if (!accepted)
+            {
+                status.Text = "一括処理を実行中です。完了後に再実行してください。";
+            }
+        }
 
         bulkEdit.Click += (_, _) => DialogAsyncGuard.Run(window, async () =>
         {
@@ -227,9 +251,12 @@ internal static class EventListDialog
                 return;
             }
 
-            var updated = await request.BulkEditAsync(ids, update);
-            await ReloadAsync(request, eventItems, status, getCurrentFilter());
-            status.Text = $"一括編集しました: {updated}件";
+            await RunBulkOperationAsync(async () =>
+            {
+                var result = await request.BulkEditAsync(ids, update);
+                await ReloadAsync(request, eventItems, status, getCurrentFilter());
+                status.Text = result.FormatStatus("一括編集", "変更");
+            });
         }, "一括編集");
 
         bulkDelete.Click += (_, _) => DialogAsyncGuard.Run(window, async () =>
@@ -246,9 +273,12 @@ internal static class EventListDialog
                 return;
             }
 
-            var deleted = await request.BulkDeleteAsync(ids);
-            await ReloadAsync(request, eventItems, status, getCurrentFilter());
-            status.Text = $"一括削除しました: {deleted}件";
+            await RunBulkOperationAsync(async () =>
+            {
+                var result = await request.BulkDeleteAsync(ids);
+                await ReloadAsync(request, eventItems, status, getCurrentFilter());
+                status.Text = result.FormatStatus("一括削除", "削除");
+            });
         }, "一括削除");
 
         panel.Children.Add(bulkEdit);
@@ -353,5 +383,5 @@ internal sealed record EventListDialogRequest(
     IReadOnlyList<string> CalendarIds,
     Func<EventListFilter, Task<IReadOnlyList<CalendarEvent>>> ReloadEventsAsync,
     Func<CalendarEvent, Task> EditEventAsync,
-    Func<IReadOnlyList<string>, BulkEventUpdateRequest, Task<int>>? BulkEditAsync = null,
-    Func<IReadOnlyList<string>, Task<int>>? BulkDeleteAsync = null);
+    Func<IReadOnlyList<string>, BulkEventUpdateRequest, Task<BulkEventOperationResult>>? BulkEditAsync = null,
+    Func<IReadOnlyList<string>, Task<BulkEventOperationResult>>? BulkDeleteAsync = null);
