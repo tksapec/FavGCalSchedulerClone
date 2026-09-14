@@ -1424,8 +1424,8 @@ public partial class MainWindow : Window
             _viewModel.CalendarNames.ToArray(),
             LoadEventsAsync,
             OpenGridEventEditorAsync,
-            async (ids, request) => await _viewModel.BulkUpdateEventsAsync(ids, request),
-            async ids => await _viewModel.BulkDeleteEventsAsync(ids)));
+            async (ids, request) => await _viewModel.BulkUpdateEventsDetailedAsync(ids, request),
+            async ids => await _viewModel.BulkDeleteEventsDetailedAsync(ids)));
     }
 
     private async Task ShowReminderHistoryDialogAsync()
