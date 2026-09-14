@@ -115,6 +115,7 @@ internal static class EventListDialog
         var kind = new ComboBox { ItemsSource = SearchKindOptions, SelectedValuePath = "Value", DisplayMemberPath = "Label", SelectedValue = initialFilter.KindFilter, Width = 100, Margin = new Thickness(0, 0, 8, 0) };
         var query = new TextBox { Text = initialFilter.Query, MinWidth = 240, Margin = new Thickness(0, 0, 8, 0) };
         var search = new Button { Content = "検索", MinWidth = 72 };
+        var searchGeneration = 0L;
 
         var calendarOptions = request.CalendarIds
             .Where(id => !string.IsNullOrWhiteSpace(id))
@@ -142,11 +143,31 @@ internal static class EventListDialog
 
         void SearchClick(object? sender, RoutedEventArgs e)
         {
+            var nextFilter = CreateFilter(query, kind, range, startDate, endDate, calendar, initialFilter.ReferenceDate);
+            var generation = Interlocked.Increment(ref searchGeneration);
             DialogAsyncGuard.Run(window, async () =>
             {
-                var nextFilter = CreateFilter(query, kind, range, startDate, endDate, calendar, initialFilter.ReferenceDate);
-                updateCurrentFilter(nextFilter);
-                await ReloadAsync(request, eventItems, status, nextFilter);
+                try
+                {
+                    var refreshed = await request.ReloadEventsAsync(nextFilter);
+                    if (generation != Volatile.Read(ref searchGeneration))
+                    {
+                        return;
+                    }
+
+                    eventItems.Clear();
+                    foreach (var refreshedEvent in refreshed)
+                    {
+                        eventItems.Add(refreshedEvent);
+                    }
+
+                    updateCurrentFilter(nextFilter);
+                    UpdateStatus(status, eventItems, nextFilter);
+                }
+                catch when (generation != Volatile.Read(ref searchGeneration))
+                {
+                    // A superseded request must not replace a newer result or surface a stale error.
+                }
             }, "検索");
         }
 
