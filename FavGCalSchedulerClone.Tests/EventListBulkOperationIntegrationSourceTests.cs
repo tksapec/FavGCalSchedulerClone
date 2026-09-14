@@ -26,12 +26,31 @@ public sealed class EventListBulkOperationIntegrationSourceTests
     }
 
     [Fact]
-    public void MainViewModel_BulkApisReturnDetailedOperationResult()
+    public void MainViewModel_PreservesCountReturningBulkApisAndExposesDetailedApis()
     {
         var source = ReadSource("FavGCalSchedulerClone.App", "ViewModels", "MainViewModel.BulkUndo.cs");
 
-        Assert.Contains("Task<BulkEventOperationResult> BulkUpdateEventsAsync", source, StringComparison.Ordinal);
-        Assert.Contains("Task<BulkEventOperationResult> BulkDeleteEventsAsync", source, StringComparison.Ordinal);
+        Assert.Contains("Task<int> BulkUpdateEventsAsync", source, StringComparison.Ordinal);
+        Assert.Contains("Task<int> BulkDeleteEventsAsync", source, StringComparison.Ordinal);
+        Assert.Contains("Task<BulkEventOperationResult> BulkUpdateEventsDetailedAsync", source, StringComparison.Ordinal);
+        Assert.Contains("Task<BulkEventOperationResult> BulkDeleteEventsDetailedAsync", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MainWindow_UsesDetailedBulkApisForEventListStatus()
+    {
+        var source = ReadSource("FavGCalSchedulerClone.App", "MainWindow.xaml.cs");
+
+        Assert.Contains("BulkUpdateEventsDetailedAsync", source, StringComparison.Ordinal);
+        Assert.Contains("BulkDeleteEventsDetailedAsync", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BulkEventOperationResult_DoesNotUseImplicitCountCompatibilityConversion()
+    {
+        var source = ReadSource("FavGCalSchedulerClone.App", "Models", "BulkEventOperationResult.cs");
+
+        Assert.DoesNotContain("implicit operator BulkEventOperationResult", source, StringComparison.Ordinal);
     }
 
     [Fact]
