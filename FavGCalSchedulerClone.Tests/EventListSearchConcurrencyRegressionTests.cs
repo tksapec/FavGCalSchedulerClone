@@ -35,6 +35,40 @@ public sealed class EventListSearchConcurrencyRegressionTests
             "Both row editing and bulk mutations must invalidate an older in-flight search before they can reload the list.");
     }
 
+    [Fact]
+    public async Task BulkEditAndDelete_InvalidatePendingSearchBeforeOpeningConfirmationUi()
+    {
+        var source = await File.ReadAllTextAsync(SourcePath());
+        var bulkEditStart = source.IndexOf("bulkEdit.Click +=", StringComparison.Ordinal);
+        var bulkDeleteStart = source.IndexOf("bulkDelete.Click +=", StringComparison.Ordinal);
+        Assert.True(bulkEditStart >= 0 && bulkDeleteStart > bulkEditStart);
+
+        var bulkEditHandler = source[bulkEditStart..bulkDeleteStart];
+        var editInvalidate = bulkEditHandler.IndexOf("invalidatePendingSearch();", StringComparison.Ordinal);
+        var editDialog = bulkEditHandler.IndexOf("BulkEventUpdateDialog.Show", StringComparison.Ordinal);
+        Assert.True(editInvalidate >= 0 && editDialog > editInvalidate,
+            "An in-flight search must be invalidated before the bulk-edit modal opens, otherwise it can replace the visible selection while the modal is open.");
+
+        var bulkDeleteHandler = source[bulkDeleteStart..];
+        var deleteInvalidate = bulkDeleteHandler.IndexOf("invalidatePendingSearch();", StringComparison.Ordinal);
+        var deletePrompt = bulkDeleteHandler.IndexOf("MessageBox.Show", StringComparison.Ordinal);
+        Assert.True(deleteInvalidate >= 0 && deletePrompt > deleteInvalidate,
+            "An in-flight search must be invalidated before the bulk-delete confirmation opens, otherwise the captured IDs can diverge from the visible selection.");
+    }
+
+    [Fact]
+    public async Task CustomSearchRange_NormalizesReversedDatesBeforeBuildingFilter()
+    {
+        var source = await File.ReadAllTextAsync(SourcePath());
+        var createFilterStart = source.IndexOf("private static EventListFilter CreateFilter", StringComparison.Ordinal);
+        var addColumnsStart = source.IndexOf("private static void AddColumns", createFilterStart, StringComparison.Ordinal);
+        Assert.True(createFilterStart >= 0 && addColumnsStart > createFilterStart);
+        var createFilter = source[createFilterStart..addColumnsStart];
+
+        Assert.Contains("if (selectedEnd < selectedStart)", createFilter, StringComparison.Ordinal);
+        Assert.Contains("(selectedStart, selectedEnd) = (selectedEnd, selectedStart);", createFilter, StringComparison.Ordinal);
+    }
+
     private static int CountOccurrences(string source, string value)
     {
         var count = 0;
