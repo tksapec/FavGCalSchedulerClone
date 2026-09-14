@@ -32,7 +32,8 @@ public sealed class NoOpEditRegressionTests
                 IsDirty = false
             };
             await repository.UpsertSyncedEventAsync(original);
-            var before = Assert.NotNull(await repository.FindMasterByIdAsync(original.Id));
+            var before = await repository.FindMasterByIdAsync(original.Id);
+            Assert.NotNull(before);
 
             var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
             await viewModel.InitializeAsync();
@@ -40,7 +41,8 @@ public sealed class NoOpEditRegressionTests
 
             await viewModel.SaveCurrentEventAsync();
 
-            var after = Assert.NotNull(await repository.FindMasterByIdAsync(original.Id));
+            var after = await repository.FindMasterByIdAsync(original.Id);
+            Assert.NotNull(after);
             Assert.False(after.IsDirty);
             Assert.Equal(before.UpdatedAt, after.UpdatedAt);
             Assert.Equal(before.LastSyncedGoogleEtag, after.LastSyncedGoogleEtag);
@@ -78,7 +80,8 @@ public sealed class NoOpEditRegressionTests
             };
             TodoReminderPolicy.NormalizeLocalFields(original);
             await repository.UpsertSyncedEventAsync(original);
-            var before = Assert.NotNull(await repository.FindMasterByIdAsync(original.Id));
+            var before = await repository.FindMasterByIdAsync(original.Id);
+            Assert.NotNull(before);
 
             var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
             await viewModel.InitializeAsync();
@@ -87,7 +90,8 @@ public sealed class NoOpEditRegressionTests
 
             await viewModel.SaveTodoAsync(before, dueDate, "A", 20, before.Title, "body");
 
-            var after = Assert.NotNull(await repository.FindMasterByIdAsync(original.Id));
+            var after = await repository.FindMasterByIdAsync(original.Id);
+            Assert.NotNull(after);
             Assert.False(after.IsDirty);
             Assert.Equal(before.UpdatedAt, after.UpdatedAt);
             Assert.Equal(before.LastSyncedGoogleEtag, after.LastSyncedGoogleEtag);
