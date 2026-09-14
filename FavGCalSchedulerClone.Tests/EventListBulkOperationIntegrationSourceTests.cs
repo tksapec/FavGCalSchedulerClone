@@ -23,6 +23,30 @@ public sealed class EventListBulkOperationIntegrationSourceTests
         Assert.Contains("Task<BulkEventOperationResult> BulkDeleteEventsAsync", source, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void MainViewModel_BulkMutationsShareTheSyncDataOperationGate()
+    {
+        var source = ReadSource("FavGCalSchedulerClone.App", "ViewModels", "MainViewModel.BulkUndo.cs");
+        const string guardedMutation = "RunExclusiveSyncDataOperationAsync(async () =>";
+
+        Assert.True(
+            CountOccurrences(source, guardedMutation) >= 2,
+            "Bulk update and bulk delete must both serialize their read/write mutation phase with sync data operations.");
+    }
+
+    private static int CountOccurrences(string source, string value)
+    {
+        var count = 0;
+        var index = 0;
+        while ((index = source.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += value.Length;
+        }
+
+        return count;
+    }
+
     private static string ReadSource(params string[] relativePathParts)
         => File.ReadAllText(Path.Combine([GetRepositoryRoot(), .. relativePathParts]));
 
