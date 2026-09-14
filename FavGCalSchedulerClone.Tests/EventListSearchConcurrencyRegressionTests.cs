@@ -25,6 +25,29 @@ public sealed class EventListSearchConcurrencyRegressionTests
         Assert.Contains("catch when (generation != Volatile.Read(ref searchGeneration))", source, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task EventListMutations_InvalidatePendingSearchBeforeChangingTheList()
+    {
+        var source = await File.ReadAllTextAsync(SourcePath());
+
+        Assert.Contains("Action invalidatePendingSearch", source, StringComparison.Ordinal);
+        Assert.True(CountOccurrences(source, "invalidatePendingSearch();") >= 2,
+            "Both row editing and bulk mutations must invalidate an older in-flight search before they can reload the list.");
+    }
+
+    private static int CountOccurrences(string source, string value)
+    {
+        var count = 0;
+        var index = 0;
+        while ((index = source.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += value.Length;
+        }
+
+        return count;
+    }
+
     private static string SourcePath() => Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory,
         "..", "..", "..", "..",
