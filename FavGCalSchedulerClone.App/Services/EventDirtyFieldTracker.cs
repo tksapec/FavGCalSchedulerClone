@@ -19,27 +19,18 @@ internal static class EventDirtyFieldTracker
         }
         else
         {
-            AddIfChanged(fields, "Deleted", existing.IsDeleted, current.IsDeleted);
-            AddIfChanged(fields, "Title", existing.Title, current.Title);
-            AddIfChanged(fields, "Description", Normalize(existing.Description), Normalize(current.Description));
-            AddIfChanged(fields, "Location", Normalize(existing.Location), Normalize(current.Location));
-            var startEndChanged = existing.IsAllDay || current.IsAllDay
-                ? existing.Start.Date != current.Start.Date || existing.End.Date != current.End.Date
-                : existing.Start.UtcTicks != current.Start.UtcTicks || existing.End.UtcTicks != current.End.UtcTicks;
-            if (startEndChanged) fields.Add("StartEnd");
-            AddIfChanged(fields, "AllDay", existing.IsAllDay, current.IsAllDay);
-            AddIfChanged(fields, "Reminder", existing.ReminderMinutesBeforeStart, current.ReminderMinutesBeforeStart);
-            AddIfChanged(fields, "Reminder", string.Join("|", existing.EffectiveAppReminderMinutesBeforeStart), string.Join("|", current.EffectiveAppReminderMinutesBeforeStart));
-            AddIfChanged(fields, "Reminder", string.Join("|", existing.EffectiveGoogleEmailReminderMinutesBeforeStart), string.Join("|", current.EffectiveGoogleEmailReminderMinutesBeforeStart));
-            AddIfChanged(fields, "Reminder", existing.IsAppReminderEnabled, current.IsAppReminderEnabled);
-            AddIfChanged(fields, "Reminder", existing.IsGoogleEmailReminderEnabled, current.IsGoogleEmailReminderEnabled);
-            AddIfChanged(fields, "Color", Normalize(existing.ColorId), Normalize(current.ColorId));
-            AddIfChanged(fields, "Calendar", existing.CalendarId, current.CalendarId);
-            AddIfChanged(fields, "Recurrence", Normalize(existing.RecurrenceJson), Normalize(current.RecurrenceJson));
+            AddChangedFields(fields, existing, current);
         }
 
         if (current.IsDirty && fields.Count == 0) fields.Add("Unknown");
         return string.Join(",", FieldOrder.Where(fields.Contains));
+    }
+
+    internal static bool HasChanges(CalendarEvent existing, CalendarEvent current)
+    {
+        var fields = new HashSet<string>(StringComparer.Ordinal);
+        AddChangedFields(fields, existing, current);
+        return fields.Count > 0;
     }
 
     public static string ToDisplayText(string? fields)
@@ -58,6 +49,27 @@ internal static class EventDirtyFieldTracker
         string.Join(",", Parse(fields).Concat(additionalFields).Distinct(StringComparer.Ordinal)
             .OrderBy(field => Array.IndexOf(FieldOrder, field) is var index && index >= 0 ? index : int.MaxValue));
 
+    private static void AddChangedFields(ISet<string> fields, CalendarEvent existing, CalendarEvent current)
+    {
+        AddIfChanged(fields, "Deleted", existing.IsDeleted, current.IsDeleted);
+        AddIfChanged(fields, "Title", existing.Title, current.Title);
+        AddIfChanged(fields, "Description", NormalizeDescription(existing.Description), NormalizeDescription(current.Description));
+        AddIfChanged(fields, "Location", Normalize(existing.Location), Normalize(current.Location));
+        var startEndChanged = existing.IsAllDay || current.IsAllDay
+            ? existing.Start.Date != current.Start.Date || existing.End.Date != current.End.Date
+            : existing.Start.UtcTicks != current.Start.UtcTicks || existing.End.UtcTicks != current.End.UtcTicks;
+        if (startEndChanged) fields.Add("StartEnd");
+        AddIfChanged(fields, "AllDay", existing.IsAllDay, current.IsAllDay);
+        AddIfChanged(fields, "Reminder", existing.ReminderMinutesBeforeStart, current.ReminderMinutesBeforeStart);
+        AddIfChanged(fields, "Reminder", string.Join("|", existing.EffectiveAppReminderMinutesBeforeStart), string.Join("|", current.EffectiveAppReminderMinutesBeforeStart));
+        AddIfChanged(fields, "Reminder", string.Join("|", existing.EffectiveGoogleEmailReminderMinutesBeforeStart), string.Join("|", current.EffectiveGoogleEmailReminderMinutesBeforeStart));
+        AddIfChanged(fields, "Reminder", existing.IsAppReminderEnabled, current.IsAppReminderEnabled);
+        AddIfChanged(fields, "Reminder", existing.IsGoogleEmailReminderEnabled, current.IsGoogleEmailReminderEnabled);
+        AddIfChanged(fields, "Color", Normalize(existing.ColorId), Normalize(current.ColorId));
+        AddIfChanged(fields, "Calendar", existing.CalendarId, current.CalendarId);
+        AddIfChanged(fields, "Recurrence", Normalize(existing.RecurrenceJson), Normalize(current.RecurrenceJson));
+    }
+
     private static HashSet<string> Parse(string? value) => string.IsNullOrWhiteSpace(value)
         ? new HashSet<string>(StringComparer.Ordinal)
         : value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.Ordinal);
@@ -66,6 +78,8 @@ internal static class EventDirtyFieldTracker
     {
         if (!EqualityComparer<T>.Default.Equals(before, after)) fields.Add(field);
     }
+
+    private static string? NormalizeDescription(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
 
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
