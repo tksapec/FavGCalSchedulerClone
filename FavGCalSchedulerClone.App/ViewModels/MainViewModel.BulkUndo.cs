@@ -269,7 +269,14 @@ public sealed partial class MainViewModel
         {
             if (await _repository.FindMasterByIdAsync(id) is { } calendarEvent)
             {
-                events.Add(calendarEvent);
+                if (calendarEvent.IsRecurringMaster)
+                {
+                    unsupportedRecurrenceCount++;
+                }
+                else
+                {
+                    events.Add(calendarEvent);
+                }
                 continue;
             }
 
