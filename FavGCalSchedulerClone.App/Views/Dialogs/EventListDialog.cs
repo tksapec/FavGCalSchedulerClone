@@ -206,6 +206,13 @@ internal static class EventListDialog
     {
         var selectedStart = startDate.SelectedDate ?? fallbackReferenceDate;
         var selectedEnd = endDate.SelectedDate ?? selectedStart;
+        if (selectedEnd < selectedStart)
+        {
+            (selectedStart, selectedEnd) = (selectedEnd, selectedStart);
+            startDate.SelectedDate = selectedStart;
+            endDate.SelectedDate = selectedEnd;
+        }
+
         var selectedRange = range.SelectedValue is EventSearchRange rangeValue ? rangeValue : EventSearchRange.Custom;
         if (selectedRange != EventSearchRange.All)
         {
@@ -286,6 +293,7 @@ internal static class EventListDialog
                 return;
             }
 
+            invalidatePendingSearch();
             var update = BulkEventUpdateDialog.Show(ui, request.CalendarIds);
             if (update is null)
             {
@@ -309,6 +317,7 @@ internal static class EventListDialog
                 return;
             }
 
+            invalidatePendingSearch();
             if (MessageBox.Show("選択した予定/ToDoを削除しますか。", "一括削除", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             {
                 return;
