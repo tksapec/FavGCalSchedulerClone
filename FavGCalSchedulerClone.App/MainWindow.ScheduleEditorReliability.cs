@@ -138,7 +138,7 @@ public partial class MainWindow
                 editingEvent.ReminderMinutesBeforeStart,
                 editingEvent.IsAppReminderEnabled,
                 editingEvent.IsGoogleEmailReminderEnabled,
-                editingEvent.Location,
+                editingEvent.Location ?? string.Empty,
                 scheduleCalendarId,
                 editingEvent.ColorId,
                 editingEvent.Title,
