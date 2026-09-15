@@ -14,7 +14,7 @@ public sealed partial class MainViewModel
 
     private async Task SaveEventWithRecurrenceAsync(RecurrenceEditScope? recurrenceScope)
     {
-        var candidate = BuildEditedEventAsync();
+        var candidate = BuildEditedEventAsync(recurrenceScope == RecurrenceEditScope.ThisAndFollowing);
         if (candidate is null)
         {
             return;
