@@ -1275,7 +1275,10 @@ public sealed class GoogleCalendarSyncService
                         || currentLocal.UpdatedAt.UtcTicks != localEvent.UpdatedAt.UtcTicks)
                     {
                         skipped++;
-                        conflicts++;
+                        if (executableItem.IsConflict)
+                        {
+                            conflicts++;
+                        }
                         break;
                     }
                     if (localEvent.IsTodoLike)
