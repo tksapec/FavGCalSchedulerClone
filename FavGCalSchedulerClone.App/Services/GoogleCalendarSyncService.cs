@@ -1256,13 +1256,13 @@ public sealed class GoogleCalendarSyncService
                         else
                         {
                             skipped++;
-                            var currentLocal = string.IsNullOrWhiteSpace(remoteEvent.Id)
+                            var currentPulledLocal = string.IsNullOrWhiteSpace(remoteEvent.Id)
                                 ? null
                                 : await _repository.FindEventByGoogleEventIdAsync(calendarId, remoteEvent.Id);
-                            var remoteChangedSinceLastSync = currentLocal is null
-                                || string.IsNullOrWhiteSpace(currentLocal.LastSyncedGoogleEtag)
+                            var remoteChangedSinceLastSync = currentPulledLocal is null
+                                || string.IsNullOrWhiteSpace(currentPulledLocal.LastSyncedGoogleEtag)
                                 || string.IsNullOrWhiteSpace(remoteEvent.ETag)
-                                || !string.Equals(currentLocal.LastSyncedGoogleEtag, remoteEvent.ETag, StringComparison.Ordinal);
+                                || !string.Equals(currentPulledLocal.LastSyncedGoogleEtag, remoteEvent.ETag, StringComparison.Ordinal);
                             if (executableItem.IsConflict || remoteChangedSinceLastSync)
                             {
                                 conflicts++;
