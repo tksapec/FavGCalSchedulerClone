@@ -163,6 +163,77 @@ public sealed class SyncPullEditRaceRegressionTests
         }
     }
 
+    [Fact]
+    public async Task SyncAsync_LocalEditAfterUnchangedPullSnapshot_IsSkippedWithoutFalseConflict()
+    {
+        var repository = await CreateRepositoryAsync();
+        var local = new CalendarEvent
+        {
+            Id = "unchanged-pull-race",
+            CalendarId = "primary",
+            GoogleEventId = "remote-unchanged-pull-race",
+            LastSyncedGoogleEtag = "etag-1",
+            Title = "Original",
+            Start = new DateTimeOffset(2026, 9, 10, 9, 0, 0, TimeSpan.FromHours(9)),
+            End = new DateTimeOffset(2026, 9, 10, 10, 0, 0, TimeSpan.FromHours(9)),
+            IsDirty = false
+        };
+        await repository.UpsertSyncedEventAsync(local);
+
+        var listStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var continueList = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var api = new PausingGoogleCalendarApi(
+            new Event
+            {
+                Id = local.GoogleEventId,
+                ETag = "etag-1",
+                Summary = local.Title,
+                Status = "confirmed",
+                Start = new EventDateTime { DateTimeDateTimeOffset = local.Start },
+                End = new EventDateTime { DateTimeDateTimeOffset = local.End }
+            },
+            listStarted,
+            continueList);
+        var oauthPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(oauthPath, "{}");
+        var settings = new AppSettings
+        {
+            OAuthClientJsonPath = oauthPath,
+            ActiveCalendarId = "primary",
+            VisibleCalendarIds = ["primary"],
+            SyncConflictPolicy = SyncConflictPolicy.SkipLocalDirty
+        };
+
+        try
+        {
+            var service = new GoogleCalendarSyncService(repository, api);
+            var syncTask = service.SyncAsync(settings);
+            await listStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            var edited = (await repository.FindEventByIdAsync(local.Id))!;
+            edited.Title = "Local edit while unchanged pull is pending";
+            edited.IsDirty = true;
+            await repository.SaveEventAsync(edited);
+
+            continueList.TrySetResult();
+            var result = await syncTask;
+
+            var stored = (await repository.FindEventByIdAsync(local.Id))!;
+            Assert.Equal("Local edit while unchanged pull is pending", stored.Title);
+            Assert.True(stored.IsDirty);
+            Assert.Equal("etag-1", stored.LastSyncedGoogleEtag);
+            Assert.Equal(0, result.Pulled);
+            Assert.Equal(1, result.Skipped);
+            Assert.Equal(0, result.Conflicts);
+            Assert.Null(await repository.GetSyncTokenAsync("primary"));
+        }
+        finally
+        {
+            continueList.TrySetResult();
+            File.Delete(oauthPath);
+        }
+    }
+
     private static async Task<CalendarRepository> CreateRepositoryAsync()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
