@@ -65,8 +65,8 @@ public sealed class RecurrenceScopeTimeZoneRegressionTests
         Assert.False(stored.IsDirty);
         Assert.Equal(originalUpdatedAt, stored.UpdatedAt);
         Assert.Equal(master.RecurrenceJson, stored.RecurrenceJson);
-        var events = await repository.LoadSeriesEventsAsync(master.Id, master.GoogleEventId);
-        Assert.Single(events, item => item.IsRecurringMaster && !item.IsDeleted);
+        var seriesChildren = await repository.LoadSeriesEventsAsync(master.Id, master.GoogleEventId);
+        Assert.Empty(seriesChildren);
     }
 
     [Fact]
