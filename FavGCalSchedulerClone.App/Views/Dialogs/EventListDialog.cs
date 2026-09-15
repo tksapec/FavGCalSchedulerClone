@@ -49,6 +49,7 @@ internal static class EventListDialog
         var searchToolbarState = CreateToolbar(request, eventItems, status, currentFilter, filter => currentFilter = filter, window);
         var searchToolbar = searchToolbarState.Element;
         var invalidatePendingSearch = searchToolbarState.InvalidatePendingSearch;
+        window.Closing += (_, _) => invalidatePendingSearch();
         DockPanel.SetDock(searchToolbar, Dock.Top);
         panel.Children.Add(searchToolbar);
 
