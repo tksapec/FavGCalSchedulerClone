@@ -36,6 +36,17 @@ public sealed class EventListSearchConcurrencyRegressionTests
     }
 
     [Fact]
+    public async Task EventListClose_InvalidatesPendingSearchBeforeWindowIsDisposed()
+    {
+        var source = await File.ReadAllTextAsync(SourcePath());
+        var callbackIndex = source.IndexOf("var invalidatePendingSearch = searchToolbarState.InvalidatePendingSearch;", StringComparison.Ordinal);
+        Assert.True(callbackIndex >= 0);
+        var afterCallback = source[callbackIndex..];
+
+        Assert.Contains("window.Closing += (_, _) => invalidatePendingSearch();", afterCallback, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task BulkEditAndDelete_InvalidatePendingSearchBeforeOpeningConfirmationUi()
     {
         var source = await File.ReadAllTextAsync(SourcePath());
