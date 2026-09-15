@@ -28,15 +28,18 @@ public sealed class AutomaticSyncRerunRegressionTests
     {
         private readonly string _databasePath;
         private readonly string _oauthPath;
+        private readonly CalendarRepository _repository;
 
         private SyncFixture(
             string databasePath,
             string oauthPath,
+            CalendarRepository repository,
             BlockingClient client,
             MainViewModel viewModel)
         {
             _databasePath = databasePath;
             _oauthPath = oauthPath;
+            _repository = repository;
             Client = client;
             ViewModel = viewModel;
         }
@@ -60,18 +63,18 @@ public sealed class AutomaticSyncRerunRegressionTests
             settings.AutomaticSyncIntervalMinutes = 30;
             settings.LastAutomaticSyncAt = null;
             await viewModel.SaveApplicationSettingsAsync(settings);
-            return new SyncFixture(databasePath, oauthPath, client, viewModel);
+            return new SyncFixture(databasePath, oauthPath, repository, client, viewModel);
         }
 
-        public ValueTask DisposeAsync()
+        public async ValueTask DisposeAsync()
         {
             Client.ReleaseFirstList.TrySetResult(true);
+            await _repository.BeginMaintenanceAsync();
             SqliteConnection.ClearAllPools();
             DeleteIfExists(_databasePath);
             DeleteIfExists(_databasePath + "-wal");
             DeleteIfExists(_databasePath + "-shm");
             DeleteIfExists(_oauthPath);
-            return ValueTask.CompletedTask;
         }
 
         private static void DeleteIfExists(string path)
