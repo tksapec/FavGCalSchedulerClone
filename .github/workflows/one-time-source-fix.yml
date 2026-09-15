@@ -1,0 +1,45 @@
+name: One-time sync source fix
+
+on:
+  push:
+    branches:
+      - fix/bulk-edit-reliability
+
+permissions:
+  contents: write
+
+jobs:
+  fix-source:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/bulk-edit-reliability
+      - name: Apply exact source fix and remove this workflow
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('FavGCalSchedulerClone.App/Services/GoogleCalendarSyncService.cs')
+          text = path.read_text(encoding='utf-8')
+          replacements = [
+              ('var currentLocal = string.IsNullOrWhiteSpace(remoteEvent.Id)', 'var currentPulledLocal = string.IsNullOrWhiteSpace(remoteEvent.Id)'),
+              ('var remoteChangedSinceLastSync = currentLocal is null', 'var remoteChangedSinceLastSync = currentPulledLocal is null'),
+              ('string.IsNullOrWhiteSpace(currentLocal.LastSyncedGoogleEtag)', 'string.IsNullOrWhiteSpace(currentPulledLocal.LastSyncedGoogleEtag)'),
+              ('!string.Equals(currentLocal.LastSyncedGoogleEtag, remoteEvent.ETag, StringComparison.Ordinal)', '!string.Equals(currentPulledLocal.LastSyncedGoogleEtag, remoteEvent.ETag, StringComparison.Ordinal)'),
+          ]
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'Expected exactly one occurrence of {old!r}, found {count}')
+              text = text.replace(old, new)
+          path.write_text(text, encoding='utf-8', newline='')
+          PY
+          rm .github/workflows/one-time-source-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add FavGCalSchedulerClone.App/Services/GoogleCalendarSyncService.cs .github/workflows/one-time-source-fix.yml
+          git commit -m "fix: compile pull conflict classification"
+          git push origin HEAD:fix/bulk-edit-reliability
