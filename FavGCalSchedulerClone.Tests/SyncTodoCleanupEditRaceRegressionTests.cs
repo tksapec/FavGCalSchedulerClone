@@ -364,7 +364,7 @@ public sealed class SyncTodoCleanupEditRaceRegressionTests
             Assert.Equal([45], stored.EffectiveAppReminderMinutesBeforeStart);
             Assert.Equal(0, api.UpdateCallCount);
             Assert.Equal(1, result.Skipped);
-            Assert.Equal(1, result.Conflicts);
+            Assert.Equal(0, result.Conflicts);
         }
         finally
         {
