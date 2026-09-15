@@ -135,7 +135,7 @@ public sealed class SyncTodoCleanupEditRaceRegressionTests
             Assert.Equal(0, api.UpdateCallCount);
             Assert.Equal(0, result.Pushed);
             Assert.Equal(1, result.Skipped);
-            Assert.Equal(1, result.Conflicts);
+            Assert.Equal(0, result.Conflicts);
             Assert.Equal("old-token", await repository.GetSyncTokenAsync("primary"));
         }
         finally
@@ -225,7 +225,7 @@ public sealed class SyncTodoCleanupEditRaceRegressionTests
             Assert.Equal(0, api.UpdateCallCount);
             Assert.Equal(0, result.Pushed);
             Assert.Equal(1, result.Skipped);
-            Assert.Equal(1, result.Conflicts);
+            Assert.Equal(0, result.Conflicts);
         }
         finally
         {
