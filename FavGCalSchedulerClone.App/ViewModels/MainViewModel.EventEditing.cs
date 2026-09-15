@@ -176,7 +176,7 @@ public sealed partial class MainViewModel
         calendarEvent.End = normalizedEnd;
     }
 
-    private CalendarEvent? BuildEditedEventAsync()
+    private CalendarEvent? BuildEditedEventAsync(bool allowUnchanged = false)
     {
         if (string.IsNullOrWhiteSpace(Title))
         {
@@ -292,7 +292,9 @@ public sealed partial class MainViewModel
             }
         }
 
-        if (SelectedEvent is not null && !EventDirtyFieldTracker.HasChanges(SelectedEvent, calendarEvent))
+        if (!allowUnchanged
+            && SelectedEvent is not null
+            && !EventDirtyFieldTracker.HasChanges(SelectedEvent, calendarEvent))
         {
             Status = "予定に変更はありません。";
             return null;
