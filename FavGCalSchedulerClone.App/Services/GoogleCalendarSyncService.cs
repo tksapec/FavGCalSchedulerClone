@@ -1241,9 +1241,10 @@ public sealed class GoogleCalendarSyncService
                 case SyncPlanAction.PullRemote:
                     try
                     {
+                        var remoteEvent = executableItem.RemoteEvent!;
                         var applied = await _repository.TryUpsertSyncedEventAsync(
                             GoogleEventMapper.FromGoogleEvent(
-                                executableItem.RemoteEvent!,
+                                remoteEvent,
                                 calendarId,
                                 GetDefaultReminders(reminderDefaults, calendarId),
                                 adoptEmailRemindersAsLocalNotifications),
@@ -1255,7 +1256,17 @@ public sealed class GoogleCalendarSyncService
                         else
                         {
                             skipped++;
-                            conflicts++;
+                            var currentLocal = string.IsNullOrWhiteSpace(remoteEvent.Id)
+                                ? null
+                                : await _repository.FindEventByGoogleEventIdAsync(calendarId, remoteEvent.Id);
+                            var remoteChangedSinceLastSync = currentLocal is null
+                                || string.IsNullOrWhiteSpace(currentLocal.LastSyncedGoogleEtag)
+                                || string.IsNullOrWhiteSpace(remoteEvent.ETag)
+                                || !string.Equals(currentLocal.LastSyncedGoogleEtag, remoteEvent.ETag, StringComparison.Ordinal);
+                            if (executableItem.IsConflict || remoteChangedSinceLastSync)
+                            {
+                                conflicts++;
+                            }
                         }
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
