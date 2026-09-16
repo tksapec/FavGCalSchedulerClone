@@ -1241,9 +1241,10 @@ public sealed class GoogleCalendarSyncService
                 case SyncPlanAction.PullRemote:
                     try
                     {
+                        var remoteEvent = executableItem.RemoteEvent!;
                         var applied = await _repository.TryUpsertSyncedEventAsync(
                             GoogleEventMapper.FromGoogleEvent(
-                                executableItem.RemoteEvent!,
+                                remoteEvent,
                                 calendarId,
                                 GetDefaultReminders(reminderDefaults, calendarId),
                                 adoptEmailRemindersAsLocalNotifications),
@@ -1255,7 +1256,17 @@ public sealed class GoogleCalendarSyncService
                         else
                         {
                             skipped++;
-                            conflicts++;
+                            var currentPulledLocal = string.IsNullOrWhiteSpace(remoteEvent.Id)
+                                ? null
+                                : await _repository.FindEventByGoogleEventIdAsync(calendarId, remoteEvent.Id);
+                            var remoteChangedSinceLastSync = currentPulledLocal is null
+                                || string.IsNullOrWhiteSpace(currentPulledLocal.LastSyncedGoogleEtag)
+                                || string.IsNullOrWhiteSpace(remoteEvent.ETag)
+                                || !string.Equals(currentPulledLocal.LastSyncedGoogleEtag, remoteEvent.ETag, StringComparison.Ordinal);
+                            if (executableItem.IsConflict || remoteChangedSinceLastSync)
+                            {
+                                conflicts++;
+                            }
                         }
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
@@ -1275,7 +1286,10 @@ public sealed class GoogleCalendarSyncService
                         || currentLocal.UpdatedAt.UtcTicks != localEvent.UpdatedAt.UtcTicks)
                     {
                         skipped++;
-                        conflicts++;
+                        if (executableItem.IsConflict)
+                        {
+                            conflicts++;
+                        }
                         break;
                     }
                     if (localEvent.IsTodoLike)

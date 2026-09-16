@@ -37,6 +37,39 @@ public sealed class RecurrenceScopeTimeZoneRegressionTests
     }
 
     [Fact]
+    public async Task ThisAndFollowing_FirstOccurrenceWithoutEdits_DoesNotDirtyOrRewriteSeries()
+    {
+        var repository = await CreateRepositoryAsync();
+        var master = new CalendarEvent
+        {
+            Id = "first-occurrence-no-op",
+            CalendarId = "primary",
+            GoogleEventId = "google-first-occurrence-no-op",
+            LastSyncedGoogleEtag = "etag-1",
+            Title = "No-op series",
+            Start = new DateTimeOffset(2026, 5, 10, 9, 0, 0, TimeSpan.FromHours(9)),
+            End = new DateTimeOffset(2026, 5, 10, 10, 0, 0, TimeSpan.FromHours(9)),
+            RecurrenceJson = "[\"RRULE:FREQ=DAILY;COUNT=5\"]"
+        };
+        await repository.UpsertSyncedEventAsync(master);
+        var before = Assert.IsType<CalendarEvent>(await repository.FindMasterByIdAsync(master.Id));
+        Assert.False(before.IsDirty);
+        var originalUpdatedAt = before.UpdatedAt;
+        var viewModel = await CreateViewModelAsync(repository);
+        var occurrence = await SelectOccurrenceAsync(viewModel, new DateTime(2026, 5, 10), master.Title);
+        PopulateEditor(viewModel, occurrence, "09:00", "10:00");
+
+        await viewModel.SaveCurrentEventAsync(RecurrenceEditScope.ThisAndFollowing);
+
+        var stored = Assert.IsType<CalendarEvent>(await repository.FindMasterByIdAsync(master.Id));
+        Assert.False(stored.IsDirty);
+        Assert.Equal(originalUpdatedAt, stored.UpdatedAt);
+        Assert.Equal(master.RecurrenceJson, stored.RecurrenceJson);
+        var seriesChildren = await repository.LoadSeriesEventsAsync(master.Id, master.GoogleEventId);
+        Assert.Empty(seriesChildren);
+    }
+
+    [Fact]
     public async Task AllEvents_ReevaluatesEditedWallClockInMasterTimeZoneAcrossDst()
     {
         var repository = await CreateRepositoryAsync();

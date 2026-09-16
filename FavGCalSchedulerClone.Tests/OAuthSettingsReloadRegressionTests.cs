@@ -12,9 +12,10 @@ public sealed class OAuthSettingsReloadRegressionTests
         var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         var databasePath = Path.Combine(directory, "calendar.db");
+        CalendarRepository? repository = null;
         try
         {
-            var repository = new CalendarRepository(databasePath);
+            repository = new CalendarRepository(databasePath);
             await repository.InitializeAsync();
             var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
             await viewModel.InitializeAsync();
@@ -36,6 +37,14 @@ public sealed class OAuthSettingsReloadRegressionTests
         }
         finally
         {
+            if (repository is not null)
+            {
+                // Initialize/refresh can leave delayed calendar prefetch work alive after
+                // the assertion completes. Maintenance waits for current connections and
+                // prevents that abandoned ViewModel from opening the temp database again.
+                await repository.BeginMaintenanceAsync();
+            }
+
             Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             Directory.Delete(directory, recursive: true);
         }

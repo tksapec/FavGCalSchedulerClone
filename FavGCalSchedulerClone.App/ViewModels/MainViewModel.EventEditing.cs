@@ -176,7 +176,7 @@ public sealed partial class MainViewModel
         calendarEvent.End = normalizedEnd;
     }
 
-    private CalendarEvent? BuildEditedEventAsync()
+    private CalendarEvent? BuildEditedEventAsync(bool allowUnchanged = false)
     {
         if (string.IsNullOrWhiteSpace(Title))
         {
@@ -188,7 +188,7 @@ public sealed partial class MainViewModel
             ? new CalendarEvent()
             : CloneEventForEditing(SelectedEvent);
         calendarEvent.Title = Title.Trim();
-        calendarEvent.Description = string.IsNullOrWhiteSpace(Description) ? null : Description.Trim();
+        calendarEvent.Description = string.IsNullOrWhiteSpace(Description) ? null : Description;
         calendarEvent.Location = string.IsNullOrWhiteSpace(Location) ? null : Location.Trim();
         calendarEvent.CalendarId = ResolveEditorCalendarId();
         calendarEvent.IsAllDay = IsAllDay;
@@ -290,6 +290,14 @@ public sealed partial class MainViewModel
                 Status = "終了日時は開始日時より後にしてください。";
                 return null;
             }
+        }
+
+        if (!allowUnchanged
+            && SelectedEvent is not null
+            && !EventDirtyFieldTracker.HasChanges(SelectedEvent, calendarEvent))
+        {
+            Status = "予定に変更はありません。";
+            return null;
         }
 
         return calendarEvent;

@@ -175,9 +175,10 @@ public sealed class SearchEventListTests
         var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         var databasePath = Path.Combine(directory, "calendar.db");
+        CalendarRepository? repository = null;
         try
         {
-            var repository = new CalendarRepository(databasePath);
+            repository = new CalendarRepository(databasePath);
             await repository.InitializeAsync();
             await repository.SaveEventAsync(Event("2026 target", isTodo: false, start: new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.Zero)));
             var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository))
@@ -206,6 +207,11 @@ public sealed class SearchEventListTests
         }
         finally
         {
+            if (repository is not null)
+            {
+                await repository.BeginMaintenanceAsync();
+            }
+
             Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             Directory.Delete(directory, recursive: true);
         }

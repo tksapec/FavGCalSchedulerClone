@@ -44,6 +44,17 @@ public sealed class EventDirtyFieldTrackerTests
         Assert.Equal("StartEnd", EventDirtyFieldTracker.Merge(null, original, changedDate));
     }
 
+    [Fact]
+    public void Merge_MarksDescriptionWhitespaceAndTrailingNewlineChanges()
+    {
+        var original = CreateTimedEvent(TimeSpan.FromHours(9));
+        original.Description = "copied text";
+        var candidate = CreateTimedEvent(TimeSpan.FromHours(9));
+        candidate.Description = "  copied text\r\n";
+
+        Assert.Equal("Description", EventDirtyFieldTracker.Merge(null, original, candidate));
+    }
+
     private static CalendarEvent CreateTimedEvent(TimeSpan offset) => new()
     {
         Title = "event",

@@ -14,7 +14,7 @@ public sealed partial class MainViewModel
 
     private async Task SaveEventWithRecurrenceAsync(RecurrenceEditScope? recurrenceScope)
     {
-        var candidate = BuildEditedEventAsync();
+        var candidate = BuildEditedEventAsync(recurrenceScope == RecurrenceEditScope.ThisAndFollowing);
         if (candidate is null)
         {
             return;
@@ -34,6 +34,13 @@ public sealed partial class MainViewModel
             SelectedEvent = candidate;
             Status = "予定を保存しました。";
             await SyncAfterLocalChangeAsync();
+            return;
+        }
+
+        if (recurrenceScope == RecurrenceEditScope.ThisAndFollowing
+            && await IsFirstOccurrenceNoOpSeriesEditAsync(candidate))
+        {
+            Status = "予定に変更はありません。";
             return;
         }
 
@@ -489,6 +496,30 @@ public sealed partial class MainViewModel
         }
 
         return null;
+    }
+
+    private async Task<bool> IsFirstOccurrenceNoOpSeriesEditAsync(CalendarEvent candidate)
+    {
+        if (SelectedEvent is null)
+        {
+            return false;
+        }
+
+        var master = await ResolveSeriesMasterAsync(SelectedEvent);
+        if (master is null)
+        {
+            return false;
+        }
+
+        var splitStart = SelectedEvent.OriginalStart ?? SelectedEvent.Start;
+        if (splitStart > master.Start)
+        {
+            return false;
+        }
+
+        var projectedMaster = CloneEventForEditing(master);
+        ApplySeriesEditValues(projectedMaster, candidate, SelectedEvent);
+        return !EventDirtyFieldTracker.HasChanges(master, projectedMaster);
     }
 
     private void ApplySeriesEditValues(CalendarEvent target, CalendarEvent candidate, CalendarEvent selectedEvent)

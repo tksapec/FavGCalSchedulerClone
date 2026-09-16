@@ -5,99 +5,136 @@ namespace FavGCalSchedulerClone.App.ViewModels;
 
 public sealed partial class MainViewModel
 {
-    public async Task<int> BulkUpdateEventsAsync(IReadOnlyCollection<string> localIds, BulkEventUpdateRequest request)
+    public async Task<int> BulkUpdateEventsAsync(
+        IReadOnlyCollection<string> localIds,
+        BulkEventUpdateRequest request)
+        => (await BulkUpdateEventsDetailedAsync(localIds, request)).AffectedCount;
+
+    public async Task<BulkEventOperationResult> BulkUpdateEventsDetailedAsync(
+        IReadOnlyCollection<string> localIds,
+        BulkEventUpdateRequest request)
     {
-        if (!request.HasUpdates)
+        var outcome = await RunExclusiveSyncDataOperationAsync(async () =>
         {
-            return 0;
-        }
-
-        var events = await LoadEventsForBulkOperationAsync(localIds);
-        if (events.Count == 0)
-        {
-            return 0;
-        }
-
-        var undoSnapshots = events.Select(UndoService.Clone).ToArray();
-        var writes = new List<CalendarEvent>();
-        var updated = 0;
-        foreach (var calendarEvent in events)
-        {
-            var original = UndoService.Clone(calendarEvent);
-            if (request.UpdatesCalendar && !string.IsNullOrWhiteSpace(request.CalendarId))
+            var targets = await LoadBulkOperationTargetsAsync(localIds);
+            if (!request.HasUpdates)
             {
-                calendarEvent.CalendarId = request.CalendarId;
+                return (Result: CreateBulkOperationResult(targets, affectedCount: 0, unchangedCount: targets.Events.Count), Persisted: false);
             }
 
-            if (request.UpdatesColor)
+            var undoSnapshots = new List<CalendarEvent>();
+            var writes = new List<CalendarEvent>();
+            var updated = 0;
+            var unchanged = 0;
+            var todoReminderSkipped = 0;
+            foreach (var calendarEvent in targets.Events)
             {
-                calendarEvent.ColorId = request.ColorId;
-            }
-
-            if (request.UpdatesReminder)
-            {
-                var minutes = request.ReminderMinutesBeforeStart ?? calendarEvent.ReminderMinutesBeforeStart;
-                var appEnabled = request.AppReminderEnabled ?? calendarEvent.IsAppReminderEnabled;
-                var emailEnabled = request.GoogleEmailReminderEnabled ?? calendarEvent.IsGoogleEmailReminderEnabled;
-                if (minutes is null || (!appEnabled && !emailEnabled))
+                var original = UndoService.Clone(calendarEvent);
+                if (request.UpdatesCalendar && !string.IsNullOrWhiteSpace(request.CalendarId))
                 {
-                    calendarEvent.ReminderMinutesBeforeStart = null;
-                    calendarEvent.AppReminderMinutesBeforeStart = [];
-                    calendarEvent.GoogleEmailReminderMinutesBeforeStart = [];
-                    calendarEvent.IsAppReminderEnabled = false;
-                    calendarEvent.IsGoogleEmailReminderEnabled = false;
-                    calendarEvent.GoogleReminderMetadata = CreateCommonGoogleReminderMetadata(calendarEvent.GoogleReminderMetadata, [], []);
+                    calendarEvent.CalendarId = request.CalendarId;
                 }
-                else
+
+                if (request.UpdatesColor)
                 {
-                    var appReminderMinutes = appEnabled ? CalendarEvent.NormalizeReminderMinutes([minutes.Value]) : [];
-                    var googleEmailReminderMinutes = emailEnabled ? CalendarEvent.NormalizeReminderMinutes([minutes.Value]) : [];
-                    calendarEvent.ReminderMinutesBeforeStart = appReminderMinutes.Count == 0 ? null : appReminderMinutes[0];
-                    calendarEvent.AppReminderMinutesBeforeStart = appReminderMinutes.ToList();
-                    calendarEvent.GoogleEmailReminderMinutesBeforeStart = googleEmailReminderMinutes.ToList();
-                    calendarEvent.IsAppReminderEnabled = appEnabled;
-                    calendarEvent.IsGoogleEmailReminderEnabled = emailEnabled;
-                    calendarEvent.GoogleReminderMetadata = CreateCommonGoogleReminderMetadata(calendarEvent.GoogleReminderMetadata, appReminderMinutes, googleEmailReminderMinutes);
+                    calendarEvent.ColorId = request.ColorId;
                 }
+
+                if (request.UpdatesReminder)
+                {
+                    if (calendarEvent.IsTodoLike)
+                    {
+                        todoReminderSkipped++;
+                    }
+                    else
+                    {
+                        ApplyBulkReminderUpdate(calendarEvent, request);
+                    }
+                }
+
+                if (!HasBulkEditableChanges(original, calendarEvent))
+                {
+                    unchanged++;
+                    continue;
+                }
+
+                undoSnapshots.Add(original);
+                calendarEvent.IsDirty = true;
+                NormalizeTimedEventTimeZoneOffsets(calendarEvent);
+                writes.AddRange(PrepareCalendarMoveWrites(calendarEvent, original));
+                updated++;
             }
 
-            calendarEvent.IsDirty = true;
-            NormalizeTimedEventTimeZoneOffsets(calendarEvent);
-            writes.AddRange(PrepareCalendarMoveWrites(calendarEvent, original));
-            updated++;
+            var result = CreateBulkOperationResult(targets, updated, todoReminderSkipped, unchanged);
+            if (writes.Count == 0)
+            {
+                return (Result: result, Persisted: false);
+            }
+
+            await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes);
+            CaptureUndo("一括編集", undoSnapshots);
+            return (Result: result, Persisted: true);
+        });
+
+        if (!outcome.Persisted)
+        {
+            Status = "一括編集: 変更なし";
+            return outcome.Result;
         }
 
-        await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes);
-        CaptureUndo("一括編集", undoSnapshots);
         await RefreshCalendarAsync();
-        Status = $"一括編集しました: {updated} 件";
+        Status = $"一括編集しました: {outcome.Result.AffectedCount} 件";
         await SyncAfterLocalChangeAsync();
-        return updated;
+        return outcome.Result;
     }
 
     public async Task<int> BulkDeleteEventsAsync(IReadOnlyCollection<string> localIds)
+        => (await BulkDeleteEventsDetailedAsync(localIds)).AffectedCount;
+
+    public async Task<BulkEventOperationResult> BulkDeleteEventsDetailedAsync(IReadOnlyCollection<string> localIds)
     {
-        var events = await LoadEventsForBulkOperationAsync(localIds);
-        if (events.Count == 0)
+        var outcome = await RunExclusiveSyncDataOperationAsync(async () =>
         {
-            return 0;
+            var targets = await LoadBulkOperationTargetsAsync(localIds);
+            var undoSnapshots = new List<CalendarEvent>();
+            var writes = new List<CalendarEvent>();
+            var unchanged = 0;
+            foreach (var calendarEvent in targets.Events)
+            {
+                if (calendarEvent.IsDeleted)
+                {
+                    unchanged++;
+                    continue;
+                }
+
+                undoSnapshots.Add(UndoService.Clone(calendarEvent));
+                calendarEvent.IsDeleted = true;
+                calendarEvent.IsDirty = true;
+                writes.Add(calendarEvent);
+            }
+
+            var result = CreateBulkOperationResult(targets, writes.Count, unchangedCount: unchanged);
+            if (writes.Count == 0)
+            {
+                return (Result: result, Persisted: false);
+            }
+
+            await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, writes);
+            CaptureUndo("一括削除", undoSnapshots);
+            return (Result: result, Persisted: true);
+        });
+
+        if (!outcome.Persisted)
+        {
+            Status = "一括削除: 対象なし";
+            return outcome.Result;
         }
 
-        var undoSnapshots = events.Select(UndoService.Clone).ToArray();
-        foreach (var calendarEvent in events)
-        {
-            calendarEvent.IsDeleted = true;
-            calendarEvent.IsDirty = true;
-        }
-
-        await CalendarRepositoryAtomicWriter.SaveEventsAsync(_repository, events);
-        CaptureUndo("一括削除", undoSnapshots);
-        var deleted = events.Count;
         SelectedEvent = null;
         await RefreshCalendarAsync();
-        Status = $"一括削除しました: {deleted} 件";
+        Status = $"一括削除しました: {outcome.Result.AffectedCount} 件";
         await SyncAfterLocalChangeAsync();
-        return deleted;
+        return outcome.Result;
     }
 
     public async Task<bool> UndoLastChangeAsync()
@@ -180,22 +217,109 @@ public sealed partial class MainViewModel
         return true;
     }
 
-    private async Task<IReadOnlyList<CalendarEvent>> LoadEventsForBulkOperationAsync(IReadOnlyCollection<string> localIds)
+    private static void ApplyBulkReminderUpdate(CalendarEvent calendarEvent, BulkEventUpdateRequest request)
+    {
+        var minutes = request.ReminderMinutesBeforeStart ?? calendarEvent.ReminderMinutesBeforeStart;
+        var appEnabled = request.AppReminderEnabled ?? calendarEvent.IsAppReminderEnabled;
+        var emailEnabled = request.GoogleEmailReminderEnabled ?? calendarEvent.IsGoogleEmailReminderEnabled;
+        if (minutes is null || (!appEnabled && !emailEnabled))
+        {
+            calendarEvent.ReminderMinutesBeforeStart = null;
+            calendarEvent.AppReminderMinutesBeforeStart = [];
+            calendarEvent.GoogleEmailReminderMinutesBeforeStart = [];
+            calendarEvent.IsAppReminderEnabled = false;
+            calendarEvent.IsGoogleEmailReminderEnabled = false;
+            calendarEvent.GoogleReminderMetadata = CreateCommonGoogleReminderMetadata(calendarEvent.GoogleReminderMetadata, [], []);
+            return;
+        }
+
+        var appReminderMinutes = appEnabled ? CalendarEvent.NormalizeReminderMinutes([minutes.Value]) : [];
+        var googleEmailReminderMinutes = emailEnabled ? CalendarEvent.NormalizeReminderMinutes([minutes.Value]) : [];
+        calendarEvent.ReminderMinutesBeforeStart = appReminderMinutes.Count == 0 ? null : appReminderMinutes[0];
+        calendarEvent.AppReminderMinutesBeforeStart = appReminderMinutes.ToList();
+        calendarEvent.GoogleEmailReminderMinutesBeforeStart = googleEmailReminderMinutes.ToList();
+        calendarEvent.IsAppReminderEnabled = appEnabled;
+        calendarEvent.IsGoogleEmailReminderEnabled = emailEnabled;
+        calendarEvent.GoogleReminderMetadata = CreateCommonGoogleReminderMetadata(
+            calendarEvent.GoogleReminderMetadata,
+            appReminderMinutes,
+            googleEmailReminderMinutes);
+    }
+
+    private static bool HasBulkEditableChanges(CalendarEvent before, CalendarEvent after)
+    {
+        return !string.Equals(before.CalendarId, after.CalendarId, StringComparison.Ordinal)
+            || !string.Equals(before.ColorId, after.ColorId, StringComparison.Ordinal)
+            || before.IsAppReminderEnabled != after.IsAppReminderEnabled
+            || before.IsGoogleEmailReminderEnabled != after.IsGoogleEmailReminderEnabled
+            || !before.EffectiveAppReminderMinutesBeforeStart.SequenceEqual(after.EffectiveAppReminderMinutesBeforeStart)
+            || !before.EffectiveGoogleEmailReminderMinutesBeforeStart.SequenceEqual(after.EffectiveGoogleEmailReminderMinutesBeforeStart);
+    }
+
+    private async Task<BulkOperationTargets> LoadBulkOperationTargetsAsync(IReadOnlyCollection<string> localIds)
     {
         var ids = localIds
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
         var events = new List<CalendarEvent>();
+        var unsupportedRecurrenceCount = 0;
+        var missingCount = 0;
         foreach (var id in ids)
         {
             if (await _repository.FindMasterByIdAsync(id) is { } calendarEvent)
             {
-                events.Add(calendarEvent);
+                if (calendarEvent.IsRecurringMaster)
+                {
+                    unsupportedRecurrenceCount++;
+                }
+                else
+                {
+                    events.Add(calendarEvent);
+                }
+                continue;
+            }
+
+            if (await IsGeneratedRecurrenceOccurrenceIdAsync(id))
+            {
+                unsupportedRecurrenceCount++;
+            }
+            else
+            {
+                missingCount++;
             }
         }
 
-        return events;
+        return new BulkOperationTargets(ids.Length, events, unsupportedRecurrenceCount, missingCount);
+    }
+
+    private async Task<bool> IsGeneratedRecurrenceOccurrenceIdAsync(string id)
+    {
+        var separatorIndex = id.LastIndexOf('@');
+        if (separatorIndex <= 0
+            || separatorIndex >= id.Length - 1
+            || !long.TryParse(id.AsSpan(separatorIndex + 1), out _))
+        {
+            return false;
+        }
+
+        var parentId = id[..separatorIndex];
+        return await _repository.FindMasterByIdAsync(parentId) is { IsRecurringMaster: true };
+    }
+
+    private static BulkEventOperationResult CreateBulkOperationResult(
+        BulkOperationTargets targets,
+        int affectedCount,
+        int todoReminderSkippedCount = 0,
+        int unchangedCount = 0)
+    {
+        return new BulkEventOperationResult(
+            targets.SelectedCount,
+            affectedCount,
+            targets.UnsupportedRecurrenceCount,
+            targets.MissingCount,
+            todoReminderSkippedCount,
+            unchangedCount);
     }
 
     private static IReadOnlyList<CalendarEvent> PrepareCalendarMoveWrites(CalendarEvent candidate, CalendarEvent? original)
@@ -315,4 +439,10 @@ public sealed partial class MainViewModel
         OnPropertyChanged(nameof(UndoStatusText));
         UndoLastChangeCommand.RaiseCanExecuteChanged();
     }
+
+    private sealed record BulkOperationTargets(
+        int SelectedCount,
+        IReadOnlyList<CalendarEvent> Events,
+        int UnsupportedRecurrenceCount,
+        int MissingCount);
 }

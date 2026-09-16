@@ -199,10 +199,11 @@ public sealed class RestoreMaintenanceBoundaryRegressionTests
         Directory.CreateDirectory(directory);
         var targetPath = Path.Combine(directory, "calendar.db");
         var missingBackupPath = Path.Combine(directory, "missing.zip");
+        CalendarRepository? targetRepository = null;
 
         try
         {
-            var targetRepository = new CalendarRepository(targetPath);
+            targetRepository = new CalendarRepository(targetPath);
             await targetRepository.InitializeAsync();
             var viewModel = new MainViewModel(targetRepository, new GoogleCalendarSyncService(targetRepository));
             await viewModel.InitializeAsync();
@@ -224,6 +225,12 @@ public sealed class RestoreMaintenanceBoundaryRegressionTests
         }
         finally
         {
+            if (targetRepository is not null)
+            {
+                // Stop abandoned ViewModel background work from reopening the temp database.
+                await targetRepository.BeginMaintenanceAsync();
+            }
+
             SqliteConnection.ClearAllPools();
             await DeleteDirectoryAfterClearingSqlitePoolsAsync(directory);
         }

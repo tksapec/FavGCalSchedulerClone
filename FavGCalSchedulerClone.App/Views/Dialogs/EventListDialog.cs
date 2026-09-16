@@ -26,6 +26,7 @@ internal static class EventListDialog
     {
         var currentFilter = request.Filter;
         var eventItems = new ObservableCollection<CalendarEvent>(request.Events);
+        var operationGate = new AsyncOperationGate();
         var window = ui.CreateOwnedDialog(request.Title, 1180, 680);
         window.MinWidth = 900;
         window.MinHeight = 520;
@@ -35,9 +36,22 @@ internal static class EventListDialog
         window.Content = panel;
 
         var status = new TextBlock { Margin = new Thickness(0, 4, 0, 0) };
-        var toolbar = CreateToolbar(request, eventItems, status, currentFilter, filter => currentFilter = filter, window);
-        DockPanel.SetDock(toolbar, Dock.Top);
-        panel.Children.Add(toolbar);
+        window.Closing += (_, e) =>
+        {
+            if (!operationGate.IsRunning)
+            {
+                return;
+            }
+
+            e.Cancel = true;
+            status.Text = "一括処理中は閉じられません。完了後に閉じてください。";
+        };
+        var searchToolbarState = CreateToolbar(request, eventItems, status, currentFilter, filter => currentFilter = filter, window);
+        var searchToolbar = searchToolbarState.Element;
+        var invalidatePendingSearch = searchToolbarState.InvalidatePendingSearch;
+        window.Closing += (_, _) => invalidatePendingSearch();
+        DockPanel.SetDock(searchToolbar, Dock.Top);
+        panel.Children.Add(searchToolbar);
 
         var close = new Button { Content = "閉じる", MinWidth = 96, Height = 28 };
         close.Click += (_, _) => window.Close();
@@ -71,12 +85,13 @@ internal static class EventListDialog
                 return;
             }
 
+            invalidatePendingSearch();
             await request.EditEventAsync(calendarEvent);
             await ReloadAsync(request, eventItems, status, currentFilter);
         }, "予定編集");
 
         AddColumns(grid);
-        var bulkToolbar = CreateBulkToolbar(ui, request, grid, eventItems, status, () => currentFilter, window);
+        var bulkToolbar = CreateBulkToolbar(ui, request, grid, searchToolbar, eventItems, status, () => currentFilter, invalidatePendingSearch, operationGate, window);
         DockPanel.SetDock(bulkToolbar, Dock.Top);
         panel.Children.Add(bulkToolbar);
         panel.Children.Add(grid);
@@ -85,7 +100,7 @@ internal static class EventListDialog
         window.ShowDialog();
     }
 
-    private static FrameworkElement CreateToolbar(
+    private static SearchToolbarState CreateToolbar(
         EventListDialogRequest request,
         ObservableCollection<CalendarEvent> eventItems,
         TextBlock status,
@@ -104,6 +119,7 @@ internal static class EventListDialog
         var kind = new ComboBox { ItemsSource = SearchKindOptions, SelectedValuePath = "Value", DisplayMemberPath = "Label", SelectedValue = initialFilter.KindFilter, Width = 100, Margin = new Thickness(0, 0, 8, 0) };
         var query = new TextBox { Text = initialFilter.Query, MinWidth = 240, Margin = new Thickness(0, 0, 8, 0) };
         var search = new Button { Content = "検索", MinWidth = 72 };
+        var searchGeneration = 0L;
 
         var calendarOptions = request.CalendarIds
             .Where(id => !string.IsNullOrWhiteSpace(id))
@@ -131,11 +147,31 @@ internal static class EventListDialog
 
         void SearchClick(object? sender, RoutedEventArgs e)
         {
+            var nextFilter = CreateFilter(query, kind, range, startDate, endDate, calendar, initialFilter.ReferenceDate);
+            var generation = Interlocked.Increment(ref searchGeneration);
             DialogAsyncGuard.Run(window, async () =>
             {
-                var nextFilter = CreateFilter(query, kind, range, startDate, endDate, calendar, initialFilter.ReferenceDate);
-                updateCurrentFilter(nextFilter);
-                await ReloadAsync(request, eventItems, status, nextFilter);
+                try
+                {
+                    var refreshed = await request.ReloadEventsAsync(nextFilter);
+                    if (generation != Volatile.Read(ref searchGeneration))
+                    {
+                        return;
+                    }
+
+                    eventItems.Clear();
+                    foreach (var refreshedEvent in refreshed)
+                    {
+                        eventItems.Add(refreshedEvent);
+                    }
+
+                    updateCurrentFilter(nextFilter);
+                    UpdateStatus(status, eventItems, nextFilter);
+                }
+                catch when (generation != Volatile.Read(ref searchGeneration))
+                {
+                    // A superseded request must not replace a newer result or surface a stale error.
+                }
             }, "検索");
         }
 
@@ -157,7 +193,7 @@ internal static class EventListDialog
 
         root.Children.Add(firstRow);
         root.Children.Add(secondRow);
-        return root;
+        return new SearchToolbarState(root, () => Interlocked.Increment(ref searchGeneration));
     }
 
     private static EventListFilter CreateFilter(
@@ -171,6 +207,13 @@ internal static class EventListDialog
     {
         var selectedStart = startDate.SelectedDate ?? fallbackReferenceDate;
         var selectedEnd = endDate.SelectedDate ?? selectedStart;
+        if (selectedEnd < selectedStart)
+        {
+            (selectedStart, selectedEnd) = (selectedEnd, selectedStart);
+            startDate.SelectedDate = selectedStart;
+            endDate.SelectedDate = selectedEnd;
+        }
+
         var selectedRange = range.SelectedValue is EventSearchRange rangeValue ? rangeValue : EventSearchRange.Custom;
         if (selectedRange != EventSearchRange.All)
         {
@@ -203,14 +246,44 @@ internal static class EventListDialog
         DialogUiFactory ui,
         EventListDialogRequest request,
         DataGrid grid,
+        FrameworkElement searchToolbar,
         ObservableCollection<CalendarEvent> eventItems,
         TextBlock status,
         Func<EventListFilter> getCurrentFilter,
+        Action invalidatePendingSearch,
+        AsyncOperationGate operationGate,
         Window window)
     {
         var panel = new WrapPanel { Margin = new Thickness(0, 0, 0, 6) };
         var bulkEdit = new Button { Content = "一括編集", MinWidth = 88, Height = 26, IsEnabled = request.BulkEditAsync is not null, Margin = new Thickness(0, 0, 8, 0) };
         var bulkDelete = new Button { Content = "一括削除", MinWidth = 88, Height = 26, IsEnabled = request.BulkDeleteAsync is not null };
+
+        async Task RunBulkOperationAsync(Func<Task> operation)
+        {
+            var accepted = await operationGate.TryRunAsync(async () =>
+            {
+                invalidatePendingSearch();
+                bulkEdit.IsEnabled = false;
+                bulkDelete.IsEnabled = false;
+                searchToolbar.IsEnabled = false;
+                grid.IsEnabled = false;
+                try
+                {
+                    await operation();
+                }
+                finally
+                {
+                    searchToolbar.IsEnabled = true;
+                    grid.IsEnabled = true;
+                    bulkEdit.IsEnabled = request.BulkEditAsync is not null;
+                    bulkDelete.IsEnabled = request.BulkDeleteAsync is not null;
+                }
+            });
+            if (!accepted)
+            {
+                status.Text = "一括処理を実行中です。完了後に再実行してください。";
+            }
+        }
 
         bulkEdit.Click += (_, _) => DialogAsyncGuard.Run(window, async () =>
         {
@@ -221,15 +294,19 @@ internal static class EventListDialog
                 return;
             }
 
+            invalidatePendingSearch();
             var update = BulkEventUpdateDialog.Show(ui, request.CalendarIds);
             if (update is null)
             {
                 return;
             }
 
-            var updated = await request.BulkEditAsync(ids, update);
-            await ReloadAsync(request, eventItems, status, getCurrentFilter());
-            status.Text = $"一括編集しました: {updated}件";
+            await RunBulkOperationAsync(async () =>
+            {
+                var result = await request.BulkEditAsync(ids, update);
+                await ReloadAsync(request, eventItems, status, getCurrentFilter());
+                status.Text = result.FormatStatus("一括編集", "変更");
+            });
         }, "一括編集");
 
         bulkDelete.Click += (_, _) => DialogAsyncGuard.Run(window, async () =>
@@ -241,14 +318,18 @@ internal static class EventListDialog
                 return;
             }
 
+            invalidatePendingSearch();
             if (MessageBox.Show("選択した予定/ToDoを削除しますか。", "一括削除", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             {
                 return;
             }
 
-            var deleted = await request.BulkDeleteAsync(ids);
-            await ReloadAsync(request, eventItems, status, getCurrentFilter());
-            status.Text = $"一括削除しました: {deleted}件";
+            await RunBulkOperationAsync(async () =>
+            {
+                var result = await request.BulkDeleteAsync(ids);
+                await ReloadAsync(request, eventItems, status, getCurrentFilter());
+                status.Text = result.FormatStatus("一括削除", "削除");
+            });
         }, "一括削除");
 
         panel.Children.Add(bulkEdit);
@@ -343,6 +424,7 @@ internal static class EventListDialog
         new("全件", EventSearchRange.All)
     ];
 
+    private sealed record SearchToolbarState(FrameworkElement Element, Action InvalidatePendingSearch);
     private sealed record Option<T>(string Label, T Value);
 }
 
@@ -353,5 +435,5 @@ internal sealed record EventListDialogRequest(
     IReadOnlyList<string> CalendarIds,
     Func<EventListFilter, Task<IReadOnlyList<CalendarEvent>>> ReloadEventsAsync,
     Func<CalendarEvent, Task> EditEventAsync,
-    Func<IReadOnlyList<string>, BulkEventUpdateRequest, Task<int>>? BulkEditAsync = null,
-    Func<IReadOnlyList<string>, Task<int>>? BulkDeleteAsync = null);
+    Func<IReadOnlyList<string>, BulkEventUpdateRequest, Task<BulkEventOperationResult>>? BulkEditAsync = null,
+    Func<IReadOnlyList<string>, Task<BulkEventOperationResult>>? BulkDeleteAsync = null);

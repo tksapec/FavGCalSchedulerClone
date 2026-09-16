@@ -63,12 +63,18 @@ public sealed partial class MainViewModel
         updatedTodo.Start = new DateTimeOffset(dueDate.Date);
         updatedTodo.End = new DateTimeOffset(dueDate.Date.AddDays(1));
         updatedTodo.IsAllDay = true;
-        updatedTodo.IsDirty = true;
         updatedTodo.IsDeleted = false;
         updatedTodo.IsTodoLike = true;
         TodoReminderPolicy.NormalizeLocalFields(updatedTodo);
         updatedTodo.ColorId = EditorColorId;
 
+        if (!EventDirtyFieldTracker.HasChanges(originalTodo, updatedTodo))
+        {
+            Status = "ToDoに変更はありません。";
+            return;
+        }
+
+        updatedTodo.IsDirty = true;
         await SaveEventWithCalendarMoveAsync(updatedTodo, originalTodo);
         CaptureUndo("ToDo編集", [originalTodo]);
         await RefreshCalendarAsync();
