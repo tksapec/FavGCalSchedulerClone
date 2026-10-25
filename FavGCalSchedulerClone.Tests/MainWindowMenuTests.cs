@@ -140,6 +140,7 @@ public sealed partial class MainWindowMenuTests
             "SelectedDayEventsGrid_MouseDoubleClick",
             "TodoEventsGrid_MouseDoubleClick",
             "TodoDoneButton_Click",
+            "SearchResultsGrid_PreviewMouseLeftButtonUp",
             "CalendarSelectionMenu_Checked",
             "CalendarSelectionMenu_Unchecked"
         })
@@ -151,6 +152,23 @@ public sealed partial class MainWindowMenuTests
 
             Assert.Contains("RunUiActionAsync", body);
         }
+    }
+
+    [Fact]
+    public async Task SearchResultDateNavigation_IsMouseDrivenAndAvoidsKeyboardSelectionRefreshes()
+    {
+        var xaml = await File.ReadAllTextAsync(MainWindowXamlPath);
+        var codeBehind = await File.ReadAllTextAsync(Path.ChangeExtension(MainWindowXamlPath, ".xaml.cs"));
+
+        Assert.Contains("PreviewMouseLeftButtonUp=\"SearchResultsGrid_PreviewMouseLeftButtonUp\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("行クリックで日付移動 / Enter・ダブルクリックで編集", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("SelectionChanged=\"SearchResultsGrid_SelectionChanged\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("GetEditableRowItem<CalendarEvent>(e.OriginalSource)", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("IsCalendarMonthCached(targetDate)", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("_viewModel.SelectedDay = cachedDay", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("await NavigateToSearchResultDateAsync(calendarEvent.Start.Date)", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("calendarDateAlreadyNavigated: true", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("if (!calendarDateAlreadyNavigated)", codeBehind, StringComparison.Ordinal);
     }
 
     [Fact]

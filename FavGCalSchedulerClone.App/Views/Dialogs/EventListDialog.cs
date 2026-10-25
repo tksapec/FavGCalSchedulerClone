@@ -46,7 +46,20 @@ internal static class EventListDialog
             e.Cancel = true;
             status.Text = "一括処理中は閉じられません。完了後に閉じてください。";
         };
-        var searchToolbarState = CreateToolbar(request, eventItems, status, currentFilter, filter => currentFilter = filter, window);
+        var grid = new DataGrid
+        {
+            ItemsSource = eventItems,
+            AutoGenerateColumns = false,
+            CanUserAddRows = false,
+            IsReadOnly = true,
+            SelectionMode = DataGridSelectionMode.Extended,
+            SelectionUnit = DataGridSelectionUnit.FullRow,
+            HeadersVisibility = DataGridHeadersVisibility.Column,
+            RowHeight = 22,
+            FontSize = 12,
+            GridLinesVisibility = DataGridGridLinesVisibility.All
+        };
+        var searchToolbarState = CreateToolbar(request, eventItems, grid, status, currentFilter, filter => currentFilter = filter, window);
         var searchToolbar = searchToolbarState.Element;
         var invalidatePendingSearch = searchToolbarState.InvalidatePendingSearch;
         window.Closing += (_, _) => invalidatePendingSearch();
@@ -64,19 +77,6 @@ internal static class EventListDialog
         DockPanel.SetDock(buttons, Dock.Bottom);
         panel.Children.Add(buttons);
 
-        var grid = new DataGrid
-        {
-            ItemsSource = eventItems,
-            AutoGenerateColumns = false,
-            CanUserAddRows = false,
-            IsReadOnly = true,
-            SelectionMode = DataGridSelectionMode.Extended,
-            SelectionUnit = DataGridSelectionUnit.FullRow,
-            HeadersVisibility = DataGridHeadersVisibility.Column,
-            RowHeight = 22,
-            FontSize = 12,
-            GridLinesVisibility = DataGridGridLinesVisibility.All
-        };
         grid.MouseDoubleClick += (_, e) => DialogAsyncGuard.Run(window, async () =>
         {
             var calendarEvent = DataGridDoubleClickHelper.GetEditableRowItem<CalendarEvent>(e.OriginalSource);
@@ -87,7 +87,7 @@ internal static class EventListDialog
 
             invalidatePendingSearch();
             await request.EditEventAsync(calendarEvent);
-            await ReloadAsync(request, eventItems, status, currentFilter);
+            await ReloadAsync(request, eventItems, grid, status, currentFilter);
         }, "予定編集");
 
         AddColumns(grid);
@@ -103,6 +103,7 @@ internal static class EventListDialog
     private static SearchToolbarState CreateToolbar(
         EventListDialogRequest request,
         ObservableCollection<CalendarEvent> eventItems,
+        DataGrid grid,
         TextBlock status,
         EventListFilter initialFilter,
         Action<EventListFilter> updateCurrentFilter,
@@ -159,11 +160,7 @@ internal static class EventListDialog
                         return;
                     }
 
-                    eventItems.Clear();
-                    foreach (var refreshedEvent in refreshed)
-                    {
-                        eventItems.Add(refreshedEvent);
-                    }
+                    ReplaceEventItems(eventItems, refreshed, grid);
 
                     updateCurrentFilter(nextFilter);
                     UpdateStatus(status, eventItems, nextFilter);
@@ -304,7 +301,7 @@ internal static class EventListDialog
             await RunBulkOperationAsync(async () =>
             {
                 var result = await request.BulkEditAsync(ids, update);
-                await ReloadAsync(request, eventItems, status, getCurrentFilter());
+                await ReloadAsync(request, eventItems, grid, status, getCurrentFilter());
                 status.Text = result.FormatStatus("一括編集", "変更");
             });
         }, "一括編集");
@@ -327,7 +324,7 @@ internal static class EventListDialog
             await RunBulkOperationAsync(async () =>
             {
                 var result = await request.BulkDeleteAsync(ids);
-                await ReloadAsync(request, eventItems, status, getCurrentFilter());
+                await ReloadAsync(request, eventItems, grid, status, getCurrentFilter());
                 status.Text = result.FormatStatus("一括削除", "削除");
             });
         }, "一括削除");
@@ -350,17 +347,31 @@ internal static class EventListDialog
     private static async Task ReloadAsync(
         EventListDialogRequest request,
         ObservableCollection<CalendarEvent> eventItems,
+        DataGrid grid,
         TextBlock status,
         EventListFilter filter)
     {
         var refreshed = await request.ReloadEventsAsync(filter);
+        ReplaceEventItems(eventItems, refreshed, grid);
+        UpdateStatus(status, eventItems, filter);
+    }
+
+    private static void ReplaceEventItems(
+        ObservableCollection<CalendarEvent> eventItems,
+        IEnumerable<CalendarEvent> refreshedEvents,
+        DataGrid grid)
+    {
+        var selectedIds = GetSelectedIds(grid);
         eventItems.Clear();
-        foreach (var refreshedEvent in refreshed)
+        foreach (var refreshedEvent in refreshedEvents)
         {
             eventItems.Add(refreshedEvent);
         }
 
-        UpdateStatus(status, eventItems, filter);
+        foreach (var selectedEvent in EventListSelectionRestore.GetRetainedSelection(selectedIds, eventItems))
+        {
+            grid.SelectedItems.Add(selectedEvent);
+        }
     }
 
     private static void UpdateStatus(TextBlock status, IReadOnlyCollection<CalendarEvent> eventItems, EventListFilter filter)

@@ -27,6 +27,8 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _windowPlacementTimer;
     private int? _lastMeasuredMonthLaneCapacity;
     private bool _restoringWindowPlacement;
+    private DateTime? _pendingSearchNavigationDate;
+    private Task? _pendingSearchNavigationTask;
     private MediaPlayer? _previewSoundPlayer;
     private bool _exitRequested;
     private Point? _dragStartPoint;
@@ -1032,6 +1034,54 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void SearchResultsGrid_PreviewMouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        var calendarEvent = DataGridDoubleClickHelper.GetEditableRowItem<CalendarEvent>(e.OriginalSource);
+        if (calendarEvent is null)
+        {
+            return;
+        }
+
+        var targetDate = calendarEvent.Start.Date;
+        await RunUiActionAsync(
+            () => NavigateToSearchResultDateAsync(targetDate),
+            nameof(SearchResultsGrid_PreviewMouseLeftButtonUp));
+    }
+
+    private async Task NavigateToSearchResultDateAsync(DateTime targetDate)
+    {
+        if (_pendingSearchNavigationDate == targetDate && _pendingSearchNavigationTask is { } pendingNavigation)
+        {
+            await pendingNavigation;
+            return;
+        }
+
+        if (_viewModel.CurrentMonth.Year == targetDate.Year
+            && _viewModel.CurrentMonth.Month == targetDate.Month
+            && _viewModel.IsCalendarMonthCached(targetDate)
+            && _viewModel.CalendarDays.FirstOrDefault(day => day.Date.Date == targetDate) is { } cachedDay)
+        {
+            _viewModel.SelectedDay = cachedDay;
+            return;
+        }
+
+        _pendingSearchNavigationDate = targetDate;
+        var navigationTask = _viewModel.NavigateToDateAsync(targetDate);
+        _pendingSearchNavigationTask = navigationTask;
+        try
+        {
+            await navigationTask;
+        }
+        finally
+        {
+            if (ReferenceEquals(_pendingSearchNavigationTask, navigationTask))
+            {
+                _pendingSearchNavigationTask = null;
+                _pendingSearchNavigationDate = null;
+            }
+        }
+    }
+
     private async void SearchResultsGrid_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if (e.Key != System.Windows.Input.Key.Enter || sender is not DataGrid { SelectedItem: CalendarEvent calendarEvent })
@@ -1047,7 +1097,8 @@ public partial class MainWindow : Window
     {
         await RunUiActionAsync(async () =>
         {
-            await OpenGridEventEditorAsync(calendarEvent);
+            await NavigateToSearchResultDateAsync(calendarEvent.Start.Date);
+            await OpenGridEventEditorAsync(calendarEvent, calendarDateAlreadyNavigated: true);
             await _viewModel.RefreshCurrentYearSearchAsync();
         }, nameof(OpenSearchResultEditorAsync));
     }
@@ -1121,14 +1172,17 @@ public partial class MainWindow : Window
         await ShowScheduleDialogAsync();
     }
 
-    private async Task OpenCalendarEventEditorAsync(CalendarEvent calendarEvent)
+    private async Task OpenCalendarEventEditorAsync(CalendarEvent calendarEvent, bool calendarDateAlreadyNavigated = false)
     {
-        await _viewModel.NavigateToDateAsync(calendarEvent.Start.Date);
+        if (!calendarDateAlreadyNavigated)
+        {
+            await _viewModel.NavigateToDateAsync(calendarEvent.Start.Date);
+        }
         _viewModel.SelectEvent(calendarEvent);
         await ShowScheduleDialogAsync();
     }
 
-    private async Task OpenGridEventEditorAsync(CalendarEvent calendarEvent)
+    private async Task OpenGridEventEditorAsync(CalendarEvent calendarEvent, bool calendarDateAlreadyNavigated = false)
     {
         try
         {
@@ -1139,7 +1193,7 @@ public partial class MainWindow : Window
                 return;
             }
 
-            await OpenCalendarEventEditorAsync(calendarEvent);
+            await OpenCalendarEventEditorAsync(calendarEvent, calendarDateAlreadyNavigated);
         }
         catch (Exception ex)
         {
@@ -1423,7 +1477,7 @@ public partial class MainWindow : Window
             filter,
             _viewModel.CalendarNames.ToArray(),
             LoadEventsAsync,
-            OpenGridEventEditorAsync,
+            calendarEvent => OpenGridEventEditorAsync(calendarEvent),
             async (ids, request) => await _viewModel.BulkUpdateEventsDetailedAsync(ids, request),
             async ids => await _viewModel.BulkDeleteEventsDetailedAsync(ids)));
     }

@@ -3,6 +3,36 @@ namespace FavGCalSchedulerClone.Tests;
 public sealed class EventListSearchConcurrencyRegressionTests
 {
     [Fact]
+    public void EventListRefresh_PreservesSelectionForRowsThatRemainInResults()
+    {
+        var first = new FavGCalSchedulerClone.App.Models.CalendarEvent { Id = "first", Title = "Updated first" };
+        var removed = new FavGCalSchedulerClone.App.Models.CalendarEvent { Id = "removed" };
+        var refreshed = new FavGCalSchedulerClone.App.Models.CalendarEvent { Id = "first", Title = "Refreshed first" };
+
+        var selected = FavGCalSchedulerClone.App.Views.Dialogs.EventListSelectionRestore.GetRetainedSelection(
+            [first.Id, removed.Id],
+            [refreshed]);
+
+        var retained = Assert.Single(selected);
+        Assert.Same(refreshed, retained);
+        Assert.Equal("Refreshed first", retained.Title);
+    }
+
+    [Fact]
+    public async Task EventListRefresh_RestoresRetainedSelectionsAfterReplacingRows()
+    {
+        var source = await File.ReadAllTextAsync(SourcePath());
+        var replaceStart = source.IndexOf("private static void ReplaceEventItems(", StringComparison.Ordinal);
+        var updateStatus = source.IndexOf("private static void UpdateStatus(", replaceStart, StringComparison.Ordinal);
+        Assert.True(replaceStart >= 0 && updateStatus > replaceStart);
+        var replaceMethod = source[replaceStart..updateStatus];
+
+        Assert.Contains("var selectedIds = GetSelectedIds(grid);", replaceMethod, StringComparison.Ordinal);
+        Assert.Contains("GetRetainedSelection(selectedIds, eventItems)", replaceMethod, StringComparison.Ordinal);
+        Assert.Contains("grid.SelectedItems.Add(selectedEvent)", replaceMethod, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task EventListSearch_OnlyLatestSuccessfulRequestMayCommitResultsAndFilter()
     {
         var source = await File.ReadAllTextAsync(SourcePath());

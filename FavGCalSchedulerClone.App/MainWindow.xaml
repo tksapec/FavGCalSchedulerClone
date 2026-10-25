@@ -713,9 +713,11 @@
                             <DockPanel Margin="0,0,0,6">
                                 <Button DockPanel.Dock="Right" Content="戻る" Command="{Binding ClearCurrentYearSearchCommand}" MinWidth="64" />
                                 <TextBlock Text="検索結果" FontSize="13" FontWeight="SemiBold" Foreground="#1E293B" VerticalAlignment="Center" />
+                                <TextBlock Text="行クリックで日付移動 / Enter・ダブルクリックで編集" FontSize="11" Foreground="#64748B" VerticalAlignment="Center" Margin="12,0,0,0" />
                             </DockPanel>
                             <TextBlock Grid.Row="1" Text="{Binding SearchResultsScopeText}" Foreground="#64748B" Margin="0,0,0,6" />
                             <DataGrid Grid.Row="2" ItemsSource="{Binding SearchResults}" SelectedItem="{Binding SelectedSearchResult, Mode=TwoWay}"
+                                      PreviewMouseLeftButtonUp="SearchResultsGrid_PreviewMouseLeftButtonUp"
                                       MouseDoubleClick="SearchResultsGrid_MouseDoubleClick" KeyDown="SearchResultsGrid_KeyDown">
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="日時" Binding="{Binding DateDisplayText}" Width="112" />
