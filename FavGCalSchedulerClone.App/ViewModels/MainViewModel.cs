@@ -75,6 +75,7 @@ public sealed partial class MainViewModel : ObservableObject
     private CalendarCacheKey? _lastAppliedCalendarSnapshotKey;
     private CalendarRefreshSnapshot? _lastAppliedCalendarSnapshot;
     private DateTime? _navigationAnchorDate;
+    private TimeSpan? _navigationRefreshDelayOverride;
     private readonly object _calendarCacheLock = new();
     private readonly Dictionary<CalendarCacheKey, CalendarRefreshSnapshot> _calendarCache = [];
     private CalendarDataWindow? _calendarDataWindow;
@@ -260,7 +261,12 @@ public sealed partial class MainViewModel : ObservableObject
     internal Action<DateTime>? BeforePrefetchCalendarMonth { get; set; }
     internal Action<DateTime>? BeforeReplaceCalendarDataWindow { get; set; }
     internal Action? BeforeRefreshTodos { get; set; }
-    internal TimeSpan NavigationRefreshDelay { get; set; } = TimeSpan.FromMilliseconds(10);
+    internal TimeSpan NavigationRefreshDelay
+    {
+        get => _navigationRefreshDelayOverride ?? TimeSpan.FromMilliseconds(10);
+        set => _navigationRefreshDelayOverride = value;
+    }
+    internal TimeSpan MonthNavigationRefreshDelay { get; set; } = TimeSpan.FromMilliseconds(150);
     internal int CalendarCacheCount
     {
         get

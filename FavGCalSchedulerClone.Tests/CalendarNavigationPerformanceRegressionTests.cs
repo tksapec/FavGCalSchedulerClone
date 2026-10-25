@@ -1,4 +1,5 @@
 using System.Collections.Specialized;
+using FavGCalSchedulerClone.App.Models;
 using FavGCalSchedulerClone.App.Services;
 using FavGCalSchedulerClone.App.ViewModels;
 
@@ -6,6 +7,58 @@ namespace FavGCalSchedulerClone.Tests;
 
 public sealed class CalendarNavigationPerformanceRegressionTests
 {
+    [Fact]
+    public async Task CachedMonthNavigation_DefersSnapshotApplicationUntilDebounceCompletes()
+    {
+        var viewModel = await CreateViewModelAsync();
+        var cachedTarget = viewModel.CurrentMonth.AddMonths(-1);
+        await viewModel.NavigateToDateAsync(cachedTarget);
+        await viewModel.NavigateToDateAsync(cachedTarget.AddMonths(1));
+        Assert.True(viewModel.IsCalendarMonthCached(cachedTarget));
+
+        viewModel.NavigationRefreshDelay = TimeSpan.FromHours(1);
+        var appliedSnapshots = 0;
+        viewModel.BeforeApplyCalendarSnapshot = _ => appliedSnapshots++;
+
+        viewModel.PreviousMonthCommand.Execute(null);
+
+        Assert.Equal(cachedTarget, viewModel.CurrentMonth);
+        Assert.Equal(0, appliedSnapshots);
+        Assert.All(viewModel.CalendarDays, day => Assert.Empty(day.Events));
+    }
+
+    [Fact]
+    public async Task MonthNavigation_DefaultDebounceLeavesTimeForRapidInput()
+    {
+        var viewModel = await CreateViewModelAsync();
+        var cachedTarget = viewModel.CurrentMonth.AddMonths(-1);
+        await viewModel.NavigateToDateAsync(cachedTarget);
+        await viewModel.NavigateToDateAsync(cachedTarget.AddMonths(1));
+
+        var appliedSnapshots = 0;
+        viewModel.BeforeApplyCalendarSnapshot = _ => Interlocked.Increment(ref appliedSnapshots);
+        viewModel.PreviousMonthCommand.Execute(null);
+        await Task.Delay(50);
+
+        Assert.Equal(0, Volatile.Read(ref appliedSnapshots));
+        await WaitUntilAsync(() => Volatile.Read(ref appliedSnapshots) == 1);
+    }
+
+    [Fact]
+    public async Task WeekNavigation_KeepsExistingShortRefreshDelay()
+    {
+        var viewModel = await CreateViewModelAsync();
+        viewModel.CurrentViewMode = CalendarViewMode.Week;
+        await viewModel.NavigateToDateAsync(DateTime.Today);
+
+        var appliedSnapshots = 0;
+        viewModel.BeforeApplyCalendarSnapshot = _ => Interlocked.Increment(ref appliedSnapshots);
+        viewModel.NextMonthCommand.Execute(null);
+        await Task.Delay(50);
+
+        Assert.Equal(1, Volatile.Read(ref appliedSnapshots));
+    }
+
     [Fact]
     public async Task DistantMonthNavigation_ReplacesCalendarInBulkWithoutResettingOldChildCollections()
     {

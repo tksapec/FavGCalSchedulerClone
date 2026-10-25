@@ -555,17 +555,19 @@ public sealed partial class MainViewModel
 
     private void ScheduleCalendarRefreshAfterNavigation()
     {
+        var refreshDelay = _navigationRefreshDelayOverride
+            ?? (IsMonthView ? MonthNavigationRefreshDelay : NavigationRefreshDelay);
         CancelActiveCalendarRefresh();
         _deferredCalendarRefreshCts?.Cancel();
         _deferredCalendarRefreshCts = new CancellationTokenSource();
-        _ = RefreshCalendarAfterNavigationDelayAsync(_deferredCalendarRefreshCts.Token);
+        _ = RefreshCalendarAfterNavigationDelayAsync(_deferredCalendarRefreshCts.Token, refreshDelay);
     }
 
-    private async Task RefreshCalendarAfterNavigationDelayAsync(CancellationToken cancellationToken)
+    private async Task RefreshCalendarAfterNavigationDelayAsync(CancellationToken cancellationToken, TimeSpan delay)
     {
         try
         {
-            await Task.Delay(NavigationRefreshDelay, cancellationToken);
+            await Task.Delay(delay, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             await RefreshCalendarSafelyAsync(BeginCalendarRefresh(saveDisplayMonth: false, refreshTodos: false));
         }
@@ -606,7 +608,7 @@ public sealed partial class MainViewModel
 
     private void ShowImmediateCalendarShellForMonth(DateTime month)
     {
-        if (TryGetCalendarCache(month) is { } snapshot)
+        if (!IsMonthView && TryGetCalendarCache(month) is { } snapshot)
         {
             ApplyCalendarSnapshotIfNeeded(
                 snapshot,
@@ -615,6 +617,9 @@ public sealed partial class MainViewModel
                 clearPendingSelectedDate: false);
             return;
         }
+
+        _lastAppliedCalendarSnapshot = null;
+        _lastAppliedCalendarSnapshotKey = null;
 
         var (gridStart, gridEnd) = DateRangeHelper.MonthGridRange(month, _settings.WeekStartsOnMonday);
         var days = Enumerable.Range(0, (gridEnd - gridStart).Days)
