@@ -6,6 +6,31 @@ namespace FavGCalSchedulerClone.Tests;
 public sealed class ReminderFailureContainmentRegressionTests
 {
     [Fact]
+    public async Task CheckDueRemindersAsync_ClearsPersistedErrorAfterSuccessfulCheck()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        try
+        {
+            var repository = new CalendarRepository(dbPath);
+            await repository.InitializeAsync();
+            await repository.SaveSettingValueAsync("reminder:last-error", "2026-09-22T08:08:53.5180550+09:00 old error");
+            using var service = new ReminderNotificationService(repository);
+
+            await service.CheckDueRemindersAsync(DateTimeOffset.Now);
+
+            Assert.Null(service.CurrentDiagnostics.LastError);
+            Assert.Null(await repository.LoadSettingValueAsync("reminder:last-error"));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            DeleteIfExists(dbPath);
+            DeleteIfExists(dbPath + "-wal");
+            DeleteIfExists(dbPath + "-shm");
+        }
+    }
+
+    [Fact]
     public async Task CheckDueRemindersAsync_DoesNotRethrowWhenErrorPersistenceAlsoFails()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");

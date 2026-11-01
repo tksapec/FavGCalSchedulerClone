@@ -471,6 +471,11 @@ public sealed class ReminderNotificationService : IDisposable
 
             await SaveFiredStateAsync(fired);
             await SaveSnoozeStateAsync(snoozed);
+            if (failedCount == 0)
+            {
+                await _repository.SaveSettingValueAsync(ReminderLastErrorKey, null);
+            }
+
             var lastError = await _repository.LoadSettingValueAsync(ReminderLastErrorKey);
             _diagnostics = new ReminderMonitoringSnapshot(
                 _isRunning, _startedAt, current, _isRunning ? current.Add(CheckInterval) : null,
