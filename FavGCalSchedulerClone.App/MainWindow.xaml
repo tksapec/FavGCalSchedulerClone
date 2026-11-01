@@ -36,9 +36,19 @@
         <SolidColorBrush x:Key="HolidayBrush" Color="#FFD6D9" />
         <SolidColorBrush x:Key="OutsideMonthBrush" Color="#F1F5F9" />
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+        <DataTemplate x:Key="EventDetailsToolTipTemplate">
+            <Border Background="#FFFDF7" BorderBrush="#94A3B8" BorderThickness="1" Padding="8">
+                <ScrollViewer MaxWidth="480" MaxHeight="320"
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <TextBlock Text="{Binding}" TextWrapping="Wrap" Foreground="#1E293B" />
+                </ScrollViewer>
+            </Border>
+        </DataTemplate>
         <DataTemplate x:Key="ColoredTitleTemplate">
-            <Border Background="{Binding DisplayColor}" BorderBrush="#64748B" BorderThickness="1" Margin="1" Padding="4,1"
-                    ToolTip="{Binding ToolTipText}">
+            <Border Background="{Binding DisplayColor}" BorderBrush="#64748B" BorderThickness="1" Margin="1" Padding="4,1">
+                <Border.ToolTip>
+                    <ToolTip Content="{Binding ToolTipText}" ContentTemplate="{StaticResource EventDetailsToolTipTemplate}" />
+                </Border.ToolTip>
                 <TextBlock Text="{Binding Title}" Foreground="{Binding DisplayForegroundColor}"
                            FontSize="{Binding DataContext.SideListFontSize, RelativeSource={RelativeSource AncestorType=Window}}"
                            TextTrimming="CharacterEllipsis" />
@@ -189,7 +199,11 @@
 
         <Style x:Key="EventSegmentBar" TargetType="Border" BasedOn="{StaticResource EventBar}">
             <Setter Property="Background" Value="{Binding DisplayColor}" />
-            <Setter Property="ToolTip" Value="{Binding ToolTipText}" />
+            <Setter Property="ToolTip">
+                <Setter.Value>
+                    <ToolTip Content="{Binding ToolTipText}" ContentTemplate="{StaticResource EventDetailsToolTipTemplate}" />
+                </Setter.Value>
+            </Setter>
             <Style.Triggers>
                 <DataTrigger Binding="{Binding Lane}" Value="0">
                     <Setter Property="Padding" Value="26,0,2,0" />

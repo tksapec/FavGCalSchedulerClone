@@ -20,7 +20,10 @@ public static class CalendarEventToolTipFormatter
         };
 
         AddValue(lines, "場所", calendarEvent.Location);
-        AddValue(lines, "内容", calendarEvent.Description);
+        var description = calendarEvent.IsTodoLike
+            ? TagService.GetTodoBodyForEditing(calendarEvent.Description)
+            : calendarEvent.Description;
+        AddDescription(lines, description);
         var appReminderMinutes = calendarEvent.EffectiveAppReminderMinutesBeforeStart;
         if (appReminderMinutes.Count > 0)
         {
@@ -41,7 +44,7 @@ public static class CalendarEventToolTipFormatter
             lines.Add($"優先度 {calendarEvent.TodoPriorityDisplayText} / 進捗 {calendarEvent.TodoProgress}%");
         }
 
-        return string.Join(Environment.NewLine, lines.Select(TrimLine));
+        return string.Join(Environment.NewLine, lines);
     }
 
     private static string FormatDate(CalendarEvent calendarEvent)
@@ -66,6 +69,20 @@ public static class CalendarEventToolTipFormatter
             lines.Add(header);
             lines.Add(TrimValue(value));
         }
+    }
+
+    private static void AddDescription(ICollection<string> lines, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        lines.Add("内容");
+        lines.Add(value
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Trim());
     }
 
     private static string TrimValue(string value)

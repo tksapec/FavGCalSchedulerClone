@@ -3,6 +3,8 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Globalization;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using FavGCalSchedulerClone.App.Models;
@@ -46,6 +48,8 @@ public sealed class MonthEventLayer : FrameworkElement
     private IList<CalendarEventSegment>? _subscribedSegments;
     private INotifyCollectionChanged? _subscribedCollection;
     private CalendarEventSegment? _toolTipSegment;
+    private ToolTip? _activeEventToolTip;
+    private readonly System.Windows.Threading.DispatcherTimer _toolTipCloseTimer;
 
     public static readonly DependencyProperty SegmentsProperty = DependencyProperty.Register(
         nameof(Segments),
@@ -67,6 +71,11 @@ public sealed class MonthEventLayer : FrameworkElement
     public MonthEventLayer()
     {
         SnapsToDevicePixels = true;
+        _toolTipCloseTimer = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(250)
+        };
+        _toolTipCloseTimer.Tick += (_, _) => CloseEventToolTip();
         Loaded += MonthEventLayer_Loaded;
         Unloaded += MonthEventLayer_Unloaded;
     }
@@ -158,6 +167,7 @@ public sealed class MonthEventLayer : FrameworkElement
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
+        _toolTipCloseTimer.Stop();
 
         var segment = HitTestSegment(e.GetPosition(this));
         if (ReferenceEquals(_toolTipSegment, segment))
@@ -165,15 +175,45 @@ public sealed class MonthEventLayer : FrameworkElement
             return;
         }
 
+        CloseEventToolTip();
         _toolTipSegment = segment;
-        ToolTip = segment?.ToolTipText;
+        if (string.IsNullOrWhiteSpace(segment?.ToolTipText))
+        {
+            return;
+        }
+
+        var eventToolTip = new ToolTip
+        {
+            Content = segment.ToolTipText,
+            ContentTemplate = (DataTemplate)FindResource("EventDetailsToolTipTemplate"),
+            PlacementTarget = this,
+            Placement = PlacementMode.Mouse,
+            StaysOpen = true
+        };
+        eventToolTip.MouseEnter += (_, _) => _toolTipCloseTimer.Stop();
+        eventToolTip.MouseLeave += (_, _) => _toolTipCloseTimer.Start();
+        _activeEventToolTip = eventToolTip;
+        ToolTip = eventToolTip;
+        eventToolTip.IsOpen = true;
     }
 
     protected override void OnMouseLeave(MouseEventArgs e)
     {
-        _toolTipSegment = null;
-        ToolTip = null;
+        _toolTipCloseTimer.Start();
         base.OnMouseLeave(e);
+    }
+
+    private void CloseEventToolTip()
+    {
+        _toolTipCloseTimer.Stop();
+        if (_activeEventToolTip is not null)
+        {
+            _activeEventToolTip.IsOpen = false;
+            _activeEventToolTip = null;
+        }
+
+        ToolTip = null;
+        _toolTipSegment = null;
     }
 
     private void DrawSegment(
@@ -317,8 +357,7 @@ public sealed class MonthEventLayer : FrameworkElement
             layer.AttachSubscriptions();
         }
 
-        layer._toolTipSegment = null;
-        layer.ToolTip = null;
+        layer.CloseEventToolTip();
         layer.InvalidateVisual();
     }
 
@@ -331,8 +370,7 @@ public sealed class MonthEventLayer : FrameworkElement
     private void MonthEventLayer_Unloaded(object sender, RoutedEventArgs e)
     {
         DetachSubscriptions();
-        _toolTipSegment = null;
-        ToolTip = null;
+        CloseEventToolTip();
     }
 
     private void AttachSubscriptions()
@@ -375,8 +413,7 @@ public sealed class MonthEventLayer : FrameworkElement
     private void Segments_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         RebuildSegmentSubscriptions();
-        _toolTipSegment = null;
-        ToolTip = null;
+        CloseEventToolTip();
         InvalidateVisual();
     }
 

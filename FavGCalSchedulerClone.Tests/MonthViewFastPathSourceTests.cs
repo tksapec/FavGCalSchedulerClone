@@ -26,6 +26,27 @@ public sealed class MonthViewFastPathSourceTests
     }
 
     [Fact]
+    public async Task MonthEventLayer_OpensTheDynamicEventToolTipAndClosesItOnMouseLeave()
+    {
+        var source = await File.ReadAllTextAsync(LayerPath);
+        var mouseMove = GetMethodBody(source, "protected override void OnMouseMove", "protected override void OnMouseLeave");
+        var mouseLeave = GetMethodBody(source, "protected override void OnMouseLeave", "private void DrawSegment");
+
+        Assert.Contains("IsOpen = true", mouseMove);
+        Assert.Contains("PlacementTarget = this", mouseMove);
+        Assert.Contains("_toolTipCloseTimer.Start()", mouseLeave);
+        Assert.Contains("_activeEventToolTip.IsOpen = false", source);
+    }
+
+    private static string GetMethodBody(string source, string methodStartMarker, string nextMethodMarker)
+    {
+        var start = source.IndexOf(methodStartMarker, StringComparison.Ordinal);
+        var end = source.IndexOf(nextMethodMarker, start, StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start);
+        return source[start..end];
+    }
+
+    [Fact]
     public async Task MonthView_PreservesDayChromeAndInteractionHandlersInXaml()
     {
         var xaml = await File.ReadAllTextAsync(MainWindowXamlPath);
