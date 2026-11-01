@@ -6,15 +6,23 @@ namespace FavGCalSchedulerClone.App.Views.Dialogs;
 
 internal static class BulkEventUpdateDialog
 {
-    public static BulkEventUpdateRequest? Show(DialogUiFactory ui, IReadOnlyList<string> calendarIds)
+    public static BulkEventUpdateRequest? Show(DialogUiFactory ui, IReadOnlyList<GoogleCalendarSelectionItem> calendars)
     {
         var window = ui.CreateOwnedDialog("一括編集", 420, 320, resizeMode: ResizeMode.NoResize);
         var root = new StackPanel { Margin = new Thickness(12) };
         window.Content = root;
 
         var calendarEnabled = new CheckBox { Content = "カレンダーを変更", Margin = new Thickness(0, 0, 0, 4) };
-        var calendar = new ComboBox { ItemsSource = calendarIds, MinWidth = 220, IsEnabled = false, Margin = new Thickness(20, 0, 0, 8) };
-        calendar.SelectedIndex = calendarIds.Count > 0 ? 0 : -1;
+        var calendar = new ComboBox
+        {
+            ItemsSource = calendars,
+            DisplayMemberPath = nameof(GoogleCalendarSelectionItem.Summary),
+            SelectedValuePath = nameof(GoogleCalendarSelectionItem.Id),
+            MinWidth = 220,
+            IsEnabled = false,
+            Margin = new Thickness(20, 0, 0, 8)
+        };
+        calendar.SelectedIndex = calendars.Count > 0 ? 0 : -1;
 
         var colorEnabled = new CheckBox { Content = "色を変更", Margin = new Thickness(0, 0, 0, 4) };
         var color = ui.CreateColorComboBox(null);
@@ -58,7 +66,7 @@ internal static class BulkEventUpdateDialog
                 emailReminder.IsChecked = false;
             }
 
-            ok.IsEnabled = calendarEnabled.IsChecked == true && calendar.SelectedItem is string
+            ok.IsEnabled = calendarEnabled.IsChecked == true && calendar.SelectedValue is string
                 || colorEnabled.IsChecked == true
                 || reminderEnabled.IsChecked == true;
         }
@@ -78,7 +86,7 @@ internal static class BulkEventUpdateDialog
         {
             var selectedReminderMinutes = minutes.SelectedValue as int?;
             result = new BulkEventUpdateRequest(
-                CalendarId: calendarEnabled.IsChecked == true ? calendar.SelectedItem as string : null,
+                CalendarId: calendarEnabled.IsChecked == true ? calendar.SelectedValue as string : null,
                 ColorId: colorEnabled.IsChecked == true ? color.SelectedValue as string : null,
                 ReminderMinutesBeforeStart: reminderEnabled.IsChecked == true ? selectedReminderMinutes : null,
                 AppReminderEnabled: reminderEnabled.IsChecked == true ? selectedReminderMinutes is null ? false : appReminder.IsChecked == true : null,

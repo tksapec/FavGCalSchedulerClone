@@ -46,6 +46,22 @@ public sealed partial class MainViewModel
             return false;
         }
 
+        if (clipboard.Cut)
+        {
+            var currentSource = await _repository.FindEventByIdAsync(clipboard.Event.Id);
+            if (currentSource is null || currentSource.IsDeleted)
+            {
+                Status = "切り取り元の予定が見つからないため貼り付けできません。";
+                return false;
+            }
+
+            // The user may edit, move, or sync the event after cutting it. Use the
+            // current stored row so the destination and remote Google identity are
+            // not replaced by an old clipboard snapshot.
+            clipboard = clipboard with { Event = currentSource };
+            _labelClipboard = clipboard;
+        }
+
         var pasted = CloneEventAsNewLocalEvent(clipboard.Event);
         var dayShift = (targetDate.Date - clipboard.Event.Start.Date).Days;
         pasted.Start = pasted.Start.AddDays(dayShift);

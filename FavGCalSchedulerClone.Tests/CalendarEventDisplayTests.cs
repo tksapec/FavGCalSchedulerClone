@@ -123,6 +123,8 @@ public sealed class CalendarEventDisplayTests
         Assert.Contains("2026年05月18日", text);
         Assert.DoesNotContain("2026年05月19日", text);
         Assert.DoesNotContain("00:00", text);
+        Assert.Contains("2026/05/18", item.ListEndText);
+        Assert.DoesNotContain("2026/05/19", item.ListEndText);
     }
 
     [Fact]

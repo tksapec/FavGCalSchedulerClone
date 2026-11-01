@@ -332,8 +332,15 @@ public sealed class GoogleCalendarSyncService
             {
                 if (!localEvent.IsDeleted)
                 {
-                    await _repository.HardDeleteEventAsync(localEvent.Id);
-                    deleted++;
+                    if (await _repository.TryHardDeleteEventAsync(localEvent))
+                    {
+                        deleted++;
+                    }
+                    else
+                    {
+                        failed++;
+                        failures.Add(CreateFailureDiagnostic(localEvent, "ローカル変更破棄", new InvalidOperationException("破棄処理中にローカル予定が変更されました。"), "新しいローカル変更を保持しました。"));
+                    }
                 }
                 else
                 {
@@ -350,17 +357,32 @@ public sealed class GoogleCalendarSyncService
                 if (string.Equals(googleEvent.Status, "cancelled", StringComparison.OrdinalIgnoreCase))
                 {
                     localEvent.IsDeleted = true;
-                    await _repository.UpsertSyncedEventAsync(localEvent);
-                    restored++;
+                    if (await _repository.TryUpsertSyncedEventAsync(localEvent, localEvent))
+                    {
+                        restored++;
+                    }
+                    else
+                    {
+                        failed++;
+                        failures.Add(CreateFailureDiagnostic(localEvent, "ローカル変更破棄", new InvalidOperationException("破棄処理中にローカル予定が変更されました。"), "新しいローカル変更を保持しました。"));
+                    }
                     continue;
                 }
 
-                await _repository.UpsertSyncedEventAsync(GoogleEventMapper.FromGoogleEvent(
+                var restoredEvent = GoogleEventMapper.FromGoogleEvent(
                     googleEvent,
                     localEvent.CalendarId,
                     GetDefaultReminders(reminderDefaults, localEvent.CalendarId),
-                    settings.AdoptGoogleEmailRemindersAsLocalNotifications));
-                restored++;
+                    settings.AdoptGoogleEmailRemindersAsLocalNotifications);
+                if (await _repository.TryUpsertSyncedEventAsync(restoredEvent, localEvent))
+                {
+                    restored++;
+                }
+                else
+                {
+                    failed++;
+                    failures.Add(CreateFailureDiagnostic(localEvent, "ローカル変更破棄", new InvalidOperationException("破棄処理中にローカル予定が変更されました。"), "新しいローカル変更を保持しました。"));
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -677,7 +699,10 @@ public sealed class GoogleCalendarSyncService
             }
         }
 
-        return new SyncPreview(DateTimeOffset.Now, pushItems, pullItems, deleteItems, conflictItems, errorItems, calendars);
+        return new SyncPreview(DateTimeOffset.Now, pushItems, pullItems, deleteItems, conflictItems, errorItems, calendars)
+        {
+            ConflictPolicy = settings.SyncConflictPolicy
+        };
     }
 
     public async Task<SyncDiagnosticsSnapshot> LoadDiagnosticsAsync(AppSettings settings)

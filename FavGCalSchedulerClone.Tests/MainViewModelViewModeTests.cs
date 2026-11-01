@@ -1102,6 +1102,12 @@ public sealed class MainViewModelViewModeTests
         Assert.Equal("2", viewModel.SelectedEvent?.ColorId);
         Assert.Equal(15, viewModel.SelectedEvent?.ReminderMinutesBeforeStart);
         Assert.Equal(start.AddDays(3), viewModel.SelectedDay?.Date);
+        Assert.Equal("予定移動", viewModel.UndoStatusText);
+
+        Assert.True(await viewModel.UndoLastChangeAsync());
+        var restored = Assert.IsType<CalendarEvent>(await viewModel.FindEventByIdAsync(calendarEvent.Id));
+        Assert.Equal(start.AddHours(9), restored.Start.DateTime);
+        Assert.Equal(start.AddHours(10), restored.End.DateTime);
     }
 
     [Fact]

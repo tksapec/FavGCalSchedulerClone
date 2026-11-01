@@ -28,6 +28,7 @@ public sealed record SyncPreview(
     IReadOnlyList<SyncPreviewItem> ErrorItems,
     IReadOnlyList<SyncCalendarDiagnostic> Calendars)
 {
+    public SyncConflictPolicy ConflictPolicy { get; init; } = SyncConflictPolicy.SkipLocalDirty;
     public int PushCount => PushItems.Count;
     public int PullCount => PullItems.Count;
     public int DeleteCount => DeleteItems.Count;

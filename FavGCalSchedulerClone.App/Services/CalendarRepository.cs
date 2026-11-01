@@ -737,6 +737,26 @@ public sealed class CalendarRepository : IEventRepository, ISettingsRepository, 
         return await command.ExecuteNonQueryAsync() > 0;
     }
 
+    public async Task<bool> TryHardDeleteEventAsync(CalendarEvent plannedEvent)
+    {
+        ArgumentNullException.ThrowIfNull(plannedEvent);
+        await EnterEventMutationAsync();
+        try
+        {
+            await using var connection = OpenConnection();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM events WHERE id = $id AND calendar_id = $calendar_id AND updated_at_utc_ticks = $updated_at_utc_ticks";
+            command.Parameters.AddWithValue("$id", plannedEvent.Id);
+            command.Parameters.AddWithValue("$calendar_id", plannedEvent.CalendarId);
+            command.Parameters.AddWithValue("$updated_at_utc_ticks", plannedEvent.UpdatedAt.UtcTicks);
+            return await command.ExecuteNonQueryAsync() > 0;
+        }
+        finally
+        {
+            ExitEventMutation();
+        }
+    }
+
     public async Task DeleteEventAsync(CalendarEvent calendarEvent)
     {
         calendarEvent.IsDeleted = true;

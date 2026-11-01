@@ -26,6 +26,19 @@ internal static class SyncDialogs
         DockPanel.SetDock(summary, Dock.Top);
         panel.Children.Add(summary);
 
+        var localDeleteCount = preview.DeleteItems.Count(item => !string.Equals(item.Kind, "remote-delete", StringComparison.Ordinal));
+        var remoteDeleteCount = preview.DeleteItems.Count - localDeleteCount;
+        var directionAndPolicy = new TextBlock
+        {
+            Text = $"実行方向: ローカルから Google へ送信 {preview.PushCount} 件 / 削除 {localDeleteCount} 件、Google からローカルへ取得 {preview.PullCount} 件 / 削除 {remoteDeleteCount} 件\n"
+                + $"競合時の扱い: {GetConflictPolicyWarning(preview.ConflictPolicy)}",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 8),
+            Foreground = System.Windows.Media.Brushes.DarkSlateGray
+        };
+        DockPanel.SetDock(directionAndPolicy, Dock.Top);
+        panel.Children.Add(directionAndPolicy);
+
         var buttons = DialogButtons(window, "同期実行", "キャンセル");
         DockPanel.SetDock(buttons, Dock.Bottom);
         panel.Children.Add(buttons);
@@ -89,11 +102,11 @@ internal static class SyncDialogs
         SyncDiagnosticsSnapshot diagnostics,
         Func<Task<SyncDiagnosticsSnapshot>> reloadDiagnosticsAsync,
         Func<Task> clearAsync,
-        Func<IReadOnlyList<string>, Task>? retryFailuresAsync = null,
+        Func<IReadOnlyList<string>, Task<SyncResult>>? retryFailuresAsync = null,
         Func<string, Task>? openDirtyItemAsync = null,
-        Func<IReadOnlyList<string>, Task>? retryDirtyItemsAsync = null,
-        Func<IReadOnlyList<string>, Task>? markDirtyItemsSyncedAsync = null,
-        Func<IReadOnlyList<string>, Task>? discardDirtyItemsAsync = null,
+        Func<IReadOnlyList<string>, Task<SyncResult>>? retryDirtyItemsAsync = null,
+        Func<IReadOnlyList<string>, Task<int>>? markDirtyItemsSyncedAsync = null,
+        Func<IReadOnlyList<string>, Task<SyncResult>>? discardDirtyItemsAsync = null,
         Func<Task<int>>? refreshGoogleRemindersAsync = null)
     {
         var currentDiagnostics = diagnostics;
@@ -115,12 +128,33 @@ internal static class SyncDialogs
         var historyItems = new ObservableCollection<SyncResult>(diagnostics.History);
         Action updateRetryFailuresState = static () => { };
         Action updateDirtyActionState = static () => { };
-
-        async Task RunAndRefreshAsync(Func<Task> operation, string successMessage)
+        Action updateOtherActionState = static () => { };
+        var syncOperationInProgress = false;
+        window.Closing += (_, eventArgs) =>
         {
+            if (syncOperationInProgress)
+            {
+                eventArgs.Cancel = true;
+            }
+        };
+
+        async Task RunAndRefreshAsync(Func<Task> operation, Func<string> successMessage, Func<string>? refreshFailureMessage = null)
+        {
+            if (syncOperationInProgress)
+            {
+                return;
+            }
+
+            syncOperationInProgress = true;
+            updateRetryFailuresState();
+            updateDirtyActionState();
+            updateOtherActionState();
+            status.Text = "同期センターの操作を実行中です...";
+            var operationCompleted = false;
             try
             {
                 await operation();
+                operationCompleted = true;
                 currentDiagnostics = await reloadDiagnosticsAsync();
                 ReplaceAll(calendarItems, currentDiagnostics.Calendars);
                 ReplaceAll(dirtyItems, currentDiagnostics.DirtyItems);
@@ -129,11 +163,20 @@ internal static class SyncDialogs
                 summary.Text = BuildDiagnosticsSummary(currentDiagnostics);
                 updateRetryFailuresState();
                 updateDirtyActionState();
-                status.Text = successMessage;
+                status.Text = successMessage();
             }
             catch (Exception ex)
             {
-                status.Text = $"操作に失敗しました: {ex.Message}";
+                status.Text = operationCompleted
+                    ? $"{refreshFailureMessage?.Invoke() ?? "操作は完了しました。"} 診断情報の再読み込みに失敗しました: {ex.Message}"
+                    : $"操作に失敗しました: {ex.Message}";
+            }
+            finally
+            {
+                syncOperationInProgress = false;
+                updateRetryFailuresState();
+                updateDirtyActionState();
+                updateOtherActionState();
             }
         }
 
@@ -151,9 +194,17 @@ internal static class SyncDialogs
         var exportDirty = new Button { Content = "未同期CSV出力", MinWidth = 116, Height = 28, Margin = new Thickness(0, 0, 8, 0) };
         var exportLog = new Button { Content = "診断ログ出力", MinWidth = 116, Height = 28, Margin = new Thickness(0, 0, 8, 0) };
         var refreshReminders = new Button { Content = "Google通知設定を再取得", MinWidth = 150, Height = 28, Margin = new Thickness(0, 0, 8, 0), IsEnabled = refreshGoogleRemindersAsync is not null };
+        updateOtherActionState = () =>
+        {
+            refreshReminders.IsEnabled = !syncOperationInProgress && refreshGoogleRemindersAsync is not null;
+            clear.IsEnabled = !syncOperationInProgress;
+            close.IsEnabled = !syncOperationInProgress;
+        };
+        updateOtherActionState();
         updateRetryFailuresState = () =>
         {
-            retryFailures.IsEnabled = retryFailuresAsync is not null
+            retryFailures.IsEnabled = !syncOperationInProgress
+                && retryFailuresAsync is not null
                 && currentDiagnostics.Failures.Any(item => !string.IsNullOrWhiteSpace(item.LocalId));
         };
         updateRetryFailuresState();
@@ -166,9 +217,13 @@ internal static class SyncDialogs
                     .Where(id => !string.IsNullOrWhiteSpace(id))
                     .Distinct(StringComparer.Ordinal)
                     .ToArray();
-                if (ConfirmBulk(owner, "失敗分を再同期", ids.Length, "失敗診断に記録された dirty データだけを再同期します。"))
+                if (ConfirmBulk(owner, "失敗分を再同期", ids.Length, "失敗診断に記録された未同期データだけを再同期します。"))
                 {
-                    await RunAndRefreshAsync(() => retryFailuresAsync(ids), "失敗した同期を再試行しました。");
+                    SyncResult? result = null;
+                    await RunAndRefreshAsync(
+                        async () => { result = await retryFailuresAsync(ids); },
+                        () => BuildSyncResultStatus("失敗分の同期を再試行しました。", result, currentDiagnostics.DirtyCount),
+                        () => BuildSyncResultStatus("失敗分の同期を再試行しました。", result, null));
                 }
             }
         };
@@ -176,7 +231,7 @@ internal static class SyncDialogs
         {
             if (refreshGoogleRemindersAsync is not null)
             {
-                await RunAndRefreshAsync(async () => await refreshGoogleRemindersAsync(), "Google通知設定を更新しました。");
+                await RunAndRefreshAsync(async () => await refreshGoogleRemindersAsync(), () => "Google通知設定を更新しました。");
             }
         };
         exportDirty.Click += (_, _) => ExportText(owner, "unsynced.csv", BuildDirtyCsv(currentDiagnostics.DirtyItems));
@@ -185,7 +240,7 @@ internal static class SyncDialogs
         {
             if (ConfirmBulk(owner, "ログ削除", 1, "同期ログと失敗診断を削除します。未同期データは削除されません。"))
             {
-                await RunAndRefreshAsync(clearAsync, "同期ログを削除しました。");
+                await RunAndRefreshAsync(clearAsync, () => "同期ログを削除しました。");
             }
         };
         close.Click += (_, _) => window.Close();
@@ -244,10 +299,10 @@ internal static class SyncDialogs
         void UpdateDirtyActionState()
         {
             var hasSelection = GetSelectedDirtyIds(dirtyGrid).Count > 0;
-            openDirty.IsEnabled = hasSelection && openDirtyItemAsync is not null;
-            retryDirty.IsEnabled = hasSelection && retryDirtyItemsAsync is not null;
-            markSynced.IsEnabled = hasSelection && markDirtyItemsSyncedAsync is not null;
-            discardLocal.IsEnabled = hasSelection && discardDirtyItemsAsync is not null;
+            openDirty.IsEnabled = !syncOperationInProgress && hasSelection && openDirtyItemAsync is not null;
+            retryDirty.IsEnabled = !syncOperationInProgress && hasSelection && retryDirtyItemsAsync is not null;
+            markSynced.IsEnabled = !syncOperationInProgress && hasSelection && markDirtyItemsSyncedAsync is not null;
+            discardLocal.IsEnabled = !syncOperationInProgress && hasSelection && discardDirtyItemsAsync is not null;
         }
 
         updateDirtyActionState = UpdateDirtyActionState;
@@ -265,17 +320,22 @@ internal static class SyncDialogs
         retryDirty.Click += async (_, _) =>
         {
             var ids = GetSelectedDirtyIds(dirtyGrid);
-            if (retryDirtyItemsAsync is not null && ConfirmBulk(owner, "選択行を再同期", ids.Count, "選択した dirty データだけを Google へ送信します。"))
+            if (retryDirtyItemsAsync is not null && ConfirmBulk(owner, "選択行を再同期", ids.Count, "選択した未同期データだけを Google へ送信します。"))
             {
-                await RunAndRefreshAsync(() => retryDirtyItemsAsync(ids), "選択した未同期データを再同期しました。");
+                SyncResult? result = null;
+                await RunAndRefreshAsync(
+                    async () => { result = await retryDirtyItemsAsync(ids); },
+                    () => BuildSyncResultStatus("選択した未同期データの再同期が完了しました。", result, currentDiagnostics.DirtyCount),
+                    () => BuildSyncResultStatus("選択した未同期データの再同期が完了しました。", result, null));
             }
         };
         markSynced.Click += async (_, _) =>
         {
             var ids = GetSelectedDirtyIds(dirtyGrid);
-            if (markDirtyItemsSyncedAsync is not null && ConfirmBulk(owner, "選択行を同期済み扱い", ids.Count, "Googleへ送信せず dirty 状態を解除します。実行前に自動バックアップを作成します。"))
+            if (markDirtyItemsSyncedAsync is not null && ConfirmBulk(owner, "選択行を同期済み扱い", ids.Count, "Googleへ送信せず未同期状態を解除します。実行前に自動バックアップを作成します。"))
             {
-                await RunAndRefreshAsync(() => markDirtyItemsSyncedAsync(ids), "選択した未同期データを同期済み扱いにしました。");
+                var updated = 0;
+                await RunAndRefreshAsync(async () => { updated = await markDirtyItemsSyncedAsync(ids); }, () => $"選択した {updated} 件を同期済み扱いにしました。");
             }
         };
         discardLocal.Click += async (_, _) =>
@@ -283,7 +343,11 @@ internal static class SyncDialogs
             var ids = GetSelectedDirtyIds(dirtyGrid);
             if (discardDirtyItemsAsync is not null && ConfirmBulk(owner, "選択行のローカル変更を破棄", ids.Count, "Googleから再取得できるものだけ復元し、ローカル新規は削除します。実行前に自動バックアップを作成します。"))
             {
-                await RunAndRefreshAsync(() => discardDirtyItemsAsync(ids), "選択したローカル変更を破棄しました。");
+                SyncResult? result = null;
+                await RunAndRefreshAsync(
+                    async () => { result = await discardDirtyItemsAsync(ids); },
+                    () => BuildSyncResultStatus("選択したローカル変更の破棄が完了しました。", result, currentDiagnostics.DirtyCount),
+                    () => BuildSyncResultStatus("選択したローカル変更の破棄が完了しました。", result, null));
             }
         };
         dirtyButtons.Children.Add(openDirty);
@@ -417,6 +481,34 @@ internal static class SyncDialogs
 
         var message = $"{operation}を実行します。\n対象件数: {count} 件\n影響範囲: {impact}";
         return MessageBox.Show(owner, message, operation, MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
+    }
+
+    private static string GetConflictPolicyWarning(SyncConflictPolicy conflictPolicy) => conflictPolicy switch
+    {
+        SyncConflictPolicy.SkipLocalDirty => "ローカルの未同期変更を保持して通常フィールドをスキップします。",
+        SyncConflictPolicy.PreferLocal => "ローカルの変更をGoogleへ送信します。",
+        SyncConflictPolicy.PreferGoogle => "Google側の内容でローカル予定を更新します。",
+        _ => "競合時の設定を判別できません。実行前に設定を確認してください。"
+    };
+
+    private static string BuildSyncResultStatus(string successMessage, SyncResult? result, int? remainingDirtyCount)
+    {
+        if (result is null)
+        {
+            return remainingDirtyCount is int remaining
+                ? $"{successMessage} 未同期残数 {remaining} 件。"
+                : successMessage;
+        }
+
+        var outcome = result.Failed > 0
+            ? "一部の同期に失敗しました。Google同期診断を確認してください。"
+            : result.Conflicts > 0
+                ? "競合が発生しました。Google同期診断を確認してください。"
+            : remainingDirtyCount is > 0
+                    ? "未同期データが残っています。"
+                    : successMessage;
+        var remainingText = remainingDirtyCount is int count ? $" / 未同期残数 {count} 件" : string.Empty;
+        return $"{outcome} {result.SummaryText}{remainingText}。{result.Message}";
     }
 
     private static void ExportText(Window owner, string fileName, string content)

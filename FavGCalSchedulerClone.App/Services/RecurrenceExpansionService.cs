@@ -45,6 +45,7 @@ public static class RecurrenceExpansionService
                 continue;
             }
 
+            var matchedExceptionIds = new HashSet<string>(StringComparer.Ordinal);
             foreach (var occurrenceStart in occurrenceStarts)
             {
                 var exception = seriesExceptions
@@ -53,6 +54,7 @@ public static class RecurrenceExpansionService
                     .FirstOrDefault(item => MatchesOriginalStart(item.OriginalStart!.Value, occurrenceStart, master.IsAllDay));
                 if (exception is not null)
                 {
+                    matchedExceptionIds.Add(exception.Id);
                     if (!exception.IsDeleted && exception.Start < rangeEnd && exception.End > rangeStart)
                     {
                         results.Add(Clone(exception));
@@ -75,6 +77,15 @@ public static class RecurrenceExpansionService
                 generated.IsGeneratedOccurrence = true;
                 generated.IsRecurrenceException = false;
                 results.Add(generated);
+            }
+
+            foreach (var movedIntoRange in seriesExceptions.Where(item =>
+                         !item.IsDeleted
+                         && !matchedExceptionIds.Contains(item.Id)
+                         && item.Start < rangeEnd
+                         && item.End > rangeStart))
+            {
+                results.Add(Clone(movedIntoRange));
             }
         }
 

@@ -78,6 +78,22 @@ public sealed class RestoreMaintenanceBoundaryRegressionTests
     }
 
     [Fact]
+    public async Task ReminderResumeFailureAfterDatabaseSwap_MarksRestartRequiredForRestoreDialog()
+    {
+        var source = await File.ReadAllTextAsync(Path.Combine(AppRoot, "ViewModels", "MainViewModel.BackupRestore.cs"));
+        var method = ExtractMethod(
+            source,
+            "public async Task<RestoreResult> RestoreAllCalendarsAsync",
+            "private void ResetTransientStateAfterDatabaseRestore");
+        var failureHandling = method[method.IndexOf("if (reminderResumeFailure is not null", StringComparison.Ordinal)..];
+
+        Assert.Contains("databaseReplaced", failureHandling, StringComparison.Ordinal);
+        Assert.Contains("MarkDatabaseRestartRequired();", failureHandling, StringComparison.Ordinal);
+        Assert.Contains("通知監視の再開に失敗しました", failureHandling, StringComparison.Ordinal);
+        Assert.Contains("アプリを再起動してください", failureHandling, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RestoreAllCalendarsAsync_WhenReloadFails_ReportsDatabaseAlreadyRestoredAndRequiresRestart()
     {
         var directory = Path.Combine(Path.GetTempPath(), $"restore-reload-failure-{Guid.NewGuid():N}");

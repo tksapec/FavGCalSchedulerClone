@@ -8,6 +8,19 @@ namespace FavGCalSchedulerClone.Tests;
 public sealed class GoogleCalendarIdentityRegressionTests
 {
     [Fact]
+    public void EventListSearchAndBulkTargetUseCalendarNamesForLabelsAndIdsForValues()
+    {
+        var eventList = File.ReadAllText(Path.Combine(GetRepositoryRoot(), "FavGCalSchedulerClone.App", "Views", "Dialogs", "EventListDialog.cs"));
+        var bulkDialog = File.ReadAllText(Path.Combine(GetRepositoryRoot(), "FavGCalSchedulerClone.App", "Views", "Dialogs", "BulkEventUpdateDialog.cs"));
+        var mainWindow = File.ReadAllText(Path.Combine(GetRepositoryRoot(), "FavGCalSchedulerClone.App", "MainWindow.xaml.cs"));
+
+        Assert.Contains("new Option<string?>(item.Summary, item.Id)", eventList, StringComparison.Ordinal);
+        Assert.Contains("nameof(GoogleCalendarSelectionItem.Summary)", bulkDialog, StringComparison.Ordinal);
+        Assert.Contains("nameof(GoogleCalendarSelectionItem.Id)", bulkDialog, StringComparison.Ordinal);
+        Assert.Contains("_viewModel.AvailableCalendars.ToArray()", mainWindow, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task SynchronizeDirtyOnlyAsync_PreviouslySyncedEventWithMissingGoogleId_DoesNotInsertDuplicate()
     {
         var repository = await CreateRepositoryAsync();
@@ -86,6 +99,17 @@ public sealed class GoogleCalendarIdentityRegressionTests
             ActiveCalendarId = calendarIds.FirstOrDefault() ?? GoogleCalendarDefaults.PrimaryCalendarId,
             SyncConflictPolicy = SyncConflictPolicy.PreferLocal
         };
+    }
+
+    private static string GetRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "FavGCalSchedulerClone.sln")))
+        {
+            directory = directory.Parent;
+        }
+
+        return directory?.FullName ?? throw new DirectoryNotFoundException("Repository root was not found.");
     }
 
     private sealed class RecordingGoogleCalendarApi : IGoogleCalendarApi, IGoogleCalendarClient

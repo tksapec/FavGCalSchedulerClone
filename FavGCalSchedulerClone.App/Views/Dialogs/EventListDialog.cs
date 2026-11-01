@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
+using System.Windows.Input;
 using FavGCalSchedulerClone.App.Models;
 using FavGCalSchedulerClone.App.Services;
 
@@ -45,6 +46,14 @@ internal static class EventListDialog
 
             e.Cancel = true;
             status.Text = "一括処理中は閉じられません。完了後に閉じてください。";
+        };
+        window.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Escape)
+            {
+                window.Close();
+                e.Handled = true;
+            }
         };
         var grid = new DataGrid
         {
@@ -89,6 +98,21 @@ internal static class EventListDialog
             await request.EditEventAsync(calendarEvent);
             await ReloadAsync(request, eventItems, grid, status, currentFilter);
         }, "予定編集");
+        grid.KeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Enter || grid.SelectedItem is not CalendarEvent calendarEvent)
+            {
+                return;
+            }
+
+            e.Handled = true;
+            DialogAsyncGuard.Run(window, async () =>
+            {
+                invalidatePendingSearch();
+                await request.EditEventAsync(calendarEvent);
+                await ReloadAsync(request, eventItems, grid, status, currentFilter);
+            }, "予定編集");
+        };
 
         AddColumns(grid);
         var bulkToolbar = CreateBulkToolbar(ui, request, grid, searchToolbar, eventItems, status, () => currentFilter, invalidatePendingSearch, operationGate, window);
@@ -122,10 +146,10 @@ internal static class EventListDialog
         var search = new Button { Content = "検索", MinWidth = 72 };
         var searchGeneration = 0L;
 
-        var calendarOptions = request.CalendarIds
-            .Where(id => !string.IsNullOrWhiteSpace(id))
-            .Distinct(StringComparer.Ordinal)
-            .Select(id => new Option<string?>(id, id))
+        var calendarOptions = request.Calendars
+            .Where(item => !string.IsNullOrWhiteSpace(item.Id))
+            .DistinctBy(item => item.Id, StringComparer.Ordinal)
+            .Select(item => new Option<string?>(item.Summary, item.Id))
             .Prepend(new Option<string?>("すべてのカレンダー", null))
             .ToArray();
         calendar.ItemsSource = calendarOptions;
@@ -173,6 +197,16 @@ internal static class EventListDialog
         }
 
         search.Click += SearchClick;
+        query.KeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Enter)
+            {
+                return;
+            }
+
+            e.Handled = true;
+            SearchClick(search, new RoutedEventArgs(Button.ClickEvent));
+        };
         secondRow.Children.Add(Label("カレンダーで絞り込み"));
         secondRow.Children.Add(calendar);
         secondRow.Children.Add(Label("種別"));
@@ -292,8 +326,19 @@ internal static class EventListDialog
             }
 
             invalidatePendingSearch();
-            var update = BulkEventUpdateDialog.Show(ui, request.CalendarIds);
+            var update = BulkEventUpdateDialog.Show(ui, request.Calendars);
             if (update is null)
+            {
+                return;
+            }
+
+            var preview = BulkEventUpdatePreviewFormatter.Format(update, ids.Count, request.Calendars);
+            if (MessageBox.Show(
+                    window,
+                    preview,
+                    "一括変更の確認",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question) != MessageBoxResult.Yes)
             {
                 return;
             }
@@ -443,7 +488,7 @@ internal sealed record EventListDialogRequest(
     string Title,
     IReadOnlyList<CalendarEvent> Events,
     EventListFilter Filter,
-    IReadOnlyList<string> CalendarIds,
+    IReadOnlyList<GoogleCalendarSelectionItem> Calendars,
     Func<EventListFilter, Task<IReadOnlyList<CalendarEvent>>> ReloadEventsAsync,
     Func<CalendarEvent, Task> EditEventAsync,
     Func<IReadOnlyList<string>, BulkEventUpdateRequest, Task<BulkEventOperationResult>>? BulkEditAsync = null,

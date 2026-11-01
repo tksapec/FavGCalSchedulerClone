@@ -107,27 +107,32 @@ public sealed partial class MainViewModel
         candidate.Start = candidate.Start.AddDays(dayShift);
         candidate.End = candidate.End.AddDays(dayShift);
         candidate.IsDirty = true;
+        IReadOnlyList<CalendarEvent> undoSnapshots;
+        IReadOnlyList<string> createdEventIds = [];
 
         if (!calendarEvent.IsRecurringSeriesItem)
         {
+            undoSnapshots = [UndoService.Clone(calendarEvent)];
             await SaveEventWithCalendarMoveAsync(candidate, calendarEvent);
             SelectedEvent = candidate;
         }
         else
         {
-            switch (recurrenceScope!.Value)
+            undoSnapshots = await LoadRecurrenceUndoSnapshotsAsync(
+                calendarEvent,
+                recurrenceScope!.Value,
+                isDelete: false,
+                targetCalendarId: candidate.CalendarId);
+            createdEventIds = recurrenceScope.Value switch
             {
-                case RecurrenceEditScope.ThisOccurrence:
-                    await SaveSingleOccurrenceAsync(candidate);
-                    break;
-                case RecurrenceEditScope.ThisAndFollowing:
-                    await SaveThisAndFollowingAsync(candidate);
-                    break;
-                case RecurrenceEditScope.AllEvents:
-                    await SaveEntireSeriesAsync(candidate);
-                    break;
-            }
+                RecurrenceEditScope.ThisOccurrence => await SaveSingleOccurrenceAsync(candidate),
+                RecurrenceEditScope.ThisAndFollowing => await SaveThisAndFollowingAsync(candidate),
+                RecurrenceEditScope.AllEvents => await SaveEntireSeriesAsync(candidate),
+                _ => []
+            };
         }
+
+        CaptureUndo(calendarEvent.IsTodoLike ? "ToDo移動" : "予定移動", undoSnapshots, createdEventIds);
 
         _pendingSelectedDate = targetDate.Date;
         var movedEvent = SelectedEvent;
@@ -143,7 +148,7 @@ public sealed partial class MainViewModel
     {
         var start = new DateTime(yearInView.Year, 1, 1);
         var end = start.AddYears(1);
-        var events = await _repository.LoadEventsAsync(new DateTimeOffset(start), new DateTimeOffset(end));
+        var events = await _repository.LoadEventsAsync(new DateTimeOffset(start), new DateTimeOffset(end), includeDeleted: true);
         var expanded = RecurrenceExpansionService.ExpandForRange(events, new DateTimeOffset(start), new DateTimeOffset(end));
         ApplyDisplayColors(expanded);
         return expanded.Where(IsVisible).OrderBy(e => e.Start).ThenBy(e => e.Title).ToArray();
@@ -157,7 +162,7 @@ public sealed partial class MainViewModel
     public async Task<IReadOnlyList<CalendarEvent>> SearchEventsAsync(EventListFilter filter)
     {
         var (start, end) = ResolveSearchRange(filter);
-        var events = await _repository.LoadEventsAsync(new DateTimeOffset(start), new DateTimeOffset(end));
+        var events = await _repository.LoadEventsAsync(new DateTimeOffset(start), new DateTimeOffset(end), includeDeleted: true);
         var expanded = RecurrenceExpansionService.ExpandForRange(events, new DateTimeOffset(start), new DateTimeOffset(end));
         ApplyDisplayColors(expanded);
         var visible = expanded.Where(IsVisible);

@@ -30,6 +30,63 @@ public sealed class RecurrenceExpansionServiceTests
     }
 
     [Fact]
+    public void ExpandForRange_IncludesOccurrenceOverlappingRangeStart()
+    {
+        var master = new CalendarEvent
+        {
+            Id = "overlap-series",
+            Title = "Overnight series",
+            Start = new DateTimeOffset(2026, 5, 10, 10, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 5, 10, 14, 0, 0, TimeSpan.Zero),
+            RecurrenceJson = "[\"RRULE:FREQ=DAILY;COUNT=3\"]"
+        };
+
+        var results = RecurrenceExpansionService.ExpandForRange(
+            [master],
+            new DateTimeOffset(2026, 5, 11, 12, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 5, 11, 13, 0, 0, TimeSpan.Zero));
+
+        var occurrence = Assert.Single(results);
+        Assert.Equal(new DateTimeOffset(2026, 5, 11, 10, 0, 0, TimeSpan.Zero), occurrence.Start);
+        Assert.Equal(new DateTimeOffset(2026, 5, 11, 14, 0, 0, TimeSpan.Zero), occurrence.End);
+    }
+
+    [Fact]
+    public void ExpandForRange_IncludesExceptionMovedIntoRangeFromOutsideSeriesWindow()
+    {
+        var master = new CalendarEvent
+        {
+            Id = "moved-in-series",
+            GoogleEventId = "remote-moved-in-series",
+            Title = "Series",
+            Start = new DateTimeOffset(2026, 5, 10, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 5, 10, 10, 0, 0, TimeSpan.Zero),
+            RecurrenceJson = "[\"RRULE:FREQ=DAILY;COUNT=3\"]"
+        };
+        var movedException = new CalendarEvent
+        {
+            Id = "moved-in-exception",
+            GoogleEventId = "remote-moved-in-exception",
+            RecurringEventId = master.GoogleEventId,
+            RecurringParentId = master.Id,
+            OriginalStart = new DateTimeOffset(2026, 5, 10, 9, 0, 0, TimeSpan.Zero),
+            IsRecurrenceException = true,
+            Title = "Moved into range",
+            Start = new DateTimeOffset(2026, 5, 11, 15, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 5, 11, 16, 0, 0, TimeSpan.Zero)
+        };
+
+        var results = RecurrenceExpansionService.ExpandForRange(
+            [master, movedException],
+            new DateTimeOffset(2026, 5, 11, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 5, 12, 0, 0, 0, TimeSpan.Zero));
+
+        Assert.Equal(2, results.Count);
+        Assert.Contains(results, item => item.Title == "Moved into range" && item.Start == movedException.Start);
+        Assert.Contains(results, item => item.Title == "Series" && item.Start == new DateTimeOffset(2026, 5, 11, 9, 0, 0, TimeSpan.Zero));
+    }
+
+    [Fact]
     public void ExpandForRange_ReplacesOccurrenceWithEditedException()
     {
         var master = new CalendarEvent

@@ -17,6 +17,8 @@ internal static class RecurrenceSetExpander
         var exclusionRules = lines.Where(line => line.StartsWith("EXRULE:", StringComparison.OrdinalIgnoreCase)).ToArray();
         var rDates = ParseDateLines(lines, "RDATE", masterEvent);
         var exDates = ParseDateLines(lines, "EXDATE", masterEvent);
+        var duration = masterEvent.End - masterEvent.Start;
+        var occurrenceSearchStart = rangeStart - duration;
 
         if (inclusionRules.Length == 0 && rDates.Count == 0)
         {
@@ -26,7 +28,7 @@ internal static class RecurrenceSetExpander
         var included = new HashSet<DateTimeOffset>();
         foreach (var ruleLine in inclusionRules)
         {
-            foreach (var occurrence in ExpandRule(masterEvent, ruleLine, rangeStart, rangeEnd))
+            foreach (var occurrence in ExpandRule(masterEvent, ruleLine, occurrenceSearchStart, rangeEnd))
             {
                 included.Add(occurrence);
             }
@@ -37,7 +39,7 @@ internal static class RecurrenceSetExpander
             included.Add(masterEvent.Start);
         }
 
-        foreach (var rDate in rDates.Where(value => value >= rangeStart && value < rangeEnd))
+        foreach (var rDate in rDates.Where(value => value < rangeEnd && value + duration > rangeStart))
         {
             included.Add(rDate);
         }
@@ -45,14 +47,14 @@ internal static class RecurrenceSetExpander
         var excluded = new HashSet<DateTimeOffset>(exDates);
         foreach (var ruleLine in exclusionRules)
         {
-            foreach (var occurrence in ExpandRule(masterEvent, ruleLine, rangeStart, rangeEnd))
+            foreach (var occurrence in ExpandRule(masterEvent, ruleLine, occurrenceSearchStart, rangeEnd))
             {
                 excluded.Add(occurrence);
             }
         }
 
         return included
-            .Where(value => !excluded.Contains(value))
+            .Where(value => !excluded.Contains(value) && value < rangeEnd && value + duration > rangeStart)
             .OrderBy(value => value)
             .ToArray();
     }
@@ -82,7 +84,7 @@ internal static class RecurrenceSetExpander
                      .TakeWhile(item => item.Period.StartTime < evaluationEnd))
         {
             var candidate = FromCalDateTime(occurrence.Period.StartTime, masterEvent.Start.Offset);
-            if (candidate >= rangeStart && candidate < rangeEnd)
+            if (candidate < rangeEnd && candidate + (masterEvent.End - masterEvent.Start) > rangeStart)
             {
                 yield return candidate;
             }
@@ -166,6 +168,10 @@ internal static class RecurrenceSetExpander
             if (value.Length == 8)
             {
                 dateTime = new DateTimeOffset(dateTime.Date, defaultOffset);
+            }
+            else if (value.EndsWith('Z') && !string.IsNullOrWhiteSpace(timeZoneId))
+            {
+                dateTime = GoogleCalendarTimeZone.ConvertInstantToTimeZone(dateTime, timeZoneId);
             }
 
             return true;

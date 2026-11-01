@@ -68,6 +68,7 @@ public sealed class GoogleCalendarSyncServiceTests
         var repository = await CreateRepositoryAsync();
         var api = new FakeGoogleCalendarApi { ThrowOnList = true };
         var settings = CreateSettings("work");
+        settings.SyncConflictPolicy = SyncConflictPolicy.PreferGoogle;
         var local = new CalendarEvent
         {
             Id = "preview-list-failure", CalendarId = "work", Title = "local dirty",
@@ -79,6 +80,7 @@ public sealed class GoogleCalendarSyncServiceTests
 
         var preview = await new GoogleCalendarSyncService(repository, api).PreviewAsync(settings);
 
+        Assert.Equal(SyncConflictPolicy.PreferGoogle, preview.ConflictPolicy);
         var error = Assert.Single(preview.ErrorItems);
         Assert.Equal("Google予定を取得できませんでした", error.Title);
         Assert.Contains("ローカル予定は変更されていません", error.Detail);
@@ -2244,6 +2246,53 @@ public sealed class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task DiscardLocalChangesAsync_DoesNotOverwriteEditMadeWhileFetchingRemoteEvent()
+    {
+        var repository = await CreateRepositoryAsync();
+        var api = new FakeGoogleCalendarApi();
+        var settings = CreateSettings("work");
+        var local = new CalendarEvent
+        {
+            CalendarId = "work",
+            GoogleEventId = "remote-discard-race",
+            Title = "old local title",
+            Start = new DateTimeOffset(2026, 7, 6, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 7, 6, 10, 0, 0, TimeSpan.Zero),
+            IsDirty = true
+        };
+        await repository.SaveEventAsync(local);
+        api.UpsertRemote("work", new Event
+        {
+            Id = "remote-discard-race",
+            Summary = "remote title",
+            Start = DateTimeEvent(2026, 7, 6, 9),
+            End = DateTimeEvent(2026, 7, 6, 10),
+            Status = "confirmed"
+        });
+        var getStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var continueGet = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        api.GetStarted = getStarted;
+        api.ContinueGet = continueGet;
+        var service = new GoogleCalendarSyncService(repository, api);
+
+        var discardTask = service.DiscardLocalChangesAsync(settings, new HashSet<string>(StringComparer.Ordinal) { local.Id });
+        await getStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var concurrentEdit = await repository.FindEventByIdAsync(local.Id);
+        Assert.NotNull(concurrentEdit);
+        concurrentEdit!.Title = "new concurrent edit";
+        concurrentEdit.IsDirty = true;
+        await repository.SaveEventAsync(concurrentEdit);
+        continueGet.SetResult();
+        var result = await discardTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(1, result.Failed);
+        var stored = await repository.FindEventByIdAsync(local.Id);
+        Assert.NotNull(stored);
+        Assert.Equal("new concurrent edit", stored!.Title);
+        Assert.True(stored.IsDirty);
+    }
+
+    [Fact]
     public async Task DiscardLocalChangesAsync_MarksCancelledNormalGoogleEventDeletedAndClean()
     {
         var repository = await CreateRepositoryAsync();
@@ -2686,6 +2735,8 @@ public sealed class GoogleCalendarSyncServiceTests
         public HashSet<string> StaleSyncTokens { get; } = new(StringComparer.Ordinal);
         public TaskCompletionSource? ListStarted { get; set; }
         public TaskCompletionSource? ContinueList { get; set; }
+        public TaskCompletionSource? GetStarted { get; set; }
+        public TaskCompletionSource? ContinueGet { get; set; }
 
         public Task<IGoogleCalendarClient> CreateClientAsync(string clientJsonPath, CancellationToken cancellationToken = default)
         {
@@ -2771,7 +2822,7 @@ public sealed class GoogleCalendarSyncServiceTests
             return Task.CompletedTask;
         }
 
-        public Task<Event> GetEventAsync(string calendarId, string eventId, CancellationToken cancellationToken = default)
+        public async Task<Event> GetEventAsync(string calendarId, string eventId, CancellationToken cancellationToken = default)
         {
             Operations.Add($"get:{calendarId}:{eventId}");
             if (ThrowOnGet || GetFailuresRemaining-- > 0)
@@ -2784,7 +2835,13 @@ public sealed class GoogleCalendarSyncServiceTests
                 throw new KeyNotFoundException(eventId);
             }
 
-            return Task.FromResult(Clone(googleEvent));
+            if (GetStarted is not null && ContinueGet is not null)
+            {
+                GetStarted.TrySetResult();
+                await ContinueGet.Task.WaitAsync(cancellationToken);
+            }
+
+            return Clone(googleEvent);
         }
 
         public async Task<GoogleEventPage> ListEventsAsync(GoogleEventListRequest request, CancellationToken cancellationToken = default)

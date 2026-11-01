@@ -232,7 +232,7 @@ public sealed class ReminderNotificationService : IDisposable
 
             var windowStart = current.AddDays(-1);
             var windowEnd = current.AddDays(30);
-            var storedEvents = await _repository.LoadEventsAsync(windowStart, windowEnd, includeDeleted: false);
+            var storedEvents = await _repository.LoadEventsAsync(windowStart, windowEnd, includeDeleted: true);
             var expandedEvents = RecurrenceExpansionService.ExpandForRange(storedEvents, windowStart, windowEnd);
             var candidateDiagnostics = new List<ReminderCandidateDiagnostic>();
             var dueNotifications = new List<ReminderNotification>();

@@ -70,6 +70,7 @@ public sealed class GoogleCalendarExportTimeZoneTests
             Assert.Equal(2, data.Events.Count);
             Assert.Contains(data.Events, item => item.Uid == "primary-event" && item.Summary == "Primary event");
             Assert.Contains(data.Events, item => item.Uid == "team-event" && item.Summary == "Team event");
+            Assert.All(data.Events, item => Assert.Equal(TimeSpan.Zero, item.Start.Offset));
         }
         finally
         {

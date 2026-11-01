@@ -64,6 +64,45 @@ public sealed class SearchEventListTests
     }
 
     [Fact]
+    public async Task SearchEventsAsync_DeletedRecurrenceExceptionSuppressesGeneratedOccurrence()
+    {
+        var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
+        await repository.InitializeAsync();
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Id = "search-series",
+            GoogleEventId = "remote-search-series",
+            CalendarId = "primary",
+            Title = "Series title",
+            Start = new DateTimeOffset(2026, 5, 10, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 5, 10, 10, 0, 0, TimeSpan.Zero),
+            RecurrenceJson = "[\"RRULE:FREQ=DAILY;COUNT=3\"]"
+        });
+        await repository.SaveEventAsync(new CalendarEvent
+        {
+            Id = "search-deleted-instance",
+            GoogleEventId = "remote-search-instance",
+            RecurringEventId = "remote-search-series",
+            RecurringParentId = "search-series",
+            OriginalStart = new DateTimeOffset(2026, 5, 11, 9, 0, 0, TimeSpan.Zero),
+            IsRecurrenceException = true,
+            IsDeleted = true,
+            CalendarId = "primary",
+            Title = "Series title",
+            Start = new DateTimeOffset(2026, 5, 11, 9, 0, 0, TimeSpan.Zero),
+            End = new DateTimeOffset(2026, 5, 11, 10, 0, 0, TimeSpan.Zero)
+        });
+        var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+
+        var result = await viewModel.SearchEventsAsync(new EventListFilter(
+            "Series title", EventKindFilter.All, EventSearchRange.Custom, new DateTime(2026, 5, 10),
+            StartDate: new DateTime(2026, 5, 10), EndDate: new DateTime(2026, 5, 12)));
+
+        Assert.Equal(2, result.Count);
+        Assert.DoesNotContain(result, item => item.Start.Date == new DateTime(2026, 5, 11));
+    }
+
+    [Fact]
     public async Task ClearCurrentYearSearch_PreservesSelectionWhenNoSearchResultWasSelected()
     {
         var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));

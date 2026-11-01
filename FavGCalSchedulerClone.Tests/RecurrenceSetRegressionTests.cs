@@ -73,6 +73,19 @@ public sealed class RecurrenceSetRegressionTests
         Assert.Contains(results, item => item.Start == new DateTimeOffset(2026, 5, 12, 9, 0, 0, TimeSpan.Zero));
     }
 
+    [Fact]
+    public void ExpandForRange_UtcRDateIsDisplayedInMasterTimeZone()
+    {
+        var master = CreateMaster("utc-rdate", "[\"RDATE:20260512T090000Z\"]");
+        master.StartTimeZoneId = "America/New_York";
+
+        var results = Expand(master, new DateTimeOffset(2026, 5, 12, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 5, 13, 0, 0, 0, TimeSpan.Zero));
+
+        var occurrence = Assert.Single(results);
+        Assert.Equal(new DateTime(2026, 5, 12, 5, 0, 0), occurrence.Start.DateTime);
+        Assert.Equal(TimeSpan.FromHours(-4), occurrence.Start.Offset);
+    }
+
     private static IReadOnlyList<CalendarEvent> Expand(CalendarEvent master, DateTimeOffset start, DateTimeOffset end)
     {
         return RecurrenceExpansionService.ExpandForRange([master], start, end);

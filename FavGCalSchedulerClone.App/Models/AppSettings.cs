@@ -42,6 +42,7 @@ public sealed class AppSettings
     }
 
     public bool ConfirmBeforeDelete { get; set; } = true;
+    public bool HasShownTrayCloseNotification { get; set; }
     // Compatibility-only facade for callers compiled against older versions.
     // Window close always minimizes to the notification area unless explicit exit is requested.
     [JsonIgnore]

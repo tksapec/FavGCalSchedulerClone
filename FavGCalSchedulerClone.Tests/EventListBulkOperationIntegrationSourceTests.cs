@@ -36,6 +36,18 @@ public sealed class EventListBulkOperationIntegrationSourceTests
     }
 
     [Fact]
+    public void EventListDialog_SupportsEnterForSearchAndEditAndEscapeToClose()
+    {
+        var source = ReadSource("FavGCalSchedulerClone.App", "Views", "Dialogs", "EventListDialog.cs");
+
+        Assert.Contains("query.KeyDown +=", source, StringComparison.Ordinal);
+        Assert.Contains("e.Key != Key.Enter", source, StringComparison.Ordinal);
+        Assert.Contains("grid.KeyDown +=", source, StringComparison.Ordinal);
+        Assert.Contains("window.PreviewKeyDown +=", source, StringComparison.Ordinal);
+        Assert.Contains("e.Key == Key.Escape", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void MainViewModel_PreservesCountReturningBulkApisAndExposesDetailedApis()
     {
         var source = ReadSource("FavGCalSchedulerClone.App", "ViewModels", "MainViewModel.BulkUndo.cs");

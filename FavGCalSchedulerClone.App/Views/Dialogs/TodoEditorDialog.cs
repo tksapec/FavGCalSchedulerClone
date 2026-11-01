@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using FavGCalSchedulerClone.App.Models;
 
@@ -131,6 +132,22 @@ internal static class TodoEditorDialog
             VerticalAlignment = VerticalAlignment.Center
         };
 
+        var hasUnsavedChanges = false;
+        void MarkUnsavedChanges() => hasUnsavedChanges = true;
+        title.TextChanged += (_, _) => MarkUnsavedChanges();
+        description.TextChanged += (_, _) => MarkUnsavedChanges();
+        dueDate.SelectedDateChanged += (_, _) => MarkUnsavedChanges();
+        priority.SelectionChanged += (_, _) => MarkUnsavedChanges();
+        calendar.SelectionChanged += (_, _) => MarkUnsavedChanges();
+        color.SelectionChanged += (_, _) => MarkUnsavedChanges();
+        complete.Checked += (_, _) => MarkUnsavedChanges();
+        complete.Unchecked += (_, _) => MarkUnsavedChanges();
+        if (progressInput is Slider progressSlider)
+        {
+            progressSlider.ValueChanged += (_, _) => MarkUnsavedChanges();
+        }
+        var closeGuard = new UnsavedChangesCloseGuard(window, () => hasUnsavedChanges);
+
         void SaveIfValid()
         {
             if (!TryValidateInput(title.Text, dueDate.SelectedDate, out var error))
@@ -153,12 +170,13 @@ internal static class TodoEditorDialog
             }
             else if (e.Key == System.Windows.Input.Key.Escape)
             {
-                window.DialogResult = false;
+                closeGuard.Cancel();
                 e.Handled = true;
             }
         };
 
-        AddTodoEditorLayout(ui, root, window, request.IsNew, dueDateEditor, priority, progressInput, progressValue, complete, color, calendar, title, description, validationMessage, SaveIfValid);
+        AddTodoEditorLayout(ui, root, window, request.IsNew, dueDateEditor, priority, progressInput, progressValue, complete, color, calendar, title, description, validationMessage, SaveIfValid, closeGuard.Cancel);
+        window.Loaded += (_, _) => hasUnsavedChanges = false;
         if (window.ShowDialog() != true)
         {
             return null;
@@ -262,7 +280,8 @@ internal static class TodoEditorDialog
         TextBox title,
         TextBox description,
         TextBlock validationMessage,
-        Action saveIfValid)
+        Action saveIfValid,
+        Action cancelIfUnsavedChanges)
     {
         var dueGroup = new GroupBox { Header = "期限／進捗", Padding = ui.Thickness(16, 16, 16, 8), Margin = new Thickness(0, 0, ui.X(10), ui.Y(10)) };
         var dueGrid = new Grid();
@@ -331,7 +350,7 @@ internal static class TodoEditorDialog
         var save = new Button { Content = isNew ? "登録" : "保存", MinWidth = 96 };
         var cancel = new Button { Content = "キャンセル", MinWidth = 96 };
         save.Click += (_, _) => saveIfValid();
-        cancel.Click += (_, _) => window.DialogResult = false;
+        cancel.Click += (_, _) => cancelIfUnsavedChanges();
         buttons.Children.Add(save);
         buttons.Children.Add(cancel);
         Grid.SetRow(buttons, 2);

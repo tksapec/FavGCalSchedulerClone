@@ -168,6 +168,7 @@ public sealed partial class MainViewModel
 
             if (reminderResumeFailure is not null && restoreFailure is null && databaseReplaced)
             {
+                MarkDatabaseRestartRequired();
                 const string message = "バックアップDBの復元は完了しましたが、通知監視の再開に失敗しました。アプリを再起動してください。";
                 Status = message;
                 throw new InvalidOperationException(message, reminderResumeFailure);

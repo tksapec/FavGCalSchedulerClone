@@ -50,6 +50,51 @@ public sealed class CalendarMoveUndoRegressionTests
         Assert.False(restored.IsDeleted);
     }
 
+    [Fact]
+    public async Task CutThenMoveCalendarAndSync_PasteUsesCurrentDestinationAndRemoteLink()
+    {
+        var repository = new CalendarRepository(Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db"));
+        await repository.InitializeAsync();
+        var settings = CreateSettings();
+        await repository.SaveSettingsAsync(settings);
+        var api = new CalendarMoveApi();
+        var original = new CalendarEvent
+        {
+            Id = "cut-calendar-move",
+            CalendarId = "A",
+            GoogleEventId = "remote-a-cut",
+            LastSyncedGoogleEtag = "etag-a-cut",
+            Title = "Cut, then move",
+            Start = new DateTimeOffset(2026, 8, 24, 9, 0, 0, TimeSpan.FromHours(9)),
+            End = new DateTimeOffset(2026, 8, 24, 10, 0, 0, TimeSpan.FromHours(9)),
+            IsDirty = false,
+            LastSyncedAt = DateTimeOffset.Now.AddMinutes(-5)
+        };
+        await repository.UpsertSyncedEventAsync(original);
+        api.Upsert("A", ToGoogle(original, "remote-a-cut", "etag-a-cut"));
+        var sync = new GoogleCalendarSyncService(repository, api);
+        var viewModel = new MainViewModel(repository, sync);
+        await viewModel.InitializeAsync();
+        viewModel.SelectEvent(Assert.IsType<CalendarEvent>(await repository.FindEventByIdAsync(original.Id)));
+        viewModel.CutSelectedEventLabel();
+
+        await viewModel.BulkUpdateEventsAsync([original.Id], new BulkEventUpdateRequest(CalendarId: "B"));
+        await sync.SyncAsync(settings);
+        var movedSource = Assert.IsType<CalendarEvent>(await repository.FindEventByIdAsync(original.Id));
+        Assert.Equal("B", movedSource.CalendarId);
+        Assert.False(string.IsNullOrWhiteSpace(movedSource.GoogleEventId));
+        Assert.NotEqual("remote-a-cut", movedSource.GoogleEventId);
+
+        Assert.True(await viewModel.PasteEventLabelAsync(new DateTime(2026, 8, 31)));
+        var deletedSource = Assert.IsType<CalendarEvent>(await repository.FindEventByIdAsync(original.Id));
+        Assert.Equal("B", deletedSource.CalendarId);
+        Assert.True(deletedSource.IsDeleted);
+        Assert.Equal(movedSource.GoogleEventId, deletedSource.GoogleEventId);
+        var pasted = Assert.IsType<CalendarEvent>(await repository.FindEventByIdAsync(viewModel.SelectedEvent!.Id));
+        Assert.Equal("B", pasted.CalendarId);
+        Assert.Null(pasted.GoogleEventId);
+    }
+
     private static AppSettings CreateSettings()
     {
         var jsonPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.json");

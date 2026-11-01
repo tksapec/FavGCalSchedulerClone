@@ -140,7 +140,11 @@ public sealed class GoogleCalendarExportCompareService
 
         if (value.EndsWith("Z", StringComparison.OrdinalIgnoreCase))
         {
-            return DateTimeOffset.ParseExact(value, "yyyyMMdd'T'HHmmss'Z'", null).ToLocalTime();
+            return DateTimeOffset.ParseExact(
+                value,
+                "yyyyMMdd'T'HHmmss'Z'",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal);
         }
 
         var wallClock = DateTime.ParseExact(

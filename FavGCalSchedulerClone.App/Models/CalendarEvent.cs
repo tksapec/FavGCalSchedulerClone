@@ -140,7 +140,7 @@ public sealed class CalendarEvent
 
     public string DateDisplayText => IsAllDay ? Start.ToString("yyyy/MM/dd") : Start.ToString("yyyy/MM/dd HH:mm");
     public string ListStartText => IsAllDay ? $"{Start:yyyy/MM/dd} [終日]" : Start.ToString("yyyy/MM/dd HH:mm");
-    public string ListEndText => IsAllDay ? $"{End:yyyy/MM/dd} [終日]" : End.ToString("yyyy/MM/dd HH:mm");
+    public string ListEndText => IsAllDay ? $"{End.AddDays(-1):yyyy/MM/dd} [終日]" : End.ToString("yyyy/MM/dd HH:mm");
     public string ReminderDisplayText => PrimaryAppReminderMinutesBeforeStart switch
     {
         null => "",

@@ -17,6 +17,7 @@ internal static class SearchDialog
         var kind = new ComboBox { ItemsSource = SearchKindOptions, SelectedValuePath = "Value", DisplayMemberPath = "Label", SelectedValue = request.KindFilter };
         var range = new ComboBox { ItemsSource = SearchRangeOptions, SelectedValuePath = "Value", DisplayMemberPath = "Label", SelectedValue = request.Range };
 
+        var applyingPresetDates = false;
         range.SelectionChanged += (_, _) =>
         {
             if (range.SelectedValue is not EventSearchRange selectedRange || selectedRange == EventSearchRange.Custom)
@@ -26,9 +27,28 @@ internal static class SearchDialog
 
             var reference = start.SelectedDate ?? request.StartDate;
             var (rangeStart, rangeEnd) = ResolveDisplayedRange(selectedRange, reference);
-            start.SelectedDate = rangeStart;
-            end.SelectedDate = rangeEnd;
+            applyingPresetDates = true;
+            try
+            {
+                start.SelectedDate = rangeStart;
+                end.SelectedDate = rangeEnd;
+            }
+            finally
+            {
+                applyingPresetDates = false;
+            }
         };
+
+        void UseCustomRangeForEditedDate()
+        {
+            if (!applyingPresetDates && range.SelectedValue is EventSearchRange selectedRange && selectedRange != EventSearchRange.Custom)
+            {
+                range.SelectedValue = EventSearchRange.Custom;
+            }
+        }
+
+        start.SelectedDateChanged += (_, _) => UseCustomRangeForEditedDate();
+        end.SelectedDateChanged += (_, _) => UseCustomRangeForEditedDate();
 
         root.Children.Add(ui.SectionHeader("検索範囲"));
         root.Children.Add(ui.FormGrid(("開始", start, "終了", end)));

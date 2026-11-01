@@ -262,6 +262,17 @@ public partial class MainWindow : Window
 
         tab.Content = new DockPanel { LastChildFill = true };
         var panel = (DockPanel)tab.Content;
+        Button CreateTodoLimitButton(string contentPath, string visibilityPath, System.Windows.Input.ICommand command)
+        {
+            var button = CreateSmallCommandButton(string.Empty, command, 112);
+            button.SetBinding(ContentControl.ContentProperty, new Binding(contentPath));
+            button.SetBinding(UIElement.VisibilityProperty, new Binding(visibilityPath)
+            {
+                Converter = new BooleanToVisibilityConverter()
+            });
+            return button;
+        }
+
         var filterButtons = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
         filterButtons.Children.Add(CreateSmallCommandButton("すべて", _viewModel.ShowAllTodosCommand, 48));
         filterButtons.Children.Add(CreateSmallCommandButton("今日", _viewModel.ShowTodayTodosCommand, 44));
@@ -282,7 +293,38 @@ public partial class MainWindow : Window
         editButtons.Children.Add(CreateSmallCommandButton("完了", _viewModel.MarkSelectedTodoDoneCommand, 50));
         DockPanel.SetDock(editButtons, Dock.Top);
         panel.Children.Add(editButtons);
+
+        var incompleteLimitPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+        var incompleteCount = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Foreground = CreateBrush("#475569"), Margin = new Thickness(0, 0, 8, 0) };
+        incompleteCount.SetBinding(TextBlock.TextProperty, new Binding(nameof(MainViewModel.TodoEventsCountText)));
+        incompleteLimitPanel.Children.Add(incompleteCount);
+        var incompleteLimitButton = CreateTodoLimitButton(
+            nameof(MainViewModel.TodoEventsLimitButtonText),
+            nameof(MainViewModel.IsTodoEventsLimitControlVisible),
+            _viewModel.ToggleIncompleteTodoListLimitCommand);
+        incompleteLimitPanel.Children.Add(incompleteLimitButton);
+        DockPanel.SetDock(incompleteLimitPanel, Dock.Top);
+        panel.Children.Add(incompleteLimitPanel);
         panel.Children.Add(todoGrid);
+
+        var completedGrid = FindLogicalChildren<DataGrid>(this)
+            .FirstOrDefault(grid => grid.ItemsSource == _viewModel.CompletedTodoEvents);
+        if (completedGrid?.Parent is TabItem completedTab && completedTab.Content is DataGrid)
+        {
+            var completedPanel = new DockPanel { LastChildFill = true };
+            var completedLimitPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+            var completedCount = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Foreground = CreateBrush("#475569"), Margin = new Thickness(0, 0, 8, 0) };
+            completedCount.SetBinding(TextBlock.TextProperty, new Binding(nameof(MainViewModel.CompletedTodoEventsCountText)));
+            completedLimitPanel.Children.Add(completedCount);
+            completedLimitPanel.Children.Add(CreateTodoLimitButton(
+                nameof(MainViewModel.CompletedTodoEventsLimitButtonText),
+                nameof(MainViewModel.IsCompletedTodoEventsLimitControlVisible),
+                _viewModel.ToggleCompletedTodoListLimitCommand));
+            DockPanel.SetDock(completedLimitPanel, Dock.Top);
+            completedPanel.Children.Add(completedLimitPanel);
+            completedPanel.Children.Add(completedGrid);
+            completedTab.Content = completedPanel;
+        }
     }
 
     private static Button CreateSmallCommandButton(string text, System.Windows.Input.ICommand command, double minWidth) =>
@@ -371,6 +413,7 @@ public partial class MainWindow : Window
         }
 
         e.Cancel = true;
+        NotifyFirstTrayClose();
         Hide();
     }
 
@@ -1475,7 +1518,7 @@ public partial class MainWindow : Window
             title,
             await LoadEventsAsync(filter),
             filter,
-            _viewModel.CalendarNames.ToArray(),
+            _viewModel.AvailableCalendars.ToArray(),
             LoadEventsAsync,
             calendarEvent => OpenGridEventEditorAsync(calendarEvent),
             async (ids, request) => await _viewModel.BulkUpdateEventsDetailedAsync(ids, request),

@@ -11,6 +11,40 @@ namespace FavGCalSchedulerClone.App.ViewModels;
 
 public sealed partial class MainViewModel
 {
+    private const int TodoListDisplayLimit = 100;
+    private bool _showAllIncompleteTodos;
+    private bool _showAllCompletedTodos;
+    private int _incompleteTodosTotalCount;
+    private int _completedTodosTotalCount;
+    private AsyncRelayCommand? _toggleIncompleteTodoListLimitCommand;
+    private AsyncRelayCommand? _toggleCompletedTodoListLimitCommand;
+
+    public AsyncRelayCommand ToggleIncompleteTodoListLimitCommand =>
+        _toggleIncompleteTodoListLimitCommand ??= CreateAsyncCommand(ToggleIncompleteTodoListLimitAsync);
+
+    public AsyncRelayCommand ToggleCompletedTodoListLimitCommand =>
+        _toggleCompletedTodoListLimitCommand ??= CreateAsyncCommand(ToggleCompletedTodoListLimitAsync);
+
+    public int TodoEventsRemainingCount => Math.Max(0, _incompleteTodosTotalCount - TodoEvents.Count);
+    public int CompletedTodoEventsRemainingCount => Math.Max(0, _completedTodosTotalCount - CompletedTodoEvents.Count);
+    public string TodoEventsCountText => $"表示中 {TodoEvents.Count} / {_incompleteTodosTotalCount} 件";
+    public string CompletedTodoEventsCountText => $"表示中 {CompletedTodoEvents.Count} / {_completedTodosTotalCount} 件";
+    public string TodoEventsLimitButtonText => _showAllIncompleteTodos ? "100件に戻す" : $"残り {TodoEventsRemainingCount} 件を表示";
+    public string CompletedTodoEventsLimitButtonText => _showAllCompletedTodos ? "100件に戻す" : $"残り {CompletedTodoEventsRemainingCount} 件を表示";
+    public bool IsTodoEventsLimitControlVisible => TodoEventsRemainingCount > 0 || _showAllIncompleteTodos;
+    public bool IsCompletedTodoEventsLimitControlVisible => CompletedTodoEventsRemainingCount > 0 || _showAllCompletedTodos;
+
+    public async Task ToggleIncompleteTodoListLimitAsync()
+    {
+        _showAllIncompleteTodos = !_showAllIncompleteTodos;
+        await RefreshTodosAsync();
+    }
+
+    public async Task ToggleCompletedTodoListLimitAsync()
+    {
+        _showAllCompletedTodos = !_showAllCompletedTodos;
+        await RefreshTodosAsync();
+    }
 
     public async Task SaveTodoAsync(DateTime dueDate, string priority, int progress, string title, string? description)
     {
@@ -140,6 +174,7 @@ public sealed partial class MainViewModel
     public async Task SetTodoQuickFilterAsync(TodoQuickFilter filter)
     {
         TodoQuickFilter = filter;
+        _showAllIncompleteTodos = false;
         await RefreshTodosAsync();
     }
 
@@ -172,26 +207,39 @@ public sealed partial class MainViewModel
         var events = (await _repository.LoadTodoEventsAsync()).Where(IsVisible).ToArray();
         ApplyDisplayColors(events);
 
-        foreach (var item in events
-                     .Where(item => !item.IsTodoDone && TodoDisplayFilter.IsWithinDisplayPeriod(item, _settings.IncompleteTodoDisplayPeriodMonths, DateTime.Today))
-                     .Where(PassesTodoQuickFilter)
-                     .OrderBy(item => item.Start)
-                     .ThenBy(item => item.TodoPriority)
-                     .Take(100))
+        var incompleteTodos = events
+            .Where(item => !item.IsTodoDone && TodoDisplayFilter.IsWithinDisplayPeriod(item, _settings.IncompleteTodoDisplayPeriodMonths, DateTime.Today))
+            .Where(PassesTodoQuickFilter)
+            .OrderBy(item => item.Start)
+            .ThenBy(item => item.TodoPriority)
+            .ToArray();
+        _incompleteTodosTotalCount = incompleteTodos.Length;
+        foreach (var item in incompleteTodos.Take(_showAllIncompleteTodos ? incompleteTodos.Length : TodoListDisplayLimit))
         {
             TodoEvents.Add(item);
         }
 
-        foreach (var item in events
-                     .Where(item => item.IsTodoDone && TodoDisplayFilter.IsWithinDisplayPeriod(item, _settings.CompletedTodoDisplayPeriodMonths, DateTime.Today))
-                     .OrderBy(item => Math.Abs((item.Start.Date - DateTime.Today).Days))
-                     .ThenBy(item => item.Start.Date)
-                     .ThenByDescending(item => item.UpdatedAt)
-                     .ThenBy(item => item.Title, StringComparer.CurrentCulture)
-                     .Take(100))
+        var completedTodos = events
+            .Where(item => item.IsTodoDone && TodoDisplayFilter.IsWithinDisplayPeriod(item, _settings.CompletedTodoDisplayPeriodMonths, DateTime.Today))
+            .OrderBy(item => Math.Abs((item.Start.Date - DateTime.Today).Days))
+            .ThenBy(item => item.Start.Date)
+            .ThenByDescending(item => item.UpdatedAt)
+            .ThenBy(item => item.Title, StringComparer.CurrentCulture)
+            .ToArray();
+        _completedTodosTotalCount = completedTodos.Length;
+        foreach (var item in completedTodos.Take(_showAllCompletedTodos ? completedTodos.Length : TodoListDisplayLimit))
         {
             CompletedTodoEvents.Add(item);
         }
+
+        OnPropertyChanged(nameof(TodoEventsRemainingCount));
+        OnPropertyChanged(nameof(CompletedTodoEventsRemainingCount));
+        OnPropertyChanged(nameof(TodoEventsCountText));
+        OnPropertyChanged(nameof(CompletedTodoEventsCountText));
+        OnPropertyChanged(nameof(TodoEventsLimitButtonText));
+        OnPropertyChanged(nameof(CompletedTodoEventsLimitButtonText));
+        OnPropertyChanged(nameof(IsTodoEventsLimitControlVisible));
+        OnPropertyChanged(nameof(IsCompletedTodoEventsLimitControlVisible));
     }
 
     private bool PassesTodoQuickFilter(CalendarEvent item)

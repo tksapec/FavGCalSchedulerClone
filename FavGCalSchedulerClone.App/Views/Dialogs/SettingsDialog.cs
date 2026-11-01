@@ -246,25 +246,90 @@ internal static class SettingsDialog
         var clearToken = new Button { Content = "トークン削除", Width = 120 };
         var reloadCalendars = new Button { Content = "カレンダー一覧を更新", Width = 170 };
         var refreshReminders = new Button { Content = "Google通知設定を再取得", Width = 190 };
+        var googleOperationButtons = new[] { chooseOAuth, authorize, clearToken, reloadCalendars, refreshReminders };
+        var googleOperationInProgress = false;
+        StackPanel? dialogButtons = null;
+        window.Closing += (_, eventArgs) =>
+        {
+            if (googleOperationInProgress)
+            {
+                eventArgs.Cancel = true;
+            }
+        };
+        async Task RunGoogleOperationAsync(
+            string title,
+            string successMessage,
+            string errorTitle,
+            Func<Task> operation,
+            bool showSuccessMessage = true)
+        {
+            if (googleOperationInProgress)
+            {
+                return;
+            }
+
+            googleOperationInProgress = true;
+            oauthPath.IsEnabled = false;
+            foreach (var button in googleOperationButtons)
+            {
+                button.IsEnabled = false;
+            }
+            if (dialogButtons is not null)
+            {
+                foreach (var button in dialogButtons.Children.OfType<Button>())
+                {
+                    button.IsEnabled = false;
+                }
+            }
+
+            try
+            {
+                await operation();
+                if (showSuccessMessage)
+                {
+                    MessageBox.Show(window, successMessage, title, MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(window, ex.Message, errorTitle, MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                googleOperationInProgress = false;
+                oauthPath.IsEnabled = true;
+                foreach (var button in googleOperationButtons)
+                {
+                    button.IsEnabled = true;
+                }
+                if (dialogButtons is not null)
+                {
+                    foreach (var button in dialogButtons.Children.OfType<Button>())
+                    {
+                        button.IsEnabled = true;
+                    }
+                }
+            }
+        }
         chooseOAuth.Click += (_, _) =>
         {
             var dialog = new OpenFileDialog { Filter = "Google OAuth client JSON (*.json)|*.json|All files (*.*)|*.*" };
             if (dialog.ShowDialog(window) == true) oauthPath.Text = dialog.FileName;
         };
-        authorize.Click += async (_, _) => await RunGoogleOperationAsync(window, "Google認証", "Google認証が完了しました。", "Google認証エラー", async () =>
+        authorize.Click += async (_, _) => await RunGoogleOperationAsync("Google認証", "Google認証が完了しました。", "Google認証エラー", async () =>
         {
             await request.SetOAuthClientJsonPathAsync(oauthPath.Text);
             persistedOAuthClientJsonPath = NormalizeOAuthPath(oauthPath.Text);
             await request.AuthorizeGoogleAsync();
         });
-        clearToken.Click += async (_, _) => await RunGoogleOperationAsync(window, "トークン削除", "保存済みGoogleトークンを削除しました。", "トークン削除エラー", request.ClearTokensAsync);
-        reloadCalendars.Click += async (_, _) => await RunGoogleOperationAsync(window, "カレンダー一覧", "カレンダー一覧を更新しました。", "カレンダー一覧更新エラー", async () =>
+        clearToken.Click += async (_, _) => await RunGoogleOperationAsync("トークン削除", "保存済みGoogleトークンを削除しました。", "トークン削除エラー", request.ClearTokensAsync);
+        reloadCalendars.Click += async (_, _) => await RunGoogleOperationAsync("カレンダー一覧", "カレンダー一覧を更新しました。", "カレンダー一覧更新エラー", async () =>
         {
             await request.SetOAuthClientJsonPathAsync(oauthPath.Text);
             persistedOAuthClientJsonPath = NormalizeOAuthPath(oauthPath.Text);
             await request.ReloadAvailableCalendarsAsync();
         });
-        refreshReminders.Click += async (_, _) => await RunGoogleOperationAsync(window, "Google通知設定", "Google通知設定を再取得しました。", "Google通知設定エラー", async () =>
+        refreshReminders.Click += async (_, _) => await RunGoogleOperationAsync("Google通知設定", "Google通知設定を再取得しました。", "Google通知設定エラー", async () =>
         {
             await request.SetOAuthClientJsonPathAsync(oauthPath.Text);
             persistedOAuthClientJsonPath = NormalizeOAuthPath(oauthPath.Text);
@@ -294,6 +359,7 @@ internal static class SettingsDialog
         tabs.Items.Add(Tab("Googleカレンダー設定", syncPage));
 
         var buttons = ui.DialogButtons(window, "OK", "キャンセル");
+        dialogButtons = buttons;
         DockPanel.SetDock(buttons, Dock.Bottom);
         root.Children.Add(buttons);
         root.Children.Remove(tabs);
@@ -366,27 +432,6 @@ internal static class SettingsDialog
         }
     }
 
-    private static async Task RunGoogleOperationAsync(
-        Window owner,
-        string title,
-        string successMessage,
-        string errorTitle,
-        Func<Task> operation,
-        bool showSuccessMessage = true)
-    {
-        try
-        {
-            await operation();
-            if (showSuccessMessage)
-            {
-                MessageBox.Show(owner, successMessage, title, MessageBoxButton.OK, MessageBoxImage.Information);
-            }
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(owner, ex.Message, errorTitle, MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
 }
 
 internal sealed record SettingsDialogRequest(

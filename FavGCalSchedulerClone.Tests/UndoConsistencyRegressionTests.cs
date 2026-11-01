@@ -201,6 +201,47 @@ public sealed class UndoConsistencyRegressionTests
         }
     }
 
+    [Fact]
+    public async Task CutPaste_Undo_PreservesRemoteLinkUpdatedAfterCutSnapshot()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        try
+        {
+            var repository = new CalendarRepository(dbPath);
+            await repository.InitializeAsync();
+            var source = CreateEvent("source-cut-stale", "Source cut", new DateTimeOffset(2026, 8, 25, 9, 0, 0, TimeSpan.FromHours(9)));
+            source.GoogleEventId = "remote-before-cut";
+            source.LastSyncedGoogleEtag = "etag-before-cut";
+            source.IsDirty = false;
+            await repository.UpsertSyncedEventAsync(source);
+            var viewModel = new MainViewModel(repository, new GoogleCalendarSyncService(repository));
+            await viewModel.InitializeAsync();
+            viewModel.SelectEvent(Assert.IsType<CalendarEvent>(await repository.FindEventByIdAsync(source.Id)));
+            viewModel.CutSelectedEventLabel();
+
+            var current = Assert.IsType<CalendarEvent>(await repository.FindEventByIdAsync(source.Id));
+            current.GoogleEventId = "remote-after-cut";
+            current.LastSyncedGoogleEtag = "etag-after-cut";
+            current.IsDirty = false;
+            await repository.UpsertSyncedEventAsync(current);
+
+            Assert.True(await viewModel.PasteEventLabelAsync(new DateTime(2026, 8, 31)));
+            var cutSource = Assert.IsType<CalendarEvent>(await repository.FindEventByIdAsync(source.Id));
+            Assert.True(cutSource.IsDeleted);
+            Assert.Equal("remote-after-cut", cutSource.GoogleEventId);
+
+            Assert.True(await viewModel.UndoLastChangeAsync());
+            var restoredSource = Assert.IsType<CalendarEvent>(await repository.FindEventByIdAsync(source.Id));
+            Assert.False(restoredSource.IsDeleted);
+            Assert.Equal("remote-after-cut", restoredSource.GoogleEventId);
+            Assert.Equal("etag-after-cut", restoredSource.LastSyncedGoogleEtag);
+        }
+        finally
+        {
+            CleanupDatabase(dbPath);
+        }
+    }
+
     private static CalendarEvent CreateEvent(string id, string title, DateTimeOffset start) => new()
     {
         Id = id,

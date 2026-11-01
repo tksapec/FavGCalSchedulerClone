@@ -80,6 +80,24 @@ public sealed class StartupShutdownRegressionTests
     }
 
     [Fact]
+    public async Task FirstWindowClose_ExplainsTrayHideAndExitActions()
+    {
+        var source = await File.ReadAllTextAsync(Path.Combine(
+            Root,
+            "FavGCalSchedulerClone.App",
+            "MainWindow.xaml.cs"));
+
+        Assert.Contains("NotifyFirstTrayClose();", source, StringComparison.Ordinal);
+        var notification = await File.ReadAllTextAsync(Path.Combine(
+            Root,
+            "FavGCalSchedulerClone.App",
+            "MainWindow.TrayCloseNotification.cs"));
+        Assert.Contains("HasShownTrayCloseNotification", notification, StringComparison.Ordinal);
+        Assert.Contains("このウィンドウを閉じてもアプリは終了せず、通知領域に常駐します", notification, StringComparison.Ordinal);
+        Assert.Contains("アイコンを右クリックして「終了」", notification, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AppExit_DoesNotFlushDefaultSettingsBeforeStartupInitializationCompletes()
     {
         var source = await File.ReadAllTextAsync(Path.Combine(

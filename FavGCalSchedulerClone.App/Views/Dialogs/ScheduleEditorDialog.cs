@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using FavGCalSchedulerClone.App.Models;
 
@@ -293,6 +294,30 @@ internal static class ScheduleEditorDialog
         buttons.Children.Add(save);
         buttons.Children.Add(cancel);
 
+        var hasUnsavedChanges = false;
+        void MarkUnsavedChanges() => hasUnsavedChanges = true;
+        void TrackComboBox(ComboBox combo)
+        {
+            combo.SelectionChanged += (_, _) => MarkUnsavedChanges();
+            combo.AddHandler(TextBoxBase.TextChangedEvent, new TextChangedEventHandler((_, _) => MarkUnsavedChanges()));
+        }
+
+        TrackComboBox(title);
+        TrackComboBox(location);
+        TrackComboBox(calendar);
+        TrackComboBox(color);
+        TrackComboBox(startTime);
+        TrackComboBox(endTime);
+        dayCount.TextChanged += (_, _) => MarkUnsavedChanges();
+        description.TextChanged += (_, _) => MarkUnsavedChanges();
+        startDate.SelectedDateChanged += (_, _) => MarkUnsavedChanges();
+        endDate.SelectedDateChanged += (_, _) => MarkUnsavedChanges();
+        isAllDay.Checked += (_, _) => MarkUnsavedChanges();
+        isAllDay.Unchecked += (_, _) => MarkUnsavedChanges();
+        appReminderEditor.Changed += MarkUnsavedChanges;
+        googleEmailReminderEditor.Changed += MarkUnsavedChanges;
+        var closeGuard = new UnsavedChangesCloseGuard(window, () => hasUnsavedChanges);
+
         void FocusValidationField(ScheduleValidationField field)
         {
             FrameworkElement target = field switch
@@ -320,7 +345,7 @@ internal static class ScheduleEditorDialog
         }
 
         save.Click += (_, _) => SaveIfValid();
-        cancel.Click += (_, _) => window.DialogResult = false;
+        cancel.Click += (_, _) => closeGuard.Cancel();
         window.PreviewKeyDown += (_, e) =>
         {
             if (e.Key == System.Windows.Input.Key.S && System.Windows.Input.Keyboard.Modifiers == System.Windows.Input.ModifierKeys.Control)
@@ -330,14 +355,18 @@ internal static class ScheduleEditorDialog
             }
             else if (e.Key == System.Windows.Input.Key.Escape)
             {
-                window.DialogResult = false;
+                closeGuard.Cancel();
                 e.Handled = true;
             }
         };
         Grid.SetRow(buttons, 2);
         root.Children.Add(buttons);
 
-        window.Loaded += (_, _) => title.Focus();
+        window.Loaded += (_, _) =>
+        {
+            hasUnsavedChanges = false;
+            title.Focus();
+        };
 
         var accepted = false;
         var shouldRestoreOwner = hideOwner();
@@ -429,10 +458,22 @@ internal static class ScheduleEditorDialog
                 HorizontalAlignment = HorizontalAlignment.Left,
                 Margin = new Thickness(0, 2, 0, 0)
             };
-            addButton.Click += (_, _) => AddRow(DefaultMinutes);
+            addButton.Click += (_, _) =>
+            {
+                AddRow(DefaultMinutes);
+                Changed?.Invoke();
+            };
             Root.Children.Add(addButton);
-            _enabled.Checked += (_, _) => SetRowsEnabled(true);
-            _enabled.Unchecked += (_, _) => SetRowsEnabled(false);
+            _enabled.Checked += (_, _) =>
+            {
+                SetRowsEnabled(true);
+                Changed?.Invoke();
+            };
+            _enabled.Unchecked += (_, _) =>
+            {
+                SetRowsEnabled(false);
+                Changed?.Invoke();
+            };
 
             IEnumerable<int> initialValues = values.Count == 0 ? [DefaultMinutes] : values;
             foreach (var minutes in initialValues)
@@ -444,6 +485,8 @@ internal static class ScheduleEditorDialog
         }
 
         public StackPanel Root { get; }
+
+        public event Action? Changed;
 
         public IReadOnlyList<int> GetValues()
         {
@@ -488,7 +531,9 @@ internal static class ScheduleEditorDialog
 
                 _combos.Remove(combo);
                 _rows.Children.Remove(row);
+                Changed?.Invoke();
             };
+            combo.SelectionChanged += (_, _) => Changed?.Invoke();
             _combos.Add(combo);
             _rows.Children.Add(row);
             SetRowsEnabled(_enabled.IsChecked == true);

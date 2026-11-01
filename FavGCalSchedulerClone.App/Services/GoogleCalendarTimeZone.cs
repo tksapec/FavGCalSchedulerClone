@@ -62,6 +62,13 @@ internal static class GoogleCalendarTimeZone
         return true;
     }
 
+    public static DateTimeOffset ConvertInstantToTimeZone(DateTimeOffset instant, string? timeZoneId)
+    {
+        return TryResolveTimeZone(timeZoneId, out var timeZone)
+            ? TimeZoneInfo.ConvertTime(instant, timeZone)
+            : instant;
+    }
+
     private static bool TryResolveTimeZone(string? timeZoneId, out TimeZoneInfo timeZone)
     {
         if (string.IsNullOrWhiteSpace(timeZoneId))
