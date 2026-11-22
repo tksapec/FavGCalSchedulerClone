@@ -22,7 +22,7 @@ public sealed class SettingsAtomicSaveSourceTests
 
         var dialog = await File.ReadAllTextAsync(Path.Combine(AppRoot, "Views", "Dialogs", "SettingsDialog.cs"));
         Assert.Contains("var persistedOAuthClientJsonPath = NormalizeOAuthPath(request.OAuthClientJsonPath);", dialog, StringComparison.Ordinal);
-        Assert.Contains("persistedOAuthClientJsonPath = NormalizeOAuthPath(oauthPath.Text);", dialog, StringComparison.Ordinal);
+        Assert.Contains("persistedOAuthClientJsonPath = normalizedPath;", dialog, StringComparison.Ordinal);
         Assert.Contains("new SettingsDialogResult(settings, persistedOAuthClientJsonPath)", dialog, StringComparison.Ordinal);
     }
 }

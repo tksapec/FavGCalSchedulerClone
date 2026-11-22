@@ -1378,7 +1378,7 @@ public partial class MainWindow : Window
         var result = TodoEditorDialog.Show(DialogUi, new TodoEditorRequest(
             false,
             date,
-            string.IsNullOrWhiteSpace(editingTodo.TodoPriority) ? "A" : editingTodo.TodoPriority,
+            editingTodo.TodoPriority,
             editingTodo.TodoProgress,
             editingTodo.CalendarId,
             editingTodo.ColorId,
@@ -1532,7 +1532,6 @@ public partial class MainWindow : Window
             async () => (await _reminderService.LoadHistoryAsync(), await _reminderService.LoadDiagnosticsAsync()),
             async () =>
             {
-                await _viewModel.RefreshGoogleReminderMetadataAsync();
                 await _reminderService.CheckDueRemindersDetailedAsync(DateTimeOffset.Now);
             },
             async () =>
@@ -1598,7 +1597,7 @@ public partial class MainWindow : Window
                 _viewModel.SetOAuthClientJsonPathAsync,
                 _viewModel.AuthorizeGoogleAsync,
                 _viewModel.ClearTokensAsync,
-                _viewModel.ReloadAvailableCalendarsAsync,
+                _viewModel.ReloadAvailableCalendarsStrictAsync,
                 _viewModel.RefreshGoogleReminderMetadataAsync,
                 UpdateJapaneseHolidaysAsync,
                 settings => _reminderService.ShowTestNotificationDetailedAsync(CreateReminderNotifier(settings))));

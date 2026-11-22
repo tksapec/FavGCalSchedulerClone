@@ -47,11 +47,14 @@ public sealed partial class MainViewModel
     }
 
     public Task ReloadAvailableCalendarsAsync() =>
-        RunExclusiveSyncDataOperationAsync(ReloadAvailableCalendarsCoreAsync);
+        RunExclusiveSyncDataOperationAsync(() => ReloadAvailableCalendarsCoreAsync());
 
-    private async Task ReloadAvailableCalendarsCoreAsync()
+    public Task ReloadAvailableCalendarsStrictAsync() =>
+        RunExclusiveSyncDataOperationAsync(() => ReloadAvailableCalendarsCoreAsync(requireSuccess: true));
+
+    private async Task ReloadAvailableCalendarsCoreAsync(bool requireSuccess = false)
     {
-        var calendars = await LoadAvailableCalendarsCoreAsync();
+        var calendars = await LoadAvailableCalendarsCoreAsync(requireSuccess);
 
         AvailableCalendars.Clear();
         foreach (var calendar in calendars)
@@ -245,7 +248,7 @@ public sealed partial class MainViewModel
             _eventColorPalette.ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal));
     }
 
-    private async Task<IReadOnlyList<GoogleCalendarSelectionItem>> LoadAvailableCalendarsCoreAsync()
+    private async Task<IReadOnlyList<GoogleCalendarSelectionItem>> LoadAvailableCalendarsCoreAsync(bool requireSuccess = false)
     {
         var settings = CreateSettingsSnapshot();
         IReadOnlyList<GoogleCalendarInfo> calendars;
@@ -259,11 +262,19 @@ public sealed partial class MainViewModel
             {
                 Debug.WriteLine(ex);
                 Status = "Googleカレンダー一覧を取得できませんでした。OAuth設定またはネットワークを確認してください。";
+                if (requireSuccess)
+                {
+                    throw new InvalidOperationException(Status, ex);
+                }
                 calendars = [];
             }
         }
         else
         {
+            if (requireSuccess)
+            {
+                throw new InvalidOperationException("有効なOAuth client JSONファイルを設定してください。");
+            }
             calendars = [];
         }
 

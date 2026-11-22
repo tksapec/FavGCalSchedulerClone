@@ -30,8 +30,8 @@ internal static class TodoEditorDialog
         window.Content = root;
 
         var dueDate = ui.CreateDatePickerWithTodayButton(request.DueDate, out var dueDateEditor);
-        var priority = new ComboBox { SelectedIndex = 0, ItemsSource = PriorityItems };
-        priority.SelectedItem = string.IsNullOrWhiteSpace(request.Priority) ? "A" : request.Priority;
+        var priority = new ComboBox { ItemsSource = request.IsNew ? PriorityItems : new[] { "指定なし", "A", "B", "C", "D", "E", "F" } };
+        priority.SelectedItem = string.IsNullOrWhiteSpace(request.Priority) ? (request.IsNew ? "A" : "指定なし") : request.Priority;
         FrameworkElement progressInput;
         FrameworkElement progressValue;
         Func<int> getProgress;
@@ -186,7 +186,7 @@ internal static class TodoEditorDialog
             calendar.SelectedValue?.ToString() ?? calendarSelection.CalendarId,
             color.SelectedValue?.ToString(),
             dueDate.SelectedDate ?? request.DueDate,
-            priority.SelectedItem?.ToString() ?? "A",
+            priority.SelectedItem?.ToString() is "指定なし" ? "" : priority.SelectedItem?.ToString() ?? "A",
             getProgress(),
             title.Text,
             description.Text);

@@ -54,10 +54,11 @@ public sealed partial class MainViewModel
             return;
         }
 
+        var todoText = TagService.UpdateTodoFields(title.Trim(), description, priority, progress);
         var todoEvent = new CalendarEvent
         {
-            Title = title.Trim(),
-            Description = TagService.UpdateTodoMarker(description, priority, progress),
+            Title = todoText.Title,
+            Description = todoText.Description,
             CalendarId = ResolveEditorCalendarId(),
             Start = new DateTimeOffset(dueDate.Date),
             End = new DateTimeOffset(dueDate.Date.AddDays(1)),
@@ -91,12 +92,16 @@ public sealed partial class MainViewModel
 
         var originalTodo = CloneEventForEditing(editingTodo);
         var updatedTodo = CloneEventForEditing(editingTodo);
-        updatedTodo.Title = title.Trim();
-        updatedTodo.Description = TagService.UpdateTodoMarker(description, priority, progress);
+        var updatedText = TagService.UpdateTodoFields(title.Trim(), description, priority, progress);
+        updatedTodo.Title = updatedText.Title;
+        updatedTodo.Description = updatedText.Description;
         updatedTodo.CalendarId = ResolveEditorCalendarId();
-        updatedTodo.Start = new DateTimeOffset(dueDate.Date);
-        updatedTodo.End = new DateTimeOffset(dueDate.Date.AddDays(1));
-        updatedTodo.IsAllDay = true;
+        if (dueDate.Date != originalTodo.Start.Date)
+        {
+            var dayShift = (dueDate.Date - originalTodo.Start.Date).Days;
+            updatedTodo.Start = originalTodo.Start.AddDays(dayShift);
+            updatedTodo.End = originalTodo.End.AddDays(dayShift);
+        }
         updatedTodo.IsDeleted = false;
         updatedTodo.IsTodoLike = true;
         TodoReminderPolicy.NormalizeLocalFields(updatedTodo);
@@ -140,7 +145,9 @@ public sealed partial class MainViewModel
         var originalTodo = CloneEventForEditing(SelectedEvent);
         var updatedTodo = CloneEventForEditing(SelectedEvent);
         var priority = updatedTodo.TodoPriority;
-        updatedTodo.Description = TagService.UpdateTodoMarker(updatedTodo.Description, priority, 100);
+        var updatedText = TagService.UpdateTodoFields(updatedTodo.Title, updatedTodo.Description, priority, 100);
+        updatedTodo.Title = updatedText.Title;
+        updatedTodo.Description = updatedText.Description;
         updatedTodo.IsDirty = true;
         await _repository.SaveEventAsync(updatedTodo);
         CaptureUndo("ToDo完了", [originalTodo]);
@@ -161,7 +168,9 @@ public sealed partial class MainViewModel
         var originalTodo = CloneEventForEditing(todoEvent);
         var updatedTodo = CloneEventForEditing(todoEvent);
         var priority = updatedTodo.TodoPriority;
-        updatedTodo.Description = TagService.UpdateTodoMarker(updatedTodo.Description, priority, 100);
+        var updatedText = TagService.UpdateTodoFields(updatedTodo.Title, updatedTodo.Description, priority, 100);
+        updatedTodo.Title = updatedText.Title;
+        updatedTodo.Description = updatedText.Description;
         updatedTodo.IsDirty = true;
         await _repository.SaveEventAsync(updatedTodo);
         CaptureUndo("ToDo完了", [originalTodo]);
@@ -190,7 +199,9 @@ public sealed partial class MainViewModel
         var metadata = updatedTodo.TodoMetadata;
         var nextPriority = string.IsNullOrWhiteSpace(priority) ? metadata?.Priority ?? "A" : priority;
         var nextProgress = Math.Clamp((metadata?.Progress ?? 0) + (progressDelta ?? 0), 0, 100);
-        updatedTodo.Description = TagService.UpdateTodoMarker(updatedTodo.Description, nextPriority, nextProgress);
+        var updatedText = TagService.UpdateTodoFields(updatedTodo.Title, updatedTodo.Description, nextPriority, nextProgress);
+        updatedTodo.Title = updatedText.Title;
+        updatedTodo.Description = updatedText.Description;
         updatedTodo.IsDirty = true;
         await _repository.SaveEventAsync(updatedTodo);
         CaptureUndo("ToDo更新", [originalTodo]);

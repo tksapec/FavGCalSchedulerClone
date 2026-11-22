@@ -37,46 +37,33 @@ public sealed partial class MainViewModel
     {
         SettingsPersistenceRequest snapshot;
         AppSettings previousSettings;
-        var previousSelectedTabIndex = SelectedTabIndex;
-        var previousSelectedTodoTabIndex = SelectedTodoTabIndex;
-        var previousViewMode = CurrentViewMode;
         var previousOAuthClientJsonPath = OAuthClientJsonPath;
         string savedOAuthClientJsonPath;
         lock (_settingsStateLock)
         {
             previousSettings = CreateSettingsPersistenceSnapshotUnsafe();
             var displayMonth = _settings.DisplayMonth;
+            var lastAutomaticSyncAt = _settings.LastAutomaticSyncAt;
             // The settings dialog retains its own mutable instance. Clone it before
             // normalization so later dialog edits cannot mutate the ViewModel state.
             _settings = AppSettingsNormalizer.Normalize(DeepCloneSettings(settings));
             _settings.DisplayMonth = displayMonth;
+            _settings.LastAutomaticSyncAt = lastAutomaticSyncAt;
             snapshot = CreateSettingsPersistenceRequestUnsafe();
             savedOAuthClientJsonPath = _settings.OAuthClientJsonPath ?? "";
         }
-        SelectedTabIndex = _settings.StartupTabIndex;
-        SelectedTodoTabIndex = _settings.StartupTodoTabIndex;
-        CurrentViewMode = _settings.StartupCalendarViewMode;
         try
         {
             await PersistSettingsAsync(snapshot);
         }
         catch
         {
-            var restored = false;
             lock (_settingsStateLock)
             {
                 if (_settingsRevision == snapshot.Revision)
                 {
                     _settings = previousSettings;
-                    restored = true;
                 }
-            }
-
-            if (restored)
-            {
-                SelectedTabIndex = previousSelectedTabIndex;
-                SelectedTodoTabIndex = previousSelectedTodoTabIndex;
-                CurrentViewMode = previousViewMode;
             }
 
             throw;

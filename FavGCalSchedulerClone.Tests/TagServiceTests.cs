@@ -89,12 +89,31 @@ public sealed class TagServiceTests
     }
 
     [Fact]
+    public void UpdateTodoFields_PreservesPriorityFreeTitleMarker()
+    {
+        var updated = TagService.UpdateTodoFields("#todo56%", "details", "", 80);
+
+        Assert.Equal("#todo80%", updated.Title);
+        Assert.Equal("details", updated.Description);
+    }
+
+    [Fact]
     public void UpdateTodoMarker_ReplacesExistingMarkerWithoutDuplicating()
     {
         var updated = TagService.UpdateTodoMarker("Existing body #todoB10% details", "A", 100);
 
         Assert.Equal($"#todoA100%{Environment.NewLine}Existing body details", updated);
         Assert.Single(System.Text.RegularExpressions.Regex.Matches(updated, "#todo", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+    }
+
+    [Fact]
+    public void UpdateTodoFields_UpdatesMarkerInPlaceInTitle()
+    {
+        var updated = TagService.UpdateTodoFields("確認 #todoB20%", "説明", "B", 100);
+
+        Assert.Equal("確認 #todoB100%", updated.Title);
+        Assert.Equal("説明", updated.Description);
+        Assert.True(TagService.IsTodoDone(new CalendarEvent { Title = updated.Title, Description = updated.Description }));
     }
 
     [Fact]

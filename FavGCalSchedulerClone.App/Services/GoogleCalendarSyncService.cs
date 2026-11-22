@@ -1394,7 +1394,7 @@ public sealed class GoogleCalendarSyncService
                 string.IsNullOrWhiteSpace(syncToken) ? RemoteSyncMode.InitialFull : RemoteSyncMode.Incremental,
                 fullSyncStart);
         }
-        catch (GoogleApiException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.Gone)
+        catch (GoogleApiException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.Gone && !string.IsNullOrWhiteSpace(syncToken))
         {
             failures.Add(CreatePullFailureDiagnostic(calendarId, syncToken, pageToken, ex, "SyncTokenExpired", "410 Gone: sync token was reset before retry."));
             if (persistTokenReset)
@@ -1578,6 +1578,7 @@ public sealed class GoogleCalendarSyncService
                     {
                         conflicts++;
                         skipped++;
+                        canAdvanceSyncToken = false;
                         continue;
                     }
 
@@ -1613,7 +1614,7 @@ public sealed class GoogleCalendarSyncService
             }
             while (true);
         }
-        catch (GoogleApiException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.Gone)
+        catch (GoogleApiException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.Gone && !string.IsNullOrWhiteSpace(syncToken))
         {
             failures.Add(CreatePullFailureDiagnostic(calendarId, syncToken, pageToken, ex, "SyncTokenExpired", "410 Gone: sync token をリセットして再取得します。"));
             await _repository.SaveSyncTokenAsync(calendarId, null);

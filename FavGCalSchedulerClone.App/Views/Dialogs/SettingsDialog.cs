@@ -13,7 +13,7 @@ internal static class SettingsDialog
     {
         var settings = request.Settings;
         var persistedOAuthClientJsonPath = NormalizeOAuthPath(request.OAuthClientJsonPath);
-        var window = ui.CreateOwnedDialog("アプリ設定", 760, 610);
+        var window = ui.CreateOwnedDialog("アプリ設定", 760, 610, fitToWorkArea: true);
         window.ResizeMode = ResizeMode.CanResize;
         var root = new DockPanel { Margin = new Thickness(10) };
         var tabs = new TabControl
@@ -26,7 +26,7 @@ internal static class SettingsDialog
         window.Content = root;
 
         static StackPanel Page() => new() { Margin = new Thickness(14) };
-        static TabItem Tab(string header, Panel content) => new() { Header = header, Content = new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } };
+        static TabItem Tab(string header, Panel content) => new() { Header = header, Content = new ScrollViewer { Content = content, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } };
         static ComboBox Options<T>(IEnumerable<T> items, T selected) => new() { ItemsSource = items, SelectedItem = selected, MinWidth = 200, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 10) };
 
         var appPage = Page();
@@ -246,6 +246,14 @@ internal static class SettingsDialog
         var clearToken = new Button { Content = "トークン削除", Width = 120 };
         var reloadCalendars = new Button { Content = "カレンダー一覧を更新", Width = 170 };
         var refreshReminders = new Button { Content = "Google通知設定を再取得", Width = 190 };
+        var googleOperationStatus = new TextBlock { Margin = new Thickness(0, 0, 0, 10), TextWrapping = TextWrapping.Wrap };
+        accountPage.Children.Add(new TextBlock
+        {
+            Text = "OAuth JSONの変更はGoogle操作時に保存されます。設定画面でキャンセルしても保存済みのパスは戻りません。",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 10)
+        });
+        accountPage.Children.Add(googleOperationStatus);
         var googleOperationButtons = new[] { chooseOAuth, authorize, clearToken, reloadCalendars, refreshReminders };
         var googleOperationInProgress = false;
         StackPanel? dialogButtons = null;
@@ -269,6 +277,7 @@ internal static class SettingsDialog
             }
 
             googleOperationInProgress = true;
+            googleOperationStatus.Text = $"{title}を実行しています...";
             oauthPath.IsEnabled = false;
             foreach (var button in googleOperationButtons)
             {
@@ -285,6 +294,7 @@ internal static class SettingsDialog
             try
             {
                 await operation();
+                googleOperationStatus.Text = successMessage;
                 if (showSuccessMessage)
                 {
                     MessageBox.Show(window, successMessage, title, MessageBoxButton.OK, MessageBoxImage.Information);
@@ -292,6 +302,7 @@ internal static class SettingsDialog
             }
             catch (Exception ex)
             {
+                googleOperationStatus.Text = $"{errorTitle}: {ex.Message}";
                 MessageBox.Show(window, ex.Message, errorTitle, MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
@@ -318,21 +329,24 @@ internal static class SettingsDialog
         };
         authorize.Click += async (_, _) => await RunGoogleOperationAsync("Google認証", "Google認証が完了しました。", "Google認証エラー", async () =>
         {
-            await request.SetOAuthClientJsonPathAsync(oauthPath.Text);
-            persistedOAuthClientJsonPath = NormalizeOAuthPath(oauthPath.Text);
+            var normalizedPath = ValidateOAuthPath(oauthPath.Text);
+            await request.SetOAuthClientJsonPathAsync(normalizedPath);
+            persistedOAuthClientJsonPath = normalizedPath;
             await request.AuthorizeGoogleAsync();
         });
         clearToken.Click += async (_, _) => await RunGoogleOperationAsync("トークン削除", "保存済みGoogleトークンを削除しました。", "トークン削除エラー", request.ClearTokensAsync);
         reloadCalendars.Click += async (_, _) => await RunGoogleOperationAsync("カレンダー一覧", "カレンダー一覧を更新しました。", "カレンダー一覧更新エラー", async () =>
         {
-            await request.SetOAuthClientJsonPathAsync(oauthPath.Text);
-            persistedOAuthClientJsonPath = NormalizeOAuthPath(oauthPath.Text);
+            var normalizedPath = ValidateOAuthPath(oauthPath.Text);
+            await request.SetOAuthClientJsonPathAsync(normalizedPath);
+            persistedOAuthClientJsonPath = normalizedPath;
             await request.ReloadAvailableCalendarsAsync();
         });
         refreshReminders.Click += async (_, _) => await RunGoogleOperationAsync("Google通知設定", "Google通知設定を再取得しました。", "Google通知設定エラー", async () =>
         {
-            await request.SetOAuthClientJsonPathAsync(oauthPath.Text);
-            persistedOAuthClientJsonPath = NormalizeOAuthPath(oauthPath.Text);
+            var normalizedPath = ValidateOAuthPath(oauthPath.Text);
+            await request.SetOAuthClientJsonPathAsync(normalizedPath);
+            persistedOAuthClientJsonPath = normalizedPath;
             var updated = await request.RefreshGoogleRemindersAsync();
             MessageBox.Show(window, $"更新しました: {updated} 件", "Google通知設定", MessageBoxButton.OK, MessageBoxImage.Information);
         }, showSuccessMessage: false);
@@ -406,6 +420,17 @@ internal static class SettingsDialog
     }
 
     private static string NormalizeOAuthPath(string path) => string.IsNullOrWhiteSpace(path) ? "" : path.Trim();
+
+    private static string ValidateOAuthPath(string? value)
+    {
+        var path = NormalizeOAuthPath(value ?? "");
+        if (path.Length == 0 || !File.Exists(path))
+        {
+            throw new InvalidOperationException("有効なOAuth client JSONファイルを選択してください。");
+        }
+
+        return path;
+    }
 
     private static void AddText(Grid grid, string text, int row, int column)
     {

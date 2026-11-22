@@ -341,7 +341,7 @@ public sealed class ReminderNotificationService : IDisposable
                         {
                             expandedReason = googleReminderReason ?? "通知時刻未到達";
                         }
-                        else if (IsPastForReminder(calendarEvent, current))
+                        else if (IsPastForReminder(calendarEvent, current, expandedReminderMinutes))
                         {
                             expandedReason = calendarEvent.IsAllDay ? "終了済みの予定" : "開始済みの予定";
                         }
@@ -423,7 +423,7 @@ public sealed class ReminderNotificationService : IDisposable
                 {
                     reason = googleReminderReason ?? "通知時刻未到達";
                 }
-                else if (IsPastForReminder(calendarEvent, current))
+                else if (IsPastForReminder(calendarEvent, current, reminderMinutes))
                 {
                     reason = calendarEvent.IsAllDay ? "終了済みの予定" : "開始済みの予定";
                 }
@@ -897,14 +897,15 @@ public sealed class ReminderNotificationService : IDisposable
             calendarEvent.IsTodoLike);
     }
 
-    private static bool IsPastForReminder(CalendarEvent calendarEvent, DateTimeOffset current)
+    internal static bool IsPastForReminder(CalendarEvent calendarEvent, DateTimeOffset current, int reminderMinutes)
     {
         if (calendarEvent.IsAllDay)
         {
             return calendarEvent.End <= current;
         }
 
-        return calendarEvent.Start < current;
+        var gracePeriod = reminderMinutes == 0 ? TimeSpan.FromTicks(CheckInterval.Ticks * 2) : TimeSpan.Zero;
+        return calendarEvent.Start < current.Subtract(gracePeriod);
     }
 
     private static bool IsDue(

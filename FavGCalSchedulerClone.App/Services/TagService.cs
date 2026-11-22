@@ -103,6 +103,25 @@ public static partial class TagService
         return body.Length == 0 ? marker : $"{marker}{Environment.NewLine}{body}";
     }
 
+    public static (string Title, string Description) UpdateTodoFields(string? title, string? description, string? priority, int progress)
+    {
+        var marker = BuildTodoMarker(priority, progress);
+        var updatedTitle = title ?? "";
+        var updatedDescription = description ?? "";
+        var hadMarker = TodoRegex().IsMatch(updatedTitle) || TodoRegex().IsMatch(updatedDescription);
+        if (!hadMarker)
+        {
+            updatedDescription = UpdateTodoMarker(updatedDescription, priority, progress);
+        }
+        else
+        {
+            updatedTitle = TodoRegex().Replace(updatedTitle, marker);
+            updatedDescription = TodoRegex().Replace(updatedDescription, marker);
+        }
+
+        return (updatedTitle, updatedDescription);
+    }
+
     public static string GetTodoBodyForEditing(string? text)
     {
         var source = text ?? "";

@@ -87,6 +87,7 @@ public sealed partial class MainViewModel
             && File.Exists(syncSettings.OAuthClientJsonPath))
         {
             Status = "Googleカレンダーから既存予定を確認しています...";
+            syncSettings.SyncConflictPolicy = SyncConflictPolicy.SkipLocalDirty;
             await _syncService.PullAsync(syncSettings, mappedCalendarIds);
         }
 

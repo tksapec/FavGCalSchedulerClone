@@ -165,11 +165,16 @@ public sealed partial class MainViewModel
         var events = await _repository.LoadEventsAsync(new DateTimeOffset(start), new DateTimeOffset(end), includeDeleted: true);
         var expanded = RecurrenceExpansionService.ExpandForRange(events, new DateTimeOffset(start), new DateTimeOffset(end));
         ApplyDisplayColors(expanded);
-        var visible = expanded.Where(IsVisible);
+        var visible = expanded.AsEnumerable();
         if (!string.IsNullOrWhiteSpace(filter.CalendarId))
         {
             visible = visible.Where(e => string.Equals(e.CalendarId, filter.CalendarId, StringComparison.Ordinal));
         }
+        else
+        {
+            visible = visible.Where(IsVisible);
+        }
+        visible = visible.Where(item => !TagService.IsDayCellDirective(item));
 
         visible = filter.KindFilter switch
         {
